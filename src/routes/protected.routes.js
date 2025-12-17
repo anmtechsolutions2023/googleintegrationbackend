@@ -6,12 +6,14 @@ const {
   authenticateToken,
   checkScope,
 } = require('../middleware/authMiddleware')
+const { auditLog, getAuditLogs } = require('../middleware/auditLogger')
 
 // Endpoint: Requires the user to have the 'TENANT:ADMIN' scope
 router.get(
   '/data/admin/settings',
   authenticateToken,
   checkScope('TENANT:ADMIN'),
+  auditLog(),
   (req, res) => {
     res.json({
       message: `Tenant ${req.user.tid} - ADMIN ACCESS: Configuration settings.`,
@@ -30,6 +32,7 @@ router.post(
   '/data/reports',
   authenticateToken,
   checkScope('reports:WRITE'),
+  auditLog(),
   (req, res) => {
     res.json({
       message: `Tenant ${req.user.tid} - Write Access: Report generation started.`,
@@ -48,6 +51,7 @@ router.get(
   '/data/billing',
   authenticateToken,
   checkScope('billing:READ', 'REPORTS:WRITE'),
+  auditLog(),
   // checkScope('REPORTS:READ', 'REPORTS:WRITE'),
   // checkScope('REPORTS:READ'),
   (req, res) => {
@@ -64,7 +68,7 @@ router.get(
 )
 
 // Endpoint: Requires only authentication (any user with a valid token/tenant access)
-router.get('/data/general', authenticateToken, (req, res) => {
+router.get('/data/general', authenticateToken, auditLog(), (req, res) => {
   res.json({
     message: `Tenant ${req.user.tid} - General Access: Welcome!`,
     resource: 'general_info',
@@ -75,6 +79,33 @@ router.get('/data/general', authenticateToken, (req, res) => {
     },
   })
 })
+
+// Endpoint: Get audit logs (requires TENANT:ADMIN scope)
+router.get(
+  '/audit/logs',
+  authenticateToken,
+  checkScope('TENANT:ADMIN'),
+  auditLog(),
+  async (req, res) => {
+    try {
+      const filters = {
+        tenantId: req.query.tenantId || req.user.tid, // Default to user's tenant
+        userEmail: req.query.userEmail,
+        action: req.query.action,
+        status: req.query.status,
+        limit: parseInt(req.query.limit) || 100,
+        offset: parseInt(req.query.offset) || 0,
+      }
+      const logs = await getAuditLogs(filters)
+      res.json({
+        message: 'Audit logs retrieved successfully.',
+        logs,
+      })
+    } catch (error) {
+      next(new HttpError('Failed to retrieve audit logs.', 500))
+    }
+  }
+)
 
 module.exports = router
 

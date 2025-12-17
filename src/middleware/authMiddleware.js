@@ -30,10 +30,10 @@ const authenticateToken = (req, res, next) => {
 }
 
 /**
- * 2. NEW Authorization Check: Verifies if the user's token has the required feature scope.
- * @param {string} requiredScope - The specific scope needed (e.g., 'reports:WRITE', 'TENANT:ADMIN').
+ * 2. NEW Authorization Check: Verifies if the user's token has at least one of the required feature scopes.
+ * @param {...string} requiredScopes - The specific scopes needed (e.g., 'reports:WRITE', 'TENANT:ADMIN').
  */
-const checkScope = (requiredScope) => {
+const checkScope = (...requiredScopes) => {
   return (req, res, next) => {
     const userScopes = req.user.scopes
 
@@ -46,20 +46,8 @@ const checkScope = (requiredScope) => {
       )
     }
 
-    // // Check if the required scope is present in the user's granted scopes array
-    // if (userScopes.includes(requiredScope)) {
-    //   next()
-    // } else {
-    //   return next(
-    //     new HttpError(
-    //       `Forbidden. Missing required scope: ${requiredScope}.`,
-    //       403
-    //     )
-    //   )
-    // }
-
     // requiredScopes is now an array of strings passed from the route
-    const hasAccess = requiredScope.some((scope) => userScopes.includes(scope))
+    const hasAccess = requiredScopes.some((scope) => userScopes.includes(scope))
 
     if (hasAccess) {
       next()
