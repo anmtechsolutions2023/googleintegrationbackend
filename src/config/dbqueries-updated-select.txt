@@ -1,0 +1,173 @@
+## 🔎 Essential Production Select Queries
+
+Here are eight crucial queries, covering key operational and administrative needs.
+
+-----
+
+### 1\. Fetching All Tenants for a Specific User
+
+**Use Case:** User login or profile view. This maps to an endpoint like `/users/{email}/tenants`.
+**Query Goal:** Get a list of all `tenant_id`s a user is associated with, along with their admin status.
+
+```sql
+SELECT
+    ut.tenant_id,
+    ut.is_admin,
+    ut.is_active
+FROM
+    user_tenants ut
+WHERE
+    ut.user_email = 'alice@example.com' -- Replace with the actual user email variable
+    AND ut.is_active = TRUE;
+```
+
+-----
+
+### 2\. Checking if a User is an Admin of a Specific Tenant
+
+**Use Case:** Authorization checks (e.g., checking if the user can access an admin panel). Maps to `/tenants/{tenantId}/users/{email}/isAdmin`.
+**Query Goal:** Quickly check the boolean status for a specific user and tenant combination.
+
+```sql
+SELECT
+    ut.is_admin
+FROM
+    user_tenants ut
+WHERE
+    ut.user_email = 'bob@example.com' -- Replace with user email
+    AND ut.tenant_id = 'tnt_a1b2c3d4'   -- Replace with tenant ID
+    AND ut.is_active = TRUE;
+```
+
+-----
+
+### 3\. Retrieving All Features Available to a Specific Tenant
+
+**Use Case:** Displaying a navigation menu or feature access matrix for a tenant. Maps to `/tenants/{tenantId}/features`.
+**Query Goal:** List all feature short names and scopes enabled for a given tenant.
+
+```sql
+SELECT
+    f.feature_short_name,
+    f.scope
+FROM
+    tenant_features tf
+JOIN
+    features f ON tf.feature_id = f.feature_id
+WHERE
+    tf.tenant_id = 'tnt_a1b2c3d4' -- Replace with tenant ID
+    AND tf.is_active = TRUE
+    AND f.is_active = TRUE;
+```
+
+-----
+
+### 4\. Authorization Check: Can User Access a Specific Feature/Scope on a Tenant?
+
+**Use Case:** The core authorization check (the most frequent query). Maps to `/tenants/{tenantId}/authorize?feature={name}&scope={scope}`.
+**Query Goal:** Return a single row/value if the specific feature/scope is enabled for the tenant.
+
+```sql
+SELECT
+    COUNT(tf.tenant_feature_id) AS has_access
+FROM
+    tenant_features tf
+JOIN
+    features f ON tf.feature_id = f.feature_id
+WHERE
+    tf.tenant_id = 'tnt_a1b2c3d4' -- Replace with tenant ID
+    AND f.feature_short_name = 'REPORTS' -- Replace with requested feature short name
+    AND f.scope = 'WRITE'               -- Replace with requested scope
+    AND tf.is_active = TRUE
+    AND f.is_active = TRUE;
+-- Result: 1 (Access Granted) or 0 (Access Denied)
+```
+
+-----
+
+### 5\. Listing All Users Associated with a Specific Tenant
+
+**Use Case:** Tenant administration panel (e.g., "Manage Users" screen). Maps to `/tenants/{tenantId}/users`.
+**Query Goal:** List all emails and their admin status for a given tenant.
+
+```sql
+SELECT
+    ut.user_email,
+    ut.is_admin,
+    ut.is_active
+FROM
+    user_tenants ut
+WHERE
+    ut.tenant_id = 'tnt_a1b2c3d4' -- Replace with tenant ID
+ORDER BY
+    ut.is_admin DESC, ut.user_email ASC;
+```
+
+-----
+
+### 6\. Finding All Feature Scope Combinations (For Admin UI/Configuration)
+
+**Use Case:** Populating dropdowns or lists when configuring features for a new tenant. Maps to `/features`.
+**Query Goal:** Get a full list of all available feature configurations, ordered by feature name.
+
+```sql
+SELECT
+    feature_id,
+    feature_short_name,
+    scope,
+    feature_name
+FROM
+    features
+WHERE
+    is_active = TRUE
+ORDER BY
+    feature_short_name, scope;
+```
+
+-----
+
+### 7\. Identifying Non-Admin Users in a Tenant
+
+**Use Case:** Administrative tasks like identifying users who might need permission changes.
+**Query Goal:** Find all non-admin users in a specific tenant.
+
+```sql
+SELECT
+    ut.user_email
+FROM
+    user_tenants ut
+WHERE
+    ut.tenant_id = 'tnt_a1b2c3d4' -- Replace with tenant ID
+    AND ut.is_admin = FALSE
+    AND ut.is_active = TRUE;
+```
+
+-----
+
+### 8\. Fetching a Tenant's Full Entitlement Matrix (For Caching/Audit)
+
+**Use Case:** System startup or cache warm-up. This query is the source of truth for a tenant's permissions.
+**Query Goal:** Join users, tenants, and features to get a comprehensive view of who has access to what within a tenant.
+
+```sql
+SELECT
+    ut.user_email,
+    ut.is_admin,
+    f.feature_short_name,
+    f.scope
+FROM
+    user_tenants ut
+JOIN
+    tenant_features tf ON ut.tenant_id = tf.tenant_id
+JOIN
+    features f ON tf.feature_id = f.feature_id
+WHERE
+    ut.tenant_id = 'tnt_a1b2c3d4' -- Replace with tenant ID
+    AND ut.is_active = TRUE
+    AND tf.is_active = TRUE
+    AND f.is_active = TRUE;
+```
+
+These queries cover the primary needs for user management, feature entitlement, and authorization checks in a multi-tenant environment.
+
+Would you like to explore how to combine the logic to check **if an admin user has a specific feature** (e.g., *only* admins can read reports)?

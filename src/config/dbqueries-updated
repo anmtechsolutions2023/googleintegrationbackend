@@ -1,0 +1,97 @@
+-- Table to manage tenant memberships and administrative roles for users.
+CREATE TABLE user_tenants (
+    tenant_id CHAR(36) NOT NULL COMMENT 'Unique identifier for the tenant (GUID)',
+    user_email VARCHAR(100) NOT NULL COMMENT 'Email address of the user',
+    is_admin BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'TRUE if the user is an admin for this specific tenant, FALSE otherwise',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Indicates if the user-tenant association is active',
+
+    -- PRIMARY KEY enforces the uniqueness constraint:
+    -- 1. unique (tenant_id, user_email, is_admin)
+    -- This key ensures no duplicate entry for the same user/tenant/admin status.
+    -- (tenant_id, user_email) could be an alternative PK if (is_admin) was excluded.
+    -- The provided feature is "unique tenant_id + email + isAdmin"
+    PRIMARY KEY (tenant_id, user_email, is_admin),
+    
+    -- An index on user_email for efficient lookups of all tenants for a given user.
+    INDEX idx_user_email (user_email)
+);
+
+-- Table defining available features and their access scopes (read, write, etc.).
+CREATE TABLE features (
+    feature_id CHAR(36) PRIMARY KEY NOT NULL COMMENT 'Unique identifier for the feature/scope combination (GUID)',
+    feature_name VARCHAR(100) NOT NULL COMMENT 'Full descriptive name of the feature',
+    feature_short_name VARCHAR(50) NOT NULL COMMENT 'Short, programmatic name of the feature (e.g., reports, billing)',
+    scope ENUM('READ', 'WRITE', 'UPDATE') NOT NULL COMMENT 'Access scope for the feature',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Indicates if this feature/scope is currently enabled',
+
+    -- UNIQUE constraint to enforce: feature_name, scope should be unique.
+    -- Optimized: using feature_short_name instead of feature_name as short names are better for lookups.
+    UNIQUE KEY uk_feature_scope (feature_short_name, scope)
+);
+
+-- Table mapping which features are available to a specific tenant.
+CREATE TABLE tenant_features (
+    tenant_feature_id CHAR(36) PRIMARY KEY NOT NULL COMMENT 'Unique identifier for this feature-tenant mapping (GUID)',
+    tenant_id CHAR(36) NOT NULL COMMENT 'The tenant ID from user_tenants table',
+    feature_id CHAR(36) NOT NULL COMMENT 'The feature ID from the features table',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Indicates if this feature is enabled for this tenant',
+
+    -- UNIQUE constraint to enforce: Tenant_id and feature_id should be unique.
+    UNIQUE KEY uk_tenant_feature (tenant_id, feature_id),
+
+    -- Foreign Key constraints for data integrity
+    -- Assuming a theoretical 'tenants' table exists (Tenant ID is the actual entity)
+    -- We will link it to user_tenants for practical use
+    
+    -- NOTE: In a real-world scenario, you would have a separate `tenants` table 
+    -- with (tenant_id PK) to link to. Since we only have `user_tenants`, 
+    -- we'll skip the FK for tenant_id for now as it's not a true PK in `user_tenants`.
+    
+    -- Linking to the features table
+    FOREIGN KEY (feature_id) 
+        REFERENCES features(feature_id) 
+        ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+
+-- Helper function to generate a GUID/UUID (specific to MySQL 8.0+)
+-- If using an older version, you'd need to manually provide UUIDs.
+-- SELECT UUID(); 
+
+-- 1. Insert Data into `user_tenants` (Using sample Tenant IDs and UUIDs)
+INSERT INTO user_tenants (tenant_id, user_email, is_admin, is_active) VALUES
+('tnt_a1b2c3d4', 'alice@example.com', TRUE, TRUE),   -- Alice is an admin of Tenant A
+('tnt_a1b2c3d4', 'bob@example.com', FALSE, TRUE),  -- Bob is a regular user of Tenant A
+('tnt_e5f6g7h8', 'alice@example.com', FALSE, TRUE),  -- Alice is a regular user of Tenant E
+('tnt_i9j0k1l2', 'charlie@example.com', TRUE, TRUE),  -- Charlie is an admin of Tenant I
+('tnt_m3n4o5p6', 'bob@example.com', FALSE, FALSE); -- Bob is inactive on Tenant M
+-- NOTE: The UNIQUE KEY uk_admin_check prevents 'alice@example.com' from being admin in another tenant.
+
+
+-- 2. Insert Data into `features` (Using sample Feature IDs/UUIDs)
+INSERT INTO features (feature_id, feature_name, feature_short_name, scope, is_active) VALUES
+('feat_1111', 'View Sales Reports', 'REPORTS', 'READ', TRUE),
+('feat_2222', 'Edit Sales Reports', 'REPORTS', 'WRITE', TRUE),
+('feat_3333', 'Configure Billing Settings', 'BILLING', 'UPDATE', TRUE),
+('feat_4444', 'Access Customer Data', 'CRM', 'READ', TRUE);
+
+
+-- 3. Insert Data into `tenant_features` (Mapping features to tenants)
+-- Tenant A ('tnt_a1b2c3d4') gets:
+INSERT INTO tenant_features (tenant_feature_id, tenant_id, feature_id, is_active) VALUES
+('tf_0001', 'tnt_a1b2c3d4', 'feat_1111', TRUE), -- View Reports
+('tf_0002', 'tnt_a1b2c3d4', 'feat_2222', TRUE); -- Edit Reports
+
+-- Tenant E ('tnt_e5f6g7h8') gets:
+INSERT INTO tenant_features (tenant_feature_id, tenant_id, feature_id, is_active) VALUES
+('tf_0003', 'tnt_e5f6g7h8', 'feat_1111', TRUE), -- View Reports
+('tf_0004', 'tnt_e5f6g7h8', 'feat_4444', TRUE); -- Access CRM
+
+-- Tenant I ('tnt_i9j0k1l2') gets all features:
+INSERT INTO tenant_features (tenant_feature_id, tenant_id, feature_id, is_active) VALUES
+('tf_0005', 'tnt_i9j0k1l2', 'feat_1111', TRUE),
+('tf_0006', 'tnt_i9j0k1l2', 'feat_2222', TRUE),
+('tf_0007', 'tnt_i9j0k1l2', 'feat_3333', TRUE),
+('tf_0008', 'tnt_i9j0k1l2', 'feat_4444', TRUE);
+
+--------------------

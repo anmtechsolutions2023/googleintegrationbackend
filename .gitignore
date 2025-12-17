@@ -1,0 +1,9 @@
+# Dependencies
+/node_modules
+
+# Environment Variables (CRITICAL: DO NOT COMMIT CREDENTIALS)
+.env
+
+# Logs and Build Files
+npm-debug.log*
+.DS_Store
