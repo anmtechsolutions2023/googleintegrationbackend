@@ -7,6 +7,8 @@ const {
   checkScope,
 } = require('../middleware/authMiddleware')
 const { auditLog, getAuditLogs } = require('../middleware/auditLogger')
+const db = require('../config/db')
+const { HttpError } = require('../middleware/errorHandler')
 
 // Endpoint: Requires the user to have the 'TENANT:ADMIN' scope
 router.get(
@@ -28,14 +30,14 @@ router.get(
 )
 
 // Endpoint: Requires the user to have the 'reports:WRITE' scope
-router.post(
+router.get(
   '/data/reports',
   authenticateToken,
-  checkScope('reports:WRITE'),
+  checkScope('REPORTS:READ'),
   auditLog(),
   (req, res) => {
     res.json({
-      message: `Tenant ${req.user.tid} - Write Access: Report generation started.`,
+      message: `Tenant ${req.user.tid} - Read Access: Report generation started.`,
       resource: 'reports',
       user: {
         email: req.user.email,
@@ -80,28 +82,58 @@ router.get('/data/general', authenticateToken, auditLog(), (req, res) => {
   })
 })
 
-// Endpoint: Get audit logs (requires TENANT:ADMIN scope)
+// Endpoint: Get audit logs (requires authentication, checks admin status internally)
 router.get(
   '/audit/logs',
   authenticateToken,
-  checkScope('TENANT:ADMIN'),
   auditLog(),
-  async (req, res) => {
+  async (req, res, next) => {
     try {
+      console.log('Request details:', req.user, req.query)
+      // Get all tenants the user is associated with
+      const [allRows] = await db.execute(
+        'SELECT tenant_id, is_admin FROM user_tenants WHERE user_email = ?',
+        [req.user.email]
+      )
+
+      console.log('All associated tenants:', allRows)
+      console.log('Requested user email: ' + req.user.email)
+      console.log('Requested tenant id: ' + req.user.tid)
+
+      // Collect tenant IDs where user is admin
+      // const adminTenants = allRows
+      //   .filter((row) => row.is_admin)
+      //   .map((row) => row.tenant_id)
+
+      const adminTenants = allRows
+        .filter((row) => row.tenant_id === req.user.tid && row.is_admin)
+        .map((row) => row.tenant_id)
+
+      const isAdmin = adminTenants.length > 0
+
       const filters = {
-        tenantId: req.query.tenantId || req.user.tid, // Default to user's tenant
-        userEmail: req.query.userEmail,
-        action: req.query.action,
-        status: req.query.status,
-        limit: parseInt(req.query.limit) || 100,
-        offset: parseInt(req.query.offset) || 0,
+        tenantIds: isAdmin ? adminTenants : [req.user.tid], // If admin, logs for all admin tenants; else current tenant
+        userEmail: isAdmin ? req.query.userEmail : req.user.email, // If admin, can filter by userEmail; else only their logs
+        // action: req.query.action,
+        // status: req.query.status,
+        // limit: parseInt(req.query.limit) || 100,
+        // offset: parseInt(req.query.offset) || 0,
       }
+
+      console.log('Audit log filters:', filters)
+
       const logs = await getAuditLogs(filters)
       res.json({
         message: 'Audit logs retrieved successfully.',
         logs,
+        isAdmin,
+        associatedTenants: allRows.map((row) => ({
+          tenantId: row.tenant_id,
+          isAdmin: row.is_admin,
+        })),
       })
     } catch (error) {
+      console.log(error)
       next(new HttpError('Failed to retrieve audit logs.', 500))
     }
   }

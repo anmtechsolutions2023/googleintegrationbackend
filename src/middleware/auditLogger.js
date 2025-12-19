@@ -20,7 +20,7 @@ const auditLog = () => {
 /**
  * Retrieves audit logs from the database with optional filters.
  * @param {Object} filters - Optional filters for the query.
- * @param {string} filters.tenantId - Filter by tenant ID.
+ * @param {string[]} filters.tenantIds - Array of tenant IDs to filter by.
  * @param {string} filters.userEmail - Filter by user email.
  * @param {string} filters.action - Filter by action.
  * @param {string} filters.status - Filter by status ('SUCCESS' or 'DENIED').
@@ -30,21 +30,21 @@ const auditLog = () => {
  */
 const getAuditLogs = async (filters = {}) => {
   const {
-    tenantId,
+    tenantIds,
     userEmail,
-    action,
-    status,
-    limit = 100,
-    offset = 0,
+    // action,
+    // status,
+    // limit = 100,
+    // offset = 0,
   } = filters
 
   let query =
-    'SELECT id, tenant_id, user_email, action, status, timestamp FROM audit_logs WHERE 1=1'
+    'SELECT log_id, tenant_id, user_email, action, status, timestamp FROM audit_logs WHERE 1=1'
   const params = []
 
-  if (tenantId) {
-    query += ' AND tenant_id = ?'
-    params.push(tenantId)
+  if (tenantIds && tenantIds.length > 0) {
+    query += ` AND tenant_id IN (${tenantIds.map(() => '?').join(', ')})`
+    params.push(...tenantIds)
   }
 
   if (userEmail) {
@@ -52,18 +52,18 @@ const getAuditLogs = async (filters = {}) => {
     params.push(userEmail)
   }
 
-  if (action) {
-    query += ' AND action = ?'
-    params.push(action)
-  }
+  //   if (action) {
+  //     query += ' AND action = ?'
+  //     params.push(action)
+  //   }
 
-  if (status) {
-    query += ' AND status = ?'
-    params.push(status)
-  }
+  //   if (status) {
+  //     query += ' AND status = ?'
+  //     params.push(status)
+  //   }
 
-  query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
-  params.push(limit, offset)
+  //   query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+  //   params.push(limit, offset)
 
   try {
     const [rows] = await db.execute(query, params)

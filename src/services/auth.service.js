@@ -59,7 +59,7 @@ const findAndGetPermissions = async (userData) => {
 
     // Step 1: Find all tenants associated with the user
     const [tenantRows] = await connection.execute(
-      'SELECT tenant_id, is_admin FROM user_tenants WHERE user_email = ? AND is_active = TRUE',
+      'SELECT id, tenant_id, is_admin FROM user_tenants WHERE user_email = ? AND is_active = TRUE',
       [userEmail]
     )
 
@@ -73,14 +73,28 @@ const findAndGetPermissions = async (userData) => {
     const selectedTenant = tenantRows[0]
     const tenantId = selectedTenant.tenant_id
 
+    console.log('Associated tenants:', tenantRows)
+    console.log('Selected tenant for session:', tenantId)
+
     // Step 2: Retrieve all active features (scopes) for the selected tenant
     const permissionsQuery = `
-            SELECT f.feature_short_name, f.scope
-            FROM features f
-            JOIN tenant_features tf ON f.feature_id = tf.feature_id
-            WHERE tf.tenant_id = ? AND tf.is_active = TRUE AND f.is_active = TRUE
+             SELECT 
+                  ut.tenant_id,
+                  ut.user_email,
+                  ut.is_admin,
+                  f.feature_name,
+                  f.scope,
+                  f.feature_short_name
+              FROM user_tenants ut
+              LEFT JOIN tenant_features tf ON ut.id = tf.user_tenants_id
+              LEFT JOIN features f ON tf.feature_id = f.feature_id
+              where f.is_active  = TRUE AND tf.is_active = TRUE AND ut.is_active =TRUE
+              AND ut.tenant_id = ? AND ut.user_email = ?
         `
-    const [featureRows] = await connection.execute(permissionsQuery, [tenantId])
+    const [featureRows] = await connection.execute(permissionsQuery, [
+      tenantId,
+      userEmail,
+    ])
 
     // Transform into a programmatic scope list (e.g., ['reports:READ', 'billing:WRITE'])
     const permissions = featureRows.map(
