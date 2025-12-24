@@ -1,5 +1,6 @@
 // src/routes/auth.routes.js
 const express = require('express')
+const { captureAudit } = require('../utils/logger')
 const router = express.Router()
 // const {
 //   validateGoogleToken,
@@ -56,9 +57,20 @@ router.post('/google', async (req, res, next) => {
     const validatedUser = await validateGoogleToken(id_token)
 
     // *** CHANGE: Use the new function to get tenant ID and scopes ***
-    const userPermissions = await findAndGetPermissions(validatedUser)
+    const userPermissions = await findAndGetPermissions(req, validatedUser)
 
     const appToken = generateAppToken(userPermissions)
+
+    console.log('Validated user detail: ' + JSON.stringify(validatedUser))
+
+    // LOG SUCCESS
+    await captureAudit(
+      req,
+      userPermissions.tenantId,
+      userPermissions.email,
+      'LOGIN_SUCCESS',
+      'SUCCESS'
+    )
 
     res.json({
       success: true,
@@ -71,6 +83,7 @@ router.post('/google', async (req, res, next) => {
       },
     })
   } catch (error) {
+    await captureAudit(req, null, 'SYSTEM', 'LOGIN_CRASH', '401_UNAUTHORIZED')
     error.statusCode = error.statusCode || 401
     next(error)
   }

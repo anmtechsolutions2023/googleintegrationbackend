@@ -10,10 +10,10 @@ Run run this application:
 
 REST End points: (For API access based on scope assigned to user <-> feature)
 
-curl --location 'http://localhost:3000/api/data/admin/settings' \
+curl --location 'http://localhost:3001/api/data/admin/settings' \
 --header 'Authorization: Bearer <bearer_code>' \
 --data ''
 
-curl --location 'http://localhost:3000/api/data/general' \
+curl --location 'http://localhost:3001/api/data/general' \
 --header 'Authorization: Bearer <bearer_code>' \
 --data ''

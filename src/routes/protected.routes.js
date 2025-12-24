@@ -1,7 +1,6 @@
-// src/routes/protected.routes.js (UPDATED)
+// src/routes/protected.routes.js
 const express = require('express')
 const router = express.Router()
-// Import the new checkScope middleware
 const {
   authenticateToken,
   checkScope,
@@ -9,6 +8,58 @@ const {
 const { auditLog, getAuditLogs } = require('../middleware/auditLogger')
 const db = require('../config/db')
 const { HttpError } = require('../middleware/errorHandler')
+
+// Import the service responsible for permissions and token generation
+const {
+  switchTenantPermissions,
+  generateAppToken,
+} = require('../services/auth.service')
+
+/**
+ * Endpoint: /switch-tenant
+ * Purpose: Allows a user with a valid session to switch their active tenant context.
+ */
+router.post(
+  '/switch-tenant',
+  authenticateToken, // Ensures the user is logged in
+  async (req, res, next) => {
+    // const { targetTenantId } = req.body
+
+    const targetTenantId = JSON.parse(JSON.stringify(req.body)).tenantId
+    const userEmail = req.user.email
+    const userName = req.user.name
+
+    if (!targetTenantId) {
+      return next(new HttpError('Target Tenant ID is required.', 400))
+    }
+
+    try {
+      // 1. Get new permissions and validate membership for target tenant
+      const newPermissions = await switchTenantPermissions(
+        req,
+        userEmail,
+        targetTenantId,
+        userName
+      )
+
+      // 2. Generate a new JWT with the updated tenant ID and scopes
+      const newToken = generateAppToken(newPermissions)
+
+      // 3. Return the new token to the frontend
+      res.json({
+        success: true,
+        message: `Successfully switched to tenant: ${targetTenantId}`,
+        token: newToken,
+      })
+    } catch (error) {
+      console.error('Tenant Switch Route Error:', error.message)
+      // Pass the error to our global handler (will likely be a 403)
+      next(new HttpError(error.message || 'Tenant switch failed', 403))
+    }
+  }
+)
+
+// --- EXISTING ROUTES ---
 
 // Endpoint: Requires the user to have the 'TENANT:ADMIN' scope
 router.get(
@@ -29,7 +80,7 @@ router.get(
   }
 )
 
-// Endpoint: Requires the user to have the 'reports:WRITE' scope
+// Endpoint: Requires the user to have the 'reports:READ' scope
 router.get(
   '/data/reports',
   authenticateToken,
@@ -54,8 +105,6 @@ router.get(
   authenticateToken,
   checkScope('billing:READ', 'REPORTS:WRITE'),
   auditLog(),
-  // checkScope('REPORTS:READ', 'REPORTS:WRITE'),
-  // checkScope('REPORTS:READ'),
   (req, res) => {
     res.json({
       message: `Tenant ${req.user.tid} - Read Access: Displaying billing data.`,
@@ -69,7 +118,20 @@ router.get(
   }
 )
 
-// Endpoint: Requires only authentication (any user with a valid token/tenant access)
+// Endpoint: logout
+router.post('/logout', authenticateToken, auditLog(), (req, res) => {
+  res.json({
+    message: `Tenant ${req.user.tid}  - User logged out successfully.`,
+    resource: 'logout',
+    user: {
+      email: req.user.email,
+      tenantId: req.user.tid,
+      scopes: req.user.scopes,
+    },
+  })
+})
+
+// Endpoint: Requires only authentication
 router.get('/data/general', authenticateToken, auditLog(), (req, res) => {
   res.json({
     message: `Tenant ${req.user.tid} - General Access: Welcome!`,
@@ -82,105 +144,39 @@ router.get('/data/general', authenticateToken, auditLog(), (req, res) => {
   })
 })
 
-// Endpoint: Get audit logs (requires authentication, checks admin status internally)
-router.get(
-  '/audit/logs',
-  authenticateToken,
-  auditLog(),
-  async (req, res, next) => {
-    try {
-      console.log('Request details:', req.user, req.query)
-      // Get all tenants the user is associated with
-      const [allRows] = await db.execute(
-        'SELECT tenant_id, is_admin FROM user_tenants WHERE user_email = ?',
-        [req.user.email]
-      )
+// Endpoint: Get audit logs
+router.get('/audit/logs', authenticateToken, async (req, res, next) => {
+  try {
+    const [allRows] = await db.execute(
+      'SELECT tenant_id, is_admin FROM user_tenants WHERE user_email = ?',
+      [req.user.email]
+    )
 
-      console.log('All associated tenants:', allRows)
-      console.log('Requested user email: ' + req.user.email)
-      console.log('Requested tenant id: ' + req.user.tid)
+    const adminTenants = allRows
+      .filter((row) => row.tenant_id === req.user.tid && row.is_admin)
+      .map((row) => row.tenant_id)
 
-      // Collect tenant IDs where user is admin
-      // const adminTenants = allRows
-      //   .filter((row) => row.is_admin)
-      //   .map((row) => row.tenant_id)
+    const isAdmin = adminTenants.length > 0
 
-      const adminTenants = allRows
-        .filter((row) => row.tenant_id === req.user.tid && row.is_admin)
-        .map((row) => row.tenant_id)
-
-      const isAdmin = adminTenants.length > 0
-
-      const filters = {
-        tenantIds: isAdmin ? adminTenants : [req.user.tid], // If admin, logs for all admin tenants; else current tenant
-        userEmail: isAdmin ? req.query.userEmail : req.user.email, // If admin, can filter by userEmail; else only their logs
-        // action: req.query.action,
-        // status: req.query.status,
-        // limit: parseInt(req.query.limit) || 100,
-        // offset: parseInt(req.query.offset) || 0,
-      }
-
-      console.log('Audit log filters:', filters)
-
-      const logs = await getAuditLogs(filters)
-      res.json({
-        message: 'Audit logs retrieved successfully.',
-        logs,
-        isAdmin,
-        associatedTenants: allRows.map((row) => ({
-          tenantId: row.tenant_id,
-          isAdmin: row.is_admin,
-        })),
-      })
-    } catch (error) {
-      console.log(error)
-      next(new HttpError('Failed to retrieve audit logs.', 500))
+    const filters = {
+      tenantIds: isAdmin ? adminTenants : [req.user.tid],
+      userEmail: isAdmin ? req.query.userEmail : req.user.email,
     }
+
+    const logs = await getAuditLogs(filters)
+    res.json({
+      message: 'Audit logs retrieved successfully.',
+      logs,
+      isAdmin,
+      associatedTenants: allRows.map((row) => ({
+        tenantId: row.tenant_id,
+        isAdmin: row.is_admin,
+      })),
+    })
+  } catch (error) {
+    console.log(error)
+    next(new HttpError('Failed to retrieve audit logs.', 500))
   }
-)
+})
 
 module.exports = router
-
-// // src/routes/protected.routes.js
-// const express = require('express')
-// const router = express.Router()
-// const {
-//   authenticateToken,
-//   authorizeRole,
-// } = require('../middleware/authMiddleware')
-
-// router.get(
-//   '/data/admin',
-//   authenticateToken,
-//   authorizeRole(['admin']),
-//   (req, res) => {
-//     res.json({
-//       message: 'ADMIN ACCESS GRANTED: Highly confidential data.',
-//       resource: 'admin_panel',
-//       user: req.user,
-//     })
-//   }
-// )
-
-// router.get(
-//   '/data/editor',
-//   authenticateToken,
-//   authorizeRole(['admin', 'editor']),
-//   (req, res) => {
-//     res.json({
-//       message: 'EDITOR ACCESS GRANTED: Data ready for modification.',
-//       resource: 'editor_dashboard',
-//       user: req.user,
-//     })
-//   }
-// )
-
-// router.get('/data/public', authenticateToken, (req, res) => {
-//   res.json({
-//     message: 'VIEWER ACCESS GRANTED: General public data.',
-//     resource: 'general_info',
-//     user: req.user,
-//   })
-// })
-
-// module.exports = router
