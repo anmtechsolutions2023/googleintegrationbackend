@@ -1,4 +1,9 @@
 // src/middleware/errorHandler.js
+// Global error handling middleware for Express.
+// Logs errors and sends standardized JSON responses.
+
+const { logger } = require('../utils/logger')
+const MESSAGES = require('../config/messages')
 
 class HttpError extends Error {
   constructor(message, statusCode) {
@@ -8,10 +13,11 @@ class HttpError extends Error {
 }
 
 const errorHandler = (err, req, res, next) => {
-  console.error(err.stack)
+  logger.error('Unhandled error:', err)
 
   const statusCode = err.statusCode || 500
-  const message = statusCode === 500 ? 'Internal Server Error' : err.message
+  const message =
+    statusCode === 500 ? MESSAGES.INFO.INTERNAL_ERROR : err.message
 
   res.status(statusCode).json({
     success: false,

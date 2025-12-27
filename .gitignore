@@ -7,3 +7,5 @@
 # Logs and Build Files
 npm-debug.log*
 .DS_Store
+logs/
+coverage/

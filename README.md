@@ -17,3 +17,8 @@ curl --location 'http://localhost:3001/api/data/admin/settings' \
 curl --location 'http://localhost:3001/api/data/general' \
 --header 'Authorization: Bearer <bearer_code>' \
 --data ''
+
+Commands:
+
+1. npm run lint
+2. npm start / node server.js

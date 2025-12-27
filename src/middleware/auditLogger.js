@@ -1,17 +1,29 @@
-const db = require('../config/db')
+// src/middleware/auditLogger.js
+// Middleware for logging user actions to audit logs.
+// Provides functions to log actions and retrieve audit logs with filters.
 
+const db = require('../config/db')
+const { logger } = require('../utils/logger')
+const { QUERIES, STATUSES, DEFAULTS } = require('../config/constants')
+
+/**
+ * Middleware to log user actions after authentication.
+ * @returns {Function} Express middleware function.
+ */
 const auditLog = () => {
   return async (req, res, next) => {
     const { email, tid } = req.user
     const action = `${req.method} ${req.path}`
 
     try {
-      await db.execute(
-        'INSERT INTO audit_logs (tenant_id, user_email, action, status) VALUES (?, ?, ?, ?)',
-        [tid, email, action, 'SUCCESS']
-      )
+      await db.execute(QUERIES.AUDIT_LOGS_MIDDLEWARE, [
+        tid,
+        email,
+        action,
+        STATUSES.SUCCESS,
+      ])
     } catch (err) {
-      console.error('Audit Logging Failed', err)
+      logger.error('Audit Logging Failed', err)
     }
     next()
   }
@@ -22,55 +34,48 @@ const auditLog = () => {
  * @param {Object} filters - Optional filters for the query.
  * @param {string[]} filters.tenantIds - Array of tenant IDs to filter by.
  * @param {string} filters.userEmail - Filter by user email.
- * @param {string} filters.action - Filter by action.
- * @param {string} filters.status - Filter by status ('SUCCESS' or 'DENIED').
  * @param {number} filters.limit - Limit the number of results (default 100).
  * @param {number} filters.offset - Offset for pagination (default 0).
  * @returns {Promise<Array>} Array of audit log records.
  */
 const getAuditLogs = async (filters = {}) => {
-  const {
-    tenantIds,
-    userEmail,
-    // action,
-    // status,
-    // limit = 100,
-    // offset = 0,
-  } = filters
-
-  let query =
-    'SELECT log_id, tenant_id, user_email, action, status, timestamp FROM audit_logs WHERE 1=1'
-  const params = []
-
-  if (tenantIds && tenantIds.length > 0) {
-    query += ` AND tenant_id IN (${tenantIds.map(() => '?').join(', ')})`
-    params.push(...tenantIds)
-  }
-
-  if (userEmail) {
-    query += ' AND user_email = ?'
-    params.push(userEmail)
-  }
-
-  //   if (action) {
-  //     query += ' AND action = ?'
-  //     params.push(action)
-  //   }
-
-  //   if (status) {
-  //     query += ' AND status = ?'
-  //     params.push(status)
-  //   }
-
-  //   query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
-  //   params.push(limit, offset)
-
+  const connection = await db.getConnection()
   try {
-    const [rows] = await db.execute(query, params)
+    const {
+      tenantIds,
+      userEmail,
+      limit = DEFAULTS.AUDIT_LIMIT,
+      offset = DEFAULTS.AUDIT_OFFSET,
+    } = filters
+
+    let query = QUERIES.AUDIT_LOGS_SELECT
+
+    const params = []
+
+    if (tenantIds && tenantIds.length > 0) {
+      if (tenantIds.length === 1) {
+        query += ' AND tenant_id = ?'
+      } else {
+        query += ` AND tenant_id IN (${tenantIds.map(() => '?').join(', ')})`
+      }
+      params.push(...tenantIds)
+    }
+
+    if (userEmail) {
+      query += ' AND user_email = ?'
+      params.push(userEmail)
+    }
+
+    query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+    params.push(limit, offset)
+
+    const [rows] = await connection.query(query, params)
     return rows
   } catch (err) {
-    console.error('Failed to retrieve audit logs', err)
+    logger.error('Failed to retrieve audit logs', err)
     throw err
+  } finally {
+    connection.release()
   }
 }
 

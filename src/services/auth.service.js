@@ -1,14 +1,24 @@
 // src/services/auth.service.js
+// Service for Google OAuth validation, user permissions, and JWT generation.
+// Handles multi-tenant authentication and tenant switching.
+
 const { OAuth2Client } = require('google-auth-library')
 const { captureAudit } = require('../utils/logger')
 const jwt = require('jsonwebtoken')
 const db = require('../config/db')
-require('dotenv').config()
+const { logger } = require('../utils/logger')
+const { QUERIES, STATUSES } = require('../config/constants')
+const MESSAGES = require('../config/messages')
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
 const JWT_SECRET = process.env.JWT_SECRET
 const GOOGLE_OAUTH2_CLIENT = new OAuth2Client(GOOGLE_CLIENT_ID)
 
+/**
+ * Validates a Google ID token and extracts user info.
+ * @param {string} idToken - Google ID token.
+ * @returns {Promise<Object>} Validated user data.
+ */
 const validateGoogleToken = async (idToken) => {
   try {
     const ticket = await GOOGLE_OAUTH2_CLIENT.verifyIdToken({
@@ -18,33 +28,26 @@ const validateGoogleToken = async (idToken) => {
     const payload = ticket.getPayload()
 
     if (!payload || !payload.email) {
-      throw new Error('Invalid token payload or missing email.')
+      throw new Error(MESSAGES.ERROR.INVALID_PAYLOAD)
     }
 
     return { email: payload.email, name: payload.name, googleId: payload.sub }
   } catch (error) {
-    throw new Error(`Google token validation failed: ${error.message}`)
+    throw new Error(
+      `${MESSAGES.ERROR.GOOGLE_VALIDATION_FAILED}${error.message}`
+    )
   }
 }
 
 /**
- * Helper: Fetches scopes for a specific user-tenant membership
+ * Fetches scopes for a specific user-tenant membership.
+ * @param {Object} connection - Database connection.
+ * @param {string} tenantId - Tenant ID.
+ * @param {string} userEmail - User email.
+ * @returns {Promise<string[]>} Array of scopes.
  */
 const getScopesForTenant = async (connection, tenantId, userEmail) => {
-  const permissionsQuery = `
-    SELECT 
-        f.scope,
-        f.feature_short_name
-    FROM user_tenants ut
-    JOIN tenant_features tf ON ut.id = tf.user_tenants_id
-    JOIN features f ON tf.feature_id = f.feature_id
-    WHERE f.is_active = TRUE 
-      AND tf.is_active = TRUE 
-      AND ut.is_active = TRUE
-      AND ut.tenant_id = ? 
-      AND ut.user_email = ?
-  `
-  const [featureRows] = await connection.execute(permissionsQuery, [
+  const [featureRows] = await connection.execute(QUERIES.PERMISSIONS_SELECT, [
     tenantId,
     userEmail,
   ])
@@ -52,29 +55,34 @@ const getScopesForTenant = async (connection, tenantId, userEmail) => {
 }
 
 /**
- * 1. findAndGetPermissions (Used during Login)
+ * Finds and retrieves user permissions for login.
+ * @param {Object} req - Express request object.
+ * @param {Object} userData - Validated user data.
+ * @returns {Promise<Object>} User permissions object.
  */
 const findAndGetPermissions = async (req, userData) => {
   const connection = await db.getConnection()
   try {
     const userEmail = userData.email
 
-    // Get all available tenants for this user
-    const [tenantRows] = await connection.execute(
-      'SELECT tenant_id, is_admin FROM user_tenants WHERE user_email = ? AND is_active = TRUE',
-      [userEmail]
-    )
+    const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS_SELECT, [
+      userEmail,
+    ])
 
     if (tenantRows.length === 0) {
-      await captureAudit(req, null, userEmail, 'LOGIN_ATTEMPT', '403_NOT_FOUND')
-      throw new Error('User is not associated with any active tenant.')
+      await captureAudit(
+        req,
+        null,
+        userEmail,
+        STATUSES.LOGIN_ATTEMPT,
+        STATUSES.NOT_FOUND
+      )
+      throw new Error(MESSAGES.ERROR.USER_NOT_ASSOCIATED)
     }
 
-    // Default to the first tenant
     const selectedTenant = tenantRows[0]
     const tenantId = selectedTenant.tenant_id
 
-    // Get permissions for the selected tenant
     const permissions = await getScopesForTenant(
       connection,
       tenantId,
@@ -90,19 +98,23 @@ const findAndGetPermissions = async (req, userData) => {
       name: userData.name,
       tenantId,
       permissions,
-      associatedTenants: tenantRows, // Added this to pass to JWT
+      associatedTenants: tenantRows,
     }
   } catch (error) {
-    console.error('Multi-Tenant Auth Error:', error)
-    throw error // Let the controller handle the specific error message
+    logger.error('Multi-Tenant Auth Error:', error)
+    throw error
   } finally {
     connection.release()
   }
 }
 
 /**
- * 2. switchTenantPermissions (Used during Tenant Switch)
- * Validates target tenant and fetches new scopes.
+ * Switches tenant permissions for an authenticated user.
+ * @param {Object} req - Express request object.
+ * @param {string} userEmail - User email.
+ * @param {string} targetTenantId - Target tenant ID.
+ * @param {string} userName - User name.
+ * @returns {Promise<Object>} New permissions object.
  */
 const switchTenantPermissions = async (
   req,
@@ -112,11 +124,9 @@ const switchTenantPermissions = async (
 ) => {
   const connection = await db.getConnection()
   try {
-    // 1. Verify membership for the specific target tenant
-    const [tenantRows] = await connection.execute(
-      'SELECT tenant_id, is_admin FROM user_tenants WHERE user_email = ? AND is_active = TRUE',
-      [userEmail]
-    )
+    const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS_SELECT, [
+      userEmail,
+    ])
 
     const targetTenant = tenantRows.find((t) => t.tenant_id === targetTenantId)
 
@@ -125,13 +135,12 @@ const switchTenantPermissions = async (
         req,
         null,
         userEmail,
-        'SWITCH_TENANT_DENIED',
-        '403_FORBIDDEN'
+        STATUSES.SWITCH_TENANT_DENIED,
+        STATUSES.FORBIDDEN
       )
-      throw new Error('Access denied to target tenant.')
+      throw new Error(MESSAGES.ERROR.TENANT_ACCESS_DENIED)
     }
 
-    // 2. Fetch new scopes for this tenant
     const permissions = await getScopesForTenant(
       connection,
       targetTenantId,
@@ -147,10 +156,10 @@ const switchTenantPermissions = async (
       name: userName,
       tenantId: targetTenantId,
       permissions,
-      associatedTenants: tenantRows, // Keep the list available for future switches
+      associatedTenants: tenantRows,
     }
   } catch (error) {
-    console.error('Switch Tenant Error:', error)
+    logger.error('Switch Tenant Error:', error)
     throw error
   } finally {
     connection.release()
@@ -158,7 +167,9 @@ const switchTenantPermissions = async (
 }
 
 /**
- * 3. Generates the JWT with essential multi-tenant data
+ * Generates a JWT with user permissions.
+ * @param {Object} userPermissions - User permissions object.
+ * @returns {string} JWT token.
  */
 const generateAppToken = (userPermissions) => {
   const appPayload = {
@@ -166,7 +177,6 @@ const generateAppToken = (userPermissions) => {
     name: userPermissions.name,
     tid: userPermissions.tenantId,
     scopes: userPermissions.permissions,
-    // Ensure the array matches the format the Navbar expects: [{tenantId, isAdmin}]
     associatedTenants: userPermissions.associatedTenants.map((t) => ({
       tenantId: t.tenant_id,
       isAdmin: t.is_admin === 1 || t.is_admin === true,
@@ -180,6 +190,6 @@ const generateAppToken = (userPermissions) => {
 module.exports = {
   validateGoogleToken,
   findAndGetPermissions,
-  switchTenantPermissions, // New export
+  switchTenantPermissions,
   generateAppToken,
 }

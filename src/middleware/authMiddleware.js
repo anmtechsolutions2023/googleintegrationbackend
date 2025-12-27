@@ -1,19 +1,26 @@
-// src/middleware/authMiddleware.js (UPDATED)
+// src/middleware/authMiddleware.js
+// Middleware for JWT authentication and scope-based authorization.
+// Handles token verification and permission checks for multi-tenant access.
+
 const jwt = require('jsonwebtoken')
 const { HttpError } = require('./errorHandler')
-require('dotenv').config()
+const MESSAGES = require('../config/messages')
 
 const JWT_SECRET = process.env.JWT_SECRET
 
-// 1. (authenticateToken remains the same)
+/**
+ * Middleware to authenticate JWT tokens.
+ * Verifies the token and attaches user info to req.user.
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @param {Function} next - Express next function.
+ */
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization']
   const token = authHeader && authHeader.split(' ')[1]
 
   if (!token) {
-    return next(
-      new HttpError('Access denied. No application token provided.', 401)
-    )
+    return next(new HttpError(MESSAGES.ERROR.INVALID_TOKEN, 401))
   }
 
   try {
@@ -25,13 +32,14 @@ const authenticateToken = (req, res, next) => {
     req.user = user
     next()
   } catch (error) {
-    return next(new HttpError('Invalid or expired application token.', 403))
+    return next(new HttpError(MESSAGES.ERROR.INVALID_TOKEN, 403))
   }
 }
 
 /**
- * 2. NEW Authorization Check: Verifies if the user's token has at least one of the required feature scopes.
- * @param {...string} requiredScopes - The specific scopes needed (e.g., 'reports:WRITE', 'TENANT:ADMIN').
+ * Middleware to check if the user has at least one of the required scopes.
+ * @param {...string} requiredScopes - The scopes required for access (e.g., 'TENANT:ADMIN').
+ * @returns {Function} Middleware function.
  */
 const checkScope = (...requiredScopes) => {
   return (req, res, next) => {
@@ -40,13 +48,12 @@ const checkScope = (...requiredScopes) => {
     if (!userScopes || userScopes.length === 0) {
       return next(
         new HttpError(
-          `Forbidden. No active permissions found for tenant ${req.user.tid}.`,
+          `${MESSAGES.ERROR.FORBIDDEN_NO_SCOPES}${req.user.tid}.`,
           403
         )
       )
     }
 
-    // requiredScopes is now an array of strings passed from the route
     const hasAccess = requiredScopes.some((scope) => userScopes.includes(scope))
 
     if (hasAccess) {
@@ -54,7 +61,7 @@ const checkScope = (...requiredScopes) => {
     } else {
       return next(
         new HttpError(
-          `Forbidden. Access requires one of these scopes: [${requiredScopes.join(
+          `${MESSAGES.ERROR.FORBIDDEN_MISSING_SCOPE}[${requiredScopes.join(
             ', '
           )}].`,
           403
@@ -66,37 +73,8 @@ const checkScope = (...requiredScopes) => {
 
 module.exports = {
   authenticateToken,
-  checkScope, // Renamed and changed functionality
+  checkScope,
 }
-
-// // src/middleware/authMiddleware.js
-// const jwt = require('jsonwebtoken')
-// const { HttpError } = require('./errorHandler')
-// require('dotenv').config()
-
-// const JWT_SECRET = process.env.JWT_SECRET
-
-// /**
-//  * 1. Validates the internal application JWT.
-//  */
-// const authenticateToken = (req, res, next) => {
-//   const authHeader = req.headers['authorization']
-//   const token = authHeader && authHeader.split(' ')[1]
-
-//   if (!token) {
-//     return next(
-//       new HttpError('Access denied. No application token provided.', 401)
-//     )
-//   }
-
-//   try {
-//     const user = jwt.verify(token, JWT_SECRET)
-//     req.user = user
-//     next()
-//   } catch (error) {
-//     return next(new HttpError('Invalid or expired application token.', 403))
-//   }
-// }
 
 // /**
 //  * 2. Custom Authorization Check based on Role/Scope.

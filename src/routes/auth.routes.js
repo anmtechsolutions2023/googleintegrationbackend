@@ -1,15 +1,14 @@
 // src/routes/auth.routes.js
-const express = require('express')
-const { captureAudit } = require('../utils/logger')
-const router = express.Router()
-// const {
-//   validateGoogleToken,
-//   findOrCreateUser,
-//   generateAppToken,
-// } = require('../services/auth.service')
-// const { HttpError } = require('../middleware/errorHandler')
+// Routes for authentication, including Google OAuth login.
+// Handles token validation, user permissions, and JWT generation.
 
-// Import the new service function name
+const express = require('express')
+const router = express.Router()
+const { captureAudit } = require('../utils/logger')
+const MESSAGES = require('../config/messages')
+const { STATUSES } = require('../config/constants')
+
+// Import the service functions
 const {
   validateGoogleToken,
   findAndGetPermissions,
@@ -17,73 +16,49 @@ const {
 } = require('../services/auth.service')
 const { HttpError } = require('../middleware/errorHandler')
 
-// router.post('/google', async (req, res, next) => {
-//   const { id_token } = req.body
-
-//   if (!id_token) {
-//     return next(new HttpError('Google ID token is required.', 400))
-//   }
-
-//   try {
-//     const validatedUser = await validateGoogleToken(id_token)
-//     const userWithRole = await findOrCreateUser(validatedUser)
-//     const appToken = generateAppToken(userWithRole)
-
-//     res.json({
-//       success: true,
-//       message: 'Authentication successful. Use this token for API access.',
-//       token: appToken,
-//       user: {
-//         email: userWithRole.email,
-//         role: userWithRole.role,
-//       },
-//     })
-//   } catch (error) {
-//     error.statusCode = error.statusCode || 401
-//     next(error)
-//   }
-// })
-
-// module.exports = router
-
+/**
+ * POST /api/auth/google
+ * Authenticates user via Google ID token, retrieves permissions, and issues JWT.
+ */
 router.post('/google', async (req, res, next) => {
   const { id_token } = req.body
 
   if (!id_token) {
-    return next(new HttpError('Google ID token is required.', 400))
+    return next(new HttpError(MESSAGES.ERROR.MISSING_GOOGLE_TOKEN, 400))
   }
 
   try {
     const validatedUser = await validateGoogleToken(id_token)
-
-    // *** CHANGE: Use the new function to get tenant ID and scopes ***
     const userPermissions = await findAndGetPermissions(req, validatedUser)
-
     const appToken = generateAppToken(userPermissions)
-
-    console.log('Validated user detail: ' + JSON.stringify(validatedUser))
 
     // LOG SUCCESS
     await captureAudit(
       req,
       userPermissions.tenantId,
       userPermissions.email,
-      'LOGIN_SUCCESS',
-      'SUCCESS'
+      STATUSES.LOGIN_SUCCESS,
+      STATUSES.SUCCESS
     )
 
     res.json({
       success: true,
-      message: 'Authentication successful. Use this token for API access.',
+      message: MESSAGES.SUCCESS.AUTH,
       token: appToken,
       user: {
         email: userPermissions.email,
         tenant_id: userPermissions.tenantId,
-        scopes: userPermissions.permissions, // List of effective scopes
+        scopes: userPermissions.permissions,
       },
     })
   } catch (error) {
-    await captureAudit(req, null, 'SYSTEM', 'LOGIN_CRASH', '401_UNAUTHORIZED')
+    await captureAudit(
+      req,
+      null,
+      'SYSTEM',
+      STATUSES.LOGIN_CRASH,
+      STATUSES.UNAUTHORIZED
+    )
     error.statusCode = error.statusCode || 401
     next(error)
   }
