@@ -46,6 +46,7 @@ const getAuditLogs = async (filters = {}) => {
       userEmail,
       limit = DEFAULTS.AUDIT_LIMIT,
       offset = DEFAULTS.AUDIT_OFFSET,
+      isAdmin = isAdmin,
     } = filters
 
     let query = QUERIES.AUDIT_LOGS_SELECT
@@ -61,13 +62,15 @@ const getAuditLogs = async (filters = {}) => {
       params.push(...tenantIds)
     }
 
-    if (userEmail) {
+    if (!isAdmin && userEmail) {
       query += ' AND user_email = ?'
       params.push(userEmail)
     }
 
     query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
     params.push(limit, offset)
+
+    // console.log('Final Audit Logs Query:', query)
 
     const [rows] = await connection.query(query, params)
     return rows

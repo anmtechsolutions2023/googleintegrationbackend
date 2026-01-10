@@ -175,6 +175,7 @@ router.get('/audit/logs', authenticateToken, async (req, res, next) => {
       userEmail: isAdmin
         ? req.query.userEmail || req.user.email
         : req.user.email,
+      isAdmin: isAdmin,
     }
 
     const logs = await getAuditLogs(filters)
