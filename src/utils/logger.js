@@ -3,10 +3,11 @@
 
 const winston = require('winston')
 const db = require('../config/db')
+const config = require('../config/config')
 const { QUERIES } = require('../config/constants')
 
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
+  level: process.env.LOG_LEVEL || config.LOGGING.DEFAULT_LEVEL,
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
@@ -34,7 +35,7 @@ const captureAudit = async (req, tenantId, email, action, status) => {
   const ip =
     req.headers['x-forwarded-for']?.split(',')[0] ||
     req.socket.remoteAddress ||
-    '0.0.0.0'
+    config.AUDIT.DEFAULT_IP
 
   try {
     await db.execute(QUERIES.AUDIT_LOGS_INSERT, [

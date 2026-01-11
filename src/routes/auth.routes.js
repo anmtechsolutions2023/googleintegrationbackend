@@ -1,67 +1,27 @@
 // src/routes/auth.routes.js
-// Routes for authentication, including Google OAuth login.
-// Handles token validation, user permissions, and JWT generation.
+// Authentication routes.
+// Thin layer that delegates to controllers.
 
 const express = require('express')
-const router = express.Router()
-const { captureAudit } = require('../utils/logger')
+const rateLimit = require('express-rate-limit')
+const config = require('../config/config')
 const MESSAGES = require('../config/messages')
-const { STATUSES } = require('../config/constants')
+const router = express.Router()
+const authController = require('../controllers/auth.controller')
 
-// Import the service functions
-const {
-  validateGoogleToken,
-  findAndGetPermissions,
-  generateAppToken,
-} = require('../services/auth.service')
-const { HttpError } = require('../middleware/errorHandler')
+// Rate limiter for auth routes - see src/config/config.js for settings
+const authLimiter = rateLimit({
+  windowMs: config.RATE_LIMIT.AUTH_WINDOW_MS,
+  max: config.RATE_LIMIT.AUTH_MAX_REQUESTS,
+  message: MESSAGES.ERROR.RATE_LIMIT_EXCEEDED,
+  standardHeaders: config.RATE_LIMIT.STANDARD_HEADERS,
+  legacyHeaders: config.RATE_LIMIT.LEGACY_HEADERS,
+})
 
 /**
  * POST /api/auth/google
- * Authenticates user via Google ID token, retrieves permissions, and issues JWT.
+ * Authenticates user via Google ID token.
  */
-router.post('/google', async (req, res, next) => {
-  const { id_token } = req.body
-
-  if (!id_token) {
-    return next(new HttpError(MESSAGES.ERROR.MISSING_GOOGLE_TOKEN, 400))
-  }
-
-  try {
-    const validatedUser = await validateGoogleToken(id_token)
-    const userPermissions = await findAndGetPermissions(req, validatedUser)
-    const appToken = generateAppToken(userPermissions)
-
-    // LOG SUCCESS
-    await captureAudit(
-      req,
-      userPermissions.tenantId,
-      userPermissions.email,
-      STATUSES.LOGIN_SUCCESS,
-      STATUSES.SUCCESS
-    )
-
-    res.json({
-      success: true,
-      message: MESSAGES.SUCCESS.AUTH,
-      token: appToken,
-      user: {
-        email: userPermissions.email,
-        tenant_id: userPermissions.tenantId,
-        scopes: userPermissions.permissions,
-      },
-    })
-  } catch (error) {
-    await captureAudit(
-      req,
-      null,
-      'SYSTEM',
-      STATUSES.LOGIN_CRASH,
-      STATUSES.UNAUTHORIZED
-    )
-    error.statusCode = error.statusCode || 401
-    next(error)
-  }
-})
+router.post('/google', authLimiter, authController.googleAuth)
 
 module.exports = router

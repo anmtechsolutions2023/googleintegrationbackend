@@ -16,23 +16,34 @@ const JWT_SECRET = process.env.JWT_SECRET
  * @param {Function} next - Express next function.
  */
 const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization']
-  const token = authHeader && authHeader.split(' ')[1]
+  const authHeader = req.headers[MESSAGES.HTTP_HEADER.AUTHORIZATION]
+  const token =
+    authHeader && authHeader.split(' ')[MESSAGES.HTTP_HEADER.BEARER_SPLIT_INDEX]
 
   if (!token) {
-    return next(new HttpError(MESSAGES.ERROR.INVALID_TOKEN, 401))
+    return next(
+      new HttpError(
+        MESSAGES.ERROR.INVALID_TOKEN,
+        MESSAGES.HTTP_STATUS.UNAUTHORIZED
+      )
+    )
   }
 
   try {
     const user = jwt.verify(token, JWT_SECRET)
     // Ensure token has expected payload for multi-tenancy
     if (!user.tid || !Array.isArray(user.scopes)) {
-      throw new Error('Token payload missing tenant ID or scopes.')
+      throw new Error(MESSAGES.ERROR.INVALID_TOKEN_PAYLOAD)
     }
     req.user = user
     next()
-  } catch (error) {
-    return next(new HttpError(MESSAGES.ERROR.INVALID_TOKEN, 403))
+  } catch {
+    return next(
+      new HttpError(
+        MESSAGES.ERROR.INVALID_TOKEN,
+        MESSAGES.HTTP_STATUS.FORBIDDEN
+      )
+    )
   }
 }
 
@@ -49,7 +60,7 @@ const checkScope = (...requiredScopes) => {
       return next(
         new HttpError(
           `${MESSAGES.ERROR.FORBIDDEN_NO_SCOPES}${req.user.tid}.`,
-          403
+          MESSAGES.HTTP_STATUS.FORBIDDEN
         )
       )
     }
@@ -64,7 +75,7 @@ const checkScope = (...requiredScopes) => {
           `${MESSAGES.ERROR.FORBIDDEN_MISSING_SCOPE}[${requiredScopes.join(
             ', '
           )}].`,
-          403
+          MESSAGES.HTTP_STATUS.FORBIDDEN
         )
       )
     }

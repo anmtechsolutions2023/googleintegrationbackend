@@ -3,8 +3,9 @@
 // Provides functions to log actions and retrieve audit logs with filters.
 
 const db = require('../config/db')
+const config = require('../config/config')
 const { logger } = require('../utils/logger')
-const { QUERIES, STATUSES, DEFAULTS } = require('../config/constants')
+const { QUERIES, STATUSES } = require('../config/constants')
 
 /**
  * Middleware to log user actions after authentication.
@@ -44,8 +45,8 @@ const getAuditLogs = async (filters = {}) => {
     const {
       tenantIds,
       userEmail,
-      limit = DEFAULTS.AUDIT_LIMIT,
-      offset = DEFAULTS.AUDIT_OFFSET,
+      limit = config.AUDIT.DEFAULT_LIMIT,
+      offset = config.AUDIT.DEFAULT_OFFSET,
       isAdmin = isAdmin,
     } = filters
 

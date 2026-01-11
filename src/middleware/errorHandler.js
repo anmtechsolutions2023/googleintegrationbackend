@@ -15,9 +15,12 @@ class HttpError extends Error {
 const errorHandler = (err, req, res, next) => {
   logger.error('Unhandled error:', err)
 
-  const statusCode = err.statusCode || 500
+  const statusCode =
+    err.statusCode || MESSAGES.HTTP_STATUS.INTERNAL_SERVER_ERROR
   const message =
-    statusCode === 500 ? MESSAGES.INFO.INTERNAL_ERROR : err.message
+    statusCode === MESSAGES.HTTP_STATUS.INTERNAL_SERVER_ERROR
+      ? MESSAGES.INFO.INTERNAL_ERROR
+      : err.message
 
   res.status(statusCode).json({
     success: false,

@@ -6,6 +6,7 @@ const { OAuth2Client } = require('google-auth-library')
 const { captureAudit } = require('../utils/logger')
 const jwt = require('jsonwebtoken')
 const db = require('../config/db')
+const config = require('../config/config')
 const { logger } = require('../utils/logger')
 const { QUERIES, STATUSES } = require('../config/constants')
 const MESSAGES = require('../config/messages')
@@ -181,10 +182,10 @@ const generateAppToken = (userPermissions) => {
       tenantId: t.tenant_id,
       isAdmin: t.is_admin === 1 || t.is_admin === true,
     })),
-    iss: 'MyAppServer',
+    iss: MESSAGES.JWT.ISSUER,
   }
 
-  return jwt.sign(appPayload, JWT_SECRET, { expiresIn: '1h' })
+  return jwt.sign(appPayload, JWT_SECRET, { expiresIn: config.JWT.EXPIRATION })
 }
 
 module.exports = {
