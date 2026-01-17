@@ -4,10 +4,11 @@
 const winston = require('winston')
 const db = require('../config/db')
 const config = require('../config/config')
+const { LOG_LEVEL } = require('../config/envConfig')
 const { QUERIES } = require('../config/constants')
 
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || config.LOGGING.DEFAULT_LEVEL,
+  level: LOG_LEVEL,
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),

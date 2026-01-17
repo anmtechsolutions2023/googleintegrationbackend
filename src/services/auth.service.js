@@ -10,9 +10,8 @@ const config = require('../config/config')
 const { logger } = require('../utils/logger')
 const MESSAGES = require('../config/messages')
 const { QUERIES, STATUSES, SCOPES } = require('../config/constants')
+const { GOOGLE_CLIENT_ID, JWT_SECRET } = require('../config/envConfig')
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
-const JWT_SECRET = process.env.JWT_SECRET
 const GOOGLE_OAUTH2_CLIENT = new OAuth2Client(GOOGLE_CLIENT_ID)
 
 /**

@@ -9,12 +9,12 @@ const config = require('./src/config/config')
 const { errorHandler } = require('./src/middleware/errorHandler')
 const { logger } = require('./src/utils/logger')
 const MESSAGES = require('./src/config/messages')
+const { PORT } = require('./src/config/envConfig')
 
 const authRoutes = require('./src/routes/auth.routes')
 const protectedRoutes = require('./src/routes/protected.routes')
 
 const app = express()
-const PORT = process.env.PORT || config.SERVER.DEFAULT_PORT
 
 // Middleware setup
 app.use(cors())

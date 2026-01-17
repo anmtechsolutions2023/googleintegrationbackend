@@ -5,8 +5,7 @@
 const jwt = require('jsonwebtoken')
 const { HttpError } = require('./errorHandler')
 const MESSAGES = require('../config/messages')
-
-const JWT_SECRET = process.env.JWT_SECRET
+const { JWT_SECRET } = require('../config/envConfig')
 
 /**
  * Middleware to authenticate JWT tokens.
