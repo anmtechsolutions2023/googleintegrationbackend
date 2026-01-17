@@ -48,14 +48,13 @@ select * from tenant_features;
 select * from audit_logs;
 
 --
- 
- 
  SELECT 
     ut.tenant_id AS "Tenant ID",
     ut.user_email AS "User Email",
     ut.is_admin AS "Is Admin",
     f.feature_name AS "Feature Name",
     f.scope AS "Access Level",
+    ut.is_super_admin as "Super Admin",
     CASE 
         WHEN ut.is_active = 1 AND tf.is_active = 1 THEN 'Active'
         ELSE 'Disabled'

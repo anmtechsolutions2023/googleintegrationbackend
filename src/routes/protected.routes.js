@@ -10,6 +10,7 @@ const {
 } = require('../middleware/authMiddleware')
 const { auditLog } = require('../middleware/auditLogger')
 const protectedController = require('../controllers/protected.controller')
+const { SCOPES } = require('../config/constants')
 
 /**
  * POST /api/switch-tenant
@@ -18,6 +19,7 @@ const protectedController = require('../controllers/protected.controller')
 router.post(
   '/switch-tenant',
   authenticateToken,
+  auditLog(),
   protectedController.switchTenant
 )
 
@@ -28,7 +30,7 @@ router.post(
 router.get(
   '/data/admin/settings',
   authenticateToken,
-  checkScope('TENANT:ADMIN'),
+  checkScope(SCOPES.TENANT_ADMIN),
   auditLog(),
   protectedController.getAdminSettings
 )
@@ -40,19 +42,19 @@ router.get(
 router.get(
   '/data/reports',
   authenticateToken,
-  checkScope('REPORTS:READ'),
+  checkScope(SCOPES.REPORTS_READ),
   auditLog(),
   protectedController.getReports
 )
 
 /**
  * GET /api/data/billing
- * Requires billing:READ or REPORTS:WRITE scope.
+ * Requires BILLING:READ or REPORTS:WRITE scope.
  */
 router.get(
   '/data/billing',
   authenticateToken,
-  checkScope('billing:READ', 'REPORTS:WRITE'),
+  checkScope(SCOPES.BILLING_READ, SCOPES.REPORTS_WRITE),
   auditLog(),
   protectedController.getBilling
 )

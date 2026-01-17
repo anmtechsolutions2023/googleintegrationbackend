@@ -5,8 +5,8 @@
 const db = require('../config/db')
 const config = require('../config/config')
 const { logger } = require('../utils/logger')
-const { QUERIES } = require('../config/constants')
-const { MESSAGES } = require('../config/messages')
+const { QUERIES, SCOPES } = require('../config/constants')
+const MESSAGES = require('../config/messages')
 const { HttpError } = require('../middleware/errorHandler')
 
 /**
@@ -44,7 +44,7 @@ const switchTenantPermissions = async (
       userEmail
     )
     if (targetTenant.is_admin) {
-      permissions.push('TENANT:ADMIN')
+      permissions.push(SCOPES.TENANT_ADMIN)
     }
 
     logger.info('Tenant switch successful', { userEmail, targetTenantId })

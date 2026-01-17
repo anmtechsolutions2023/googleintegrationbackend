@@ -4,7 +4,7 @@
 module.exports = {
   QUERIES: {
     USER_TENANTS_SELECT:
-      'SELECT tenant_id, is_admin FROM user_tenants WHERE user_email = ? AND is_active = TRUE',
+      'SELECT tenant_id, is_admin, is_super_admin FROM user_tenants WHERE user_email = ? AND is_active = TRUE',
     AUDIT_LOGS_SELECT:
       'SELECT log_id, tenant_id, user_email, action, status, timestamp FROM audit_logs WHERE 1=1',
     AUDIT_LOGS_INSERT:
@@ -39,5 +39,13 @@ module.exports = {
   DEFAULTS: {
     AUDIT_LIMIT: 100,
     AUDIT_OFFSET: 0,
+  },
+  SCOPES: {
+    TENANT_ADMIN: 'TENANT:ADMIN',
+    TENANT_SUPER_ADMIN: 'TENANT:SUPER_ADMIN',
+    REPORTS_READ: 'REPORTS:READ',
+    REPORTS_WRITE: 'REPORTS:WRITE',
+    BILLING_READ: 'billing:READ',
+    BILLING_WRITE: 'billing:WRITE',
   },
 }

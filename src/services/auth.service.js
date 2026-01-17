@@ -8,8 +8,8 @@ const jwt = require('jsonwebtoken')
 const db = require('../config/db')
 const config = require('../config/config')
 const { logger } = require('../utils/logger')
-const { QUERIES, STATUSES } = require('../config/constants')
 const MESSAGES = require('../config/messages')
+const { QUERIES, STATUSES, SCOPES } = require('../config/constants')
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
 const JWT_SECRET = process.env.JWT_SECRET
@@ -90,8 +90,14 @@ const findAndGetPermissions = async (req, userData) => {
       userEmail
     )
 
+    // When user is admin for the tenant, add admin scope
     if (selectedTenant.is_admin) {
-      permissions.push('TENANT:ADMIN')
+      permissions.push(SCOPES.TENANT_ADMIN)
+    }
+
+    // When user is super admin for the tenant, add super admin scope
+    if (selectedTenant.is_super_admin) {
+      permissions.push(SCOPES.TENANT_SUPER_ADMIN)
     }
 
     return {
@@ -149,7 +155,7 @@ const switchTenantPermissions = async (
     )
 
     if (targetTenant.is_admin) {
-      permissions.push('TENANT:ADMIN')
+      permissions.push(SCOPES.TENANT_ADMIN)
     }
 
     return {

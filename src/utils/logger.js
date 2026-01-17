@@ -45,7 +45,7 @@ const captureAudit = async (req, tenantId, email, action, status) => {
       status,
       ip,
     ])
-    // logger.info('Audit log captured', { tenantId, email, action, status, ip })
+    logger.info('Audit log captured', { tenantId, email, action, status, ip })
   } catch (err) {
     logger.error('Critical Audit Log Failure:', err)
   }
