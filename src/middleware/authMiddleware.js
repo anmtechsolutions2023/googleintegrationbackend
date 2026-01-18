@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken')
 const { HttpError } = require('./errorHandler')
 const MESSAGES = require('../config/messages')
 const { JWT_SECRET } = require('../config/envConfig')
+const { SCOPES } = require('../config/constants')
 
 /**
  * Middleware to authenticate JWT tokens.
@@ -53,7 +54,7 @@ const authenticateToken = (req, res, next) => {
  */
 const checkScope = (...requiredScopes) => {
   return (req, res, next) => {
-    const userScopes = req.user.scopes
+    const userScopes = req.user && req.user.scopes
 
     if (!userScopes || userScopes.length === 0) {
       return next(
@@ -64,10 +65,15 @@ const checkScope = (...requiredScopes) => {
       )
     }
 
+    // Super admin bypass: a scope like TENANT:SUPER_ADMIN grants all access
+    if (userScopes.includes(SCOPES.TENANT_SUPER_ADMIN)) {
+      return next()
+    }
+
     const hasAccess = requiredScopes.some((scope) => userScopes.includes(scope))
 
     if (hasAccess) {
-      next()
+      return next()
     } else {
       return next(
         new HttpError(
