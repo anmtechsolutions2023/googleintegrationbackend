@@ -1,4 +1,4 @@
-Run run this application:
+Run run this application/s:
 
 1. Db up and running, table used: user_tenants, features, tenant_features
 2. .env file should have all the values
