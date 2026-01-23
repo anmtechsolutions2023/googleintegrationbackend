@@ -1,0 +1,82 @@
+// src/modules/tenant/tenant.service.js
+// Service layer for tenant operations.
+// Handles tenant switching and permission management.
+
+const db = require('../../config/db');
+const { logger } = require('../../utils/logger');
+const { QUERIES, SCOPES } = require('../../config/constants');
+const MESSAGES = require('../../config/messages');
+const { HttpError } = require('../../middleware/errorHandler');
+
+/**
+ * Switches tenant permissions for an authenticated user.
+ * @param {Object} req - Express request object.
+ * @param {string} userEmail - User email.
+ * @param {string} targetTenantId - Target tenant ID.
+ * @param {string} userName - User name.
+ * @returns {Promise<Object>} New permissions object.
+ */
+const switchTenantPermissions = async (
+  req,
+  userEmail,
+  targetTenantId,
+  userName
+) => {
+  logger.info('Switching tenant permissions', { userEmail, targetTenantId });
+
+  const connection = await db.getConnection();
+  try {
+    const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS_SELECT, [
+      userEmail,
+    ]);
+
+    const targetTenant = tenantRows.find((t) => t.tenant_id === targetTenantId);
+    if (!targetTenant) {
+      logger.warn('Tenant access denied', { userEmail, targetTenantId });
+      throw new HttpError(MESSAGES.ERROR.TENANT_ACCESS_DENIED, 403);
+    }
+
+    // Fetch permissions
+    const permissions = await getScopesForTenant(
+      connection,
+      targetTenantId,
+      userEmail
+    );
+    if (targetTenant.is_admin) {
+      permissions.push(SCOPES.TENANT_ADMIN);
+    }
+
+    logger.info('Tenant switch successful', { userEmail, targetTenantId });
+    return {
+      email: userEmail,
+      name: userName,
+      tenantId: targetTenantId,
+      permissions,
+      associatedTenants: tenantRows,
+    };
+  } catch (error) {
+    logger.error('Switch tenant error', error);
+    throw error;
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * Helper: Fetches scopes for a tenant.
+ * @param {Object} connection - DB connection.
+ * @param {string} tenantId - Tenant ID.
+ * @param {string} userEmail - User email.
+ * @returns {Promise<string[]>} Array of scopes.
+ */
+const getScopesForTenant = async (connection, tenantId, userEmail) => {
+  const [featureRows] = await connection.execute(QUERIES.PERMISSIONS_SELECT, [
+    tenantId,
+    userEmail,
+  ]);
+  return featureRows.map((row) => `${row.feature_short_name}:${row.scope}`);
+};
+
+module.exports = {
+  switchTenantPermissions,
+};
