@@ -2,10 +2,10 @@
 // Middleware for logging user actions to audit logs.
 // Provides functions to log actions and retrieve audit logs with filters.
 
-const db = require('../config/db')
-const config = require('../config/config')
-const { logger } = require('../utils/logger')
-const { QUERIES, STATUSES } = require('../config/constants')
+const db = require('../config/db');
+const config = require('../config/config');
+const { logger } = require('../utils/logger');
+const { QUERIES, STATUSES } = require('../config/constants');
 
 /**
  * Middleware to log user actions after authentication.
@@ -13,22 +13,22 @@ const { QUERIES, STATUSES } = require('../config/constants')
  */
 const auditLog = () => {
   return async (req, res, next) => {
-    const { email, tid } = req.user
-    const action = `${req.method} ${req.path}`
+    const { email, tid } = req.user;
+    const action = `${req.method} ${req.path}`;
 
     try {
-      await db.execute(QUERIES.AUDIT_LOGS_MIDDLEWARE, [
+      await db.execute(QUERIES.AUDIT_LOGS.INSERT_MIDDLEWARE, [
         tid,
         email,
         action,
         STATUSES.SUCCESS,
-      ])
+      ]);
     } catch (err) {
-      logger.error('Audit Logging Failed', err)
+      logger.error('Audit Logging Failed', err);
     }
-    next()
-  }
-}
+    next();
+  };
+};
 
 /**
  * Retrieves audit logs from the database with optional filters.
@@ -40,7 +40,7 @@ const auditLog = () => {
  * @returns {Promise<Array>} Array of audit log records.
  */
 const getAuditLogs = async (filters = {}) => {
-  const connection = await db.getConnection()
+  const connection = await db.getConnection();
   try {
     const {
       tenantIds,
@@ -48,42 +48,42 @@ const getAuditLogs = async (filters = {}) => {
       limit = config.AUDIT.DEFAULT_LIMIT,
       offset = config.AUDIT.DEFAULT_OFFSET,
       isAdmin = isAdmin,
-    } = filters
+    } = filters;
 
-    let query = QUERIES.AUDIT_LOGS_SELECT
+    let query = QUERIES.AUDIT_LOGS.SELECT;
 
-    const params = []
+    const params = [];
 
     if (tenantIds && tenantIds.length > 0) {
       if (tenantIds.length === 1) {
-        query += ' AND tenant_id = ?'
+        query += ' AND tenant_id = ?';
       } else {
-        query += ` AND tenant_id IN (${tenantIds.map(() => '?').join(', ')})`
+        query += ` AND tenant_id IN (${tenantIds.map(() => '?').join(', ')})`;
       }
-      params.push(...tenantIds)
+      params.push(...tenantIds);
     }
 
     if (!isAdmin && userEmail) {
-      query += ' AND user_email = ?'
-      params.push(userEmail)
+      query += ' AND user_email = ?';
+      params.push(userEmail);
     }
 
-    query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
-    params.push(limit, offset)
+    query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
 
     // console.log('Final Audit Logs Query:', query)
 
-    const [rows] = await connection.query(query, params)
-    return rows
+    const [rows] = await connection.query(query, params);
+    return rows;
   } catch (err) {
-    logger.error('Failed to retrieve audit logs', err)
-    throw err
+    logger.error('Failed to retrieve audit logs', err);
+    throw err;
   } finally {
-    connection.release()
+    connection.release();
   }
-}
+};
 
 module.exports = {
   auditLog,
   getAuditLogs,
-}
+};

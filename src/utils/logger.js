@@ -1,11 +1,11 @@
 // src/utils/logger.js
 // Centralized logging using Winston for better production logging
 
-const winston = require('winston')
-const db = require('../config/db')
-const config = require('../config/config')
-const { LOG_LEVEL } = require('../config/envConfig')
-const { QUERIES } = require('../config/constants')
+const winston = require('winston');
+const db = require('../config/db');
+const config = require('../config/config');
+const { LOG_LEVEL } = require('../config/envConfig');
+const { QUERIES } = require('../config/constants');
 
 const logger = winston.createLogger({
   level: LOG_LEVEL,
@@ -21,7 +21,7 @@ const logger = winston.createLogger({
     // Add file transport if needed
     // new winston.transports.File({ filename: 'error.log', level: 'error' }),
   ],
-})
+});
 
 /**
  * Captures audit logs to database and logs to Winston.
@@ -36,20 +36,20 @@ const captureAudit = async (req, tenantId, email, action, status) => {
   const ip =
     req.headers['x-forwarded-for']?.split(',')[0] ||
     req.socket.remoteAddress ||
-    config.AUDIT.DEFAULT_IP
+    config.AUDIT.DEFAULT_IP;
 
   try {
-    await db.execute(QUERIES.AUDIT_LOGS_INSERT, [
+    await db.execute(QUERIES.AUDIT_LOGS.INSERT, [
       tenantId || null,
       email,
       action,
       status,
       ip,
-    ])
-    logger.info('Audit log captured', { tenantId, email, action, status, ip })
+    ]);
+    logger.info('Audit log captured', { tenantId, email, action, status, ip });
   } catch (err) {
-    logger.error('Critical Audit Log Failure:', err)
+    logger.error('Critical Audit Log Failure:', err);
   }
-}
+};
 
-module.exports = { logger, captureAudit }
+module.exports = { logger, captureAudit };

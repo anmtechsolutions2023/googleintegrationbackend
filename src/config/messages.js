@@ -29,6 +29,9 @@ module.exports = {
     VALIDATION_ERROR: 'Validation error: ',
     INVALID_TOKEN_PAYLOAD: 'Token payload missing tenant ID or scopes.',
     MISSING_AUTHORIZATION_HEADER: 'Missing authorization header.',
+    // Database
+    DATABASE_ERROR: 'Database operation failed.',
+    NOT_FOUND: 'Resource not found.',
     // Rate Limiting
     RATE_LIMIT_EXCEEDED:
       'Too many authentication attempts, please try again later.',
@@ -42,6 +45,7 @@ module.exports = {
   HTTP_STATUS: {
     OK: 200,
     CREATED: 201,
+    NO_CONTENT: 204,
     BAD_REQUEST: 400,
     UNAUTHORIZED: 401,
     FORBIDDEN: 403,
@@ -58,4 +62,4 @@ module.exports = {
     AUTHORIZATION: 'authorization',
     BEARER_SPLIT_INDEX: 1,
   },
-}
+};

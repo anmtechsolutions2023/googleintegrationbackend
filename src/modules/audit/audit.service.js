@@ -26,7 +26,7 @@ const getAuditLogs = async (filters = {}) => {
       offset = config.AUDIT.DEFAULT_OFFSET,
     } = filters;
 
-    let query = QUERIES.AUDIT_LOGS_SELECT;
+    let query = QUERIES.AUDIT_LOGS.SELECT;
     const params = [];
 
     if (tenantIds && tenantIds.length > 0) {
@@ -67,7 +67,7 @@ const getAuditLogs = async (filters = {}) => {
 const getUserTenants = async (userEmail) => {
   const connection = await db.getConnection();
   try {
-    const [rows] = await connection.execute(QUERIES.USER_TENANTS_SELECT, [
+    const [rows] = await connection.execute(QUERIES.USER_TENANTS.SELECT, [
       userEmail,
     ]);
     return rows;

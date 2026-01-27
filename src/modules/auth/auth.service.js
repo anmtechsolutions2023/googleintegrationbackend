@@ -23,7 +23,7 @@ const validateGoogleToken = async (idToken) => {
   try {
     logger.info('Validating Google ID token...');
     logger.info(`Expected audience (client ID): ${GOOGLE_CLIENT_ID}`);
-    
+
     const ticket = await GOOGLE_OAUTH2_CLIENT.verifyIdToken({
       idToken: idToken,
       audience: GOOGLE_CLIENT_ID,
@@ -55,7 +55,7 @@ const validateGoogleToken = async (idToken) => {
  * @returns {Promise<string[]>} Array of scopes.
  */
 const getScopesForTenant = async (connection, tenantId, userEmail) => {
-  const [featureRows] = await connection.execute(QUERIES.PERMISSIONS_SELECT, [
+  const [featureRows] = await connection.execute(QUERIES.PERMISSIONS.SELECT, [
     tenantId,
     userEmail,
   ]);
@@ -73,7 +73,7 @@ const findAndGetPermissions = async (req, userData) => {
   try {
     const userEmail = userData.email;
 
-    const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS_SELECT, [
+    const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS.SELECT, [
       userEmail,
     ]);
 
@@ -138,7 +138,7 @@ const switchTenantPermissions = async (
 ) => {
   const connection = await db.getConnection();
   try {
-    const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS_SELECT, [
+    const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS.SELECT, [
       userEmail,
     ]);
 

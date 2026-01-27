@@ -8,6 +8,7 @@ const reportsRoutes = require('../modules/reports/reports.routes');
 const dataRoutes = require('../modules/data/data.routes');
 const auditRoutes = require('../modules/audit/audit.routes');
 const userRoutes = require('../modules/user/user.routes');
+const taxtypeRoutes = require('../modules/taxtype/taxtype.routes');
 
 /**
  * Registers all application routes with the Express app.
@@ -32,6 +33,9 @@ const registerRoutes = (app) => {
   // User module - User operations (logout, profile)
   app.use('/api/user', userRoutes);
 
+  // Tax Type module - Tax type CRUD operations
+  app.use('/api/taxtypes', taxtypeRoutes);
+
   // Health check / root endpoint
   app.get('/', (req, res) => {
     res.json({
@@ -45,6 +49,7 @@ const registerRoutes = (app) => {
         { name: 'data', path: '/api/data' },
         { name: 'audit', path: '/api/audit' },
         { name: 'user', path: '/api/user' },
+        { name: 'taxtypes', path: '/api/taxtypes' },
       ],
     });
   });
