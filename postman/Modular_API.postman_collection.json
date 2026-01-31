@@ -1,277 +1,449 @@
 {
-	"info": {
-		"_postman_id": "google-auth-modular-api",
-		"name": "Google Auth API - Modular Structure",
-		"description": "Updated collection for refactored modular architecture with new endpoint structure",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-	},
-	"variable": [
-		{
-			"key": "base_url",
-			"value": "http://localhost:3001",
-			"type": "string"
-		},
-		{
-			"key": "app_token",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "google_id_token",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "tenant_id",
-			"value": "",
-			"type": "string"
-		}
-	],
-	"item": [
-		{
-			"name": "Auth Module",
-			"item": [
-				{
-					"name": "Google Sign-In",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 200) {",
-									"    var jsonData = pm.response.json();",
-									"    if (jsonData.success && jsonData.token) {",
-									"        pm.collectionVariables.set('app_token', jsonData.token);",
-									"        console.log('✅ Token saved');",
-									"    }",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"id_token\": \"{{google_id_token}}\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/google",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "google"]
-						}
-					}
-				}
-			]
-		},
-		{
-			"name": "Tenant Module",
-			"item": [
-				{
-					"name": "Switch Tenant",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{app_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"tenantId\": \"{{tenant_id}}\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/tenants/switch",
-							"host": ["{{base_url}}"],
-							"path": ["api", "tenants", "switch"]
-						},
-						"description": "Switch to a different tenant context. Returns new JWT token."
-					}
-				}
-			]
-		},
-		{
-			"name": "Reports Module",
-			"item": [
-				{
-					"name": "Get Reports",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{app_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/reports",
-							"host": ["{{base_url}}"],
-							"path": ["api", "reports"]
-						},
-						"description": "Requires REPORTS:READ scope"
-					}
-				},
-				{
-					"name": "Get Billing",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{app_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/reports/billing",
-							"host": ["{{base_url}}"],
-							"path": ["api", "reports", "billing"]
-						},
-						"description": "Requires BILLING:READ or REPORTS:WRITE scope"
-					}
-				}
-			]
-		},
-		{
-			"name": "Data Module",
-			"item": [
-				{
-					"name": "Get Admin Settings",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{app_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/data/settings",
-							"host": ["{{base_url}}"],
-							"path": ["api", "data", "settings"]
-						},
-						"description": "Requires TENANT:ADMIN scope"
-					}
-				},
-				{
-					"name": "Get General Data",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{app_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/data/general",
-							"host": ["{{base_url}}"],
-							"path": ["api", "data", "general"]
-						},
-						"description": "Accessible to any authenticated user"
-					}
-				}
-			]
-		},
-		{
-			"name": "Audit Module",
-			"item": [
-				{
-					"name": "Get Audit Logs",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{app_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/audit/logs?userEmail=",
-							"host": ["{{base_url}}"],
-							"path": ["api", "audit", "logs"],
-							"query": [
-								{
-									"key": "userEmail",
-									"value": "",
-									"description": "Optional: filter by user email (admin only)"
-								}
-							]
-						},
-						"description": "Get audit logs. Admins can filter by userEmail."
-					}
-				}
-			]
-		},
-		{
-			"name": "User Module",
-			"item": [
-				{
-					"name": "Logout",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{app_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/user/logout",
-							"host": ["{{base_url}}"],
-							"path": ["api", "user", "logout"]
-						},
-						"description": "Logout user (client should remove JWT)"
-					}
-				}
-			]
-		}
-	]
+  "info": {
+    "_postman_id": "google-auth-modular-api",
+    "name": "Google Auth API - Modular Structure",
+    "description": "Updated collection for refactored modular architecture with new endpoint structure",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3001",
+      "type": "string"
+    },
+    {
+      "key": "app_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "google_id_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tenant_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tax_type_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth Module",
+      "item": [
+        {
+          "name": "Google Sign-In",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.success && jsonData.token) {",
+                  "        pm.collectionVariables.set('app_token', jsonData.token);",
+                  "        console.log('✅ Token saved');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"id_token\": \"{{google_id_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/google",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "google"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tenant Module",
+      "item": [
+        {
+          "name": "Switch Tenant",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"tenantId\": \"{{tenant_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/tenants/switch",
+              "host": ["{{base_url}}"],
+              "path": ["api", "tenants", "switch"]
+            },
+            "description": "Switch to a different tenant context. Returns new JWT token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reports Module",
+      "item": [
+        {
+          "name": "Get Reports",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/reports",
+              "host": ["{{base_url}}"],
+              "path": ["api", "reports"]
+            },
+            "description": "Requires REPORTS:READ scope"
+          }
+        },
+        {
+          "name": "Get Billing",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/reports/billing",
+              "host": ["{{base_url}}"],
+              "path": ["api", "reports", "billing"]
+            },
+            "description": "Requires BILLING:READ or REPORTS:WRITE scope"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Data Module",
+      "item": [
+        {
+          "name": "Get Admin Settings",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/data/settings",
+              "host": ["{{base_url}}"],
+              "path": ["api", "data", "settings"]
+            },
+            "description": "Requires TENANT:ADMIN scope"
+          }
+        },
+        {
+          "name": "Get General Data",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/data/general",
+              "host": ["{{base_url}}"],
+              "path": ["api", "data", "general"]
+            },
+            "description": "Accessible to any authenticated user"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit Module",
+      "item": [
+        {
+          "name": "Get Audit Logs",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/logs?userEmail=",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "logs"],
+              "query": [
+                {
+                  "key": "userEmail",
+                  "value": "",
+                  "description": "Optional: filter by user email (admin only)"
+                }
+              ]
+            },
+            "description": "Get audit logs. Admins can filter by userEmail."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Taxtype Module",
+      "item": [
+        {
+          "name": "Get All Tax Types",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/taxtypes?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxtypes"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Items per page (default: 10, max: 100)"
+                }
+              ]
+            },
+            "description": "Get all tax types for the authenticated user's tenant with pagination support"
+          }
+        },
+        {
+          "name": "Get Tax Type by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/taxtypes/{{tax_type_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxtypes", "{{tax_type_id}}"]
+            },
+            "description": "Get a specific tax type by its UUID"
+          }
+        },
+        {
+          "name": "Create Tax Type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.success && jsonData.data && jsonData.data.Id) {",
+                  "        pm.collectionVariables.set('tax_type_id', jsonData.data.Id);",
+                  "        console.log('✅ Tax Type ID saved:', jsonData.data.Id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Standard VAT\",\n    \"Value\": 20.00,\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/taxtypes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxtypes"]
+            },
+            "description": "Create a new tax type. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope. Name is required (max 100 chars), Value is required (0-100%), Active defaults to true."
+          }
+        },
+        {
+          "name": "Update Tax Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Updated VAT Rate\",\n    \"Value\": 21.00,\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/taxtypes/{{tax_type_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxtypes", "{{tax_type_id}}"]
+            },
+            "description": "Update an existing tax type. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope. At least one field must be provided."
+          }
+        },
+        {
+          "name": "Delete Tax Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/taxtypes/{{tax_type_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxtypes", "{{tax_type_id}}"]
+            },
+            "description": "Delete a tax type by ID. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope."
+          }
+        }
+      ]
+    },
+    {
+      "name": "User Module",
+      "item": [
+        {
+          "name": "Logout",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/user/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "user", "logout"]
+            },
+            "description": "Logout user (client should remove JWT)"
+          }
+        }
+      ]
+    }
+  ]
 }
