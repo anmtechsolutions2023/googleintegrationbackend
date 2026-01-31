@@ -35,6 +35,8 @@ module.exports = {
     // Rate Limiting
     RATE_LIMIT_EXCEEDED:
       'Too many authentication attempts, please try again later.',
+    // Duplicate Entry
+    DUPLICATE_ENTRY: 'A record with this value already exists.',
   },
   INFO: {
     SERVER_RUNNING: 'Server is running on port ',
@@ -50,6 +52,7 @@ module.exports = {
     UNAUTHORIZED: 401,
     FORBIDDEN: 403,
     NOT_FOUND: 404,
+    CONFLICT: 409,
     INTERNAL_SERVER_ERROR: 500,
   },
   // JWT Configuration
