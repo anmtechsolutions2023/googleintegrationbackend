@@ -44,7 +44,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM TaxTypes WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM TaxTypes WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO TaxTypes (Id, TenantId, Name, Value, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO TaxTypes (Id, TenantId, Name, Value, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE TaxTypes SET Name = ?, Value = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM TaxTypes WHERE Id = ? AND TenantId = ?',
@@ -57,7 +57,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM UOM WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM UOM WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO UOM (Id, TenantId, UnitName, IsPrimary, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO UOM (Id, TenantId, UnitName, IsPrimary, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE UOM SET UnitName = ?, IsPrimary = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM UOM WHERE Id = ? AND TenantId = ?',
@@ -71,7 +71,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM CategoryDetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO CategoryDetail (Id, TenantId, Name, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO CategoryDetail (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE CategoryDetail SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM CategoryDetail WHERE Id = ? AND TenantId = ?',
@@ -86,7 +86,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM transactiontypeconfig WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO transactiontypeconfig (Id, TenantId, StartCounterNo, Prefix, Format, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO transactiontypeconfig (Id, TenantId, StartCounterNo, Prefix, Format, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE transactiontypeconfig SET StartCounterNo = ?, Prefix = ?, Format = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactiontypeconfig WHERE Id = ? AND TenantId = ?',
@@ -101,7 +101,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM organizationdetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO organizationdetail (Id, TenantId, Name, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO organizationdetail (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE organizationdetail SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM organizationdetail WHERE Id = ? AND TenantId = ?',
@@ -114,7 +114,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM uomfactor WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM uomfactor WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO uomfactor (Id, TenantId, PrimaryUOMId, SecondaryUOMId, Factor, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO uomfactor (Id, TenantId, PrimaryUOMId, SecondaryUOMId, Factor, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE uomfactor SET PrimaryUOMId = ?, SecondaryUOMId = ?, Factor = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM uomfactor WHERE Id = ? AND TenantId = ?',
@@ -128,7 +128,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM accounttypebase WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO accounttypebase (Id, TenantId, Name, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO accounttypebase (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE accounttypebase SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM accounttypebase WHERE Id = ? AND TenantId = ?',
@@ -143,7 +143,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM transactiontypestatus WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO transactiontypestatus (Id, TenantId, Name, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO transactiontypestatus (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE transactiontypestatus SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactiontypestatus WHERE Id = ? AND TenantId = ?',
@@ -158,7 +158,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM contactaddresstype WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO contactaddresstype (Id, TenantId, Name, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO contactaddresstype (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE contactaddresstype SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM contactaddresstype WHERE Id = ? AND TenantId = ?',
@@ -171,7 +171,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM taxgroup WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM taxgroup WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO taxgroup (Id, TenantId, Name, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO taxgroup (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE taxgroup SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM taxgroup WHERE Id = ? AND TenantId = ?',
@@ -186,7 +186,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM taxgrouptaxtypemapper WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO taxgrouptaxtypemapper (Id, TenantId, TaxGroupId, TaxTypeId, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO taxgrouptaxtypemapper (Id, TenantId, TaxGroupId, TaxTypeId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE taxgrouptaxtypemapper SET TaxGroupId = ?, TaxTypeId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM taxgrouptaxtypemapper WHERE Id = ? AND TenantId = ?',
@@ -199,7 +199,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM mapprovider WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM mapprovider WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO mapprovider (Id, TenantId, ProviderName, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO mapprovider (Id, TenantId, ProviderName, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE mapprovider SET ProviderName = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM mapprovider WHERE Id = ? AND TenantId = ?',
@@ -213,7 +213,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM locationdetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO locationdetail (Id, TenantId, Lat, Lng, CF1, CF2, CF3, CF4, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO locationdetail (Id, TenantId, Lat, Lng, CF1, CF2, CF3, CF4, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE locationdetail SET Lat = ?, Lng = ?, CF1 = ?, CF2 = ?, CF3 = ?, CF4 = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM locationdetail WHERE Id = ? AND TenantId = ?',
@@ -228,7 +228,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM mapproviderlocationmapper WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO mapproviderlocationmapper (Id, TenantId, MapProviderId, LocationDetailId, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO mapproviderlocationmapper (Id, TenantId, MapProviderId, LocationDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE mapproviderlocationmapper SET MapProviderId = ?, LocationDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE:
@@ -242,7 +242,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM contactdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM contactdetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO contactdetail (Id, TenantId, FirstName, LastName, MobileNo, AltMobileNo, Landline1, LandLine2, Ext1, Ext2, ContactAddressTypeId, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO contactdetail (Id, TenantId, FirstName, LastName, MobileNo, AltMobileNo, Landline1, LandLine2, Ext1, Ext2, ContactAddressTypeId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE contactdetail SET FirstName = ?, LastName = ?, MobileNo = ?, AltMobileNo = ?, Landline1 = ?, LandLine2 = ?, Ext1 = ?, Ext2 = ?, ContactAddressTypeId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM contactdetail WHERE Id = ? AND TenantId = ?',
@@ -255,7 +255,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM addressdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM addressdetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO addressdetail (Id, TenantId, AddressLine1, AddressLine2, City, State, Pincode, MapProviderLocationMapperId, Landmark, ContactAddressTypeId, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO addressdetail (Id, TenantId, AddressLine1, AddressLine2, City, State, Pincode, MapProviderLocationMapperId, Landmark, ContactAddressTypeId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE addressdetail SET AddressLine1 = ?, AddressLine2 = ?, City = ?, State = ?, Pincode = ?, MapProviderLocationMapperId = ?, Landmark = ?, ContactAddressTypeId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM addressdetail WHERE Id = ? AND TenantId = ?',
@@ -268,7 +268,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM costinfo WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM costinfo WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO costinfo (Id, TenantId, Amount, TaxGroupId, IsTaxIncluded, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO costinfo (Id, TenantId, Amount, TaxGroupId, IsTaxIncluded, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE costinfo SET Amount = ?, TaxGroupId = ?, IsTaxIncluded = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM costinfo WHERE Id = ? AND TenantId = ?',
@@ -281,7 +281,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM branchdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM branchdetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO branchdetail (Id, TenantId, Name, AddressDetailId, ContactDetailId, OrganizationId, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO branchdetail (Id, TenantId, Name, AddressDetailId, ContactDetailId, OrganizationId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE branchdetail SET Name = ?, AddressDetailId = ?, ContactDetailId = ?, OrganizationId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM branchdetail WHERE Id = ? AND TenantId = ?',
@@ -296,7 +296,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM branchusergroupmapper WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO branchusergroupmapper (Id, TenantId, BranchId, UserGroupId, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO branchusergroupmapper (Id, TenantId, BranchId, UserGroupId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE branchusergroupmapper SET BranchId = ?, UserGroupId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM branchusergroupmapper WHERE Id = ? AND TenantId = ?',
@@ -309,7 +309,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM batchdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM batchdetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO batchdetail (Id, TenantId, BatchNumber, ManufacturedDate, ExpiryDate, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO batchdetail (Id, TenantId, BatchNumber, ManufacturedDate, ExpiryDate, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE batchdetail SET BatchNumber = ?, ManufacturedDate = ?, ExpiryDate = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM batchdetail WHERE Id = ? AND TenantId = ?',
@@ -322,7 +322,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM itemdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM itemdetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO itemdetail (Id, TenantId, Name, Code, Description, CategoryId, UOMId, CostInfoId, SKU, Barcode, HSNCode, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO itemdetail (Id, TenantId, Name, Code, Description, CategoryId, UOMId, CostInfoId, SKU, Barcode, HSNCode, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE itemdetail SET Name = ?, Code = ?, Description = ?, CategoryId = ?, UOMId = ?, CostInfoId = ?, SKU = ?, Barcode = ?, HSNCode = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM itemdetail WHERE Id = ? AND TenantId = ?',
@@ -337,7 +337,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM transactiontypebaseconversion WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO transactiontypebaseconversion (Id, TenantId, TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO transactiontypebaseconversion (Id, TenantId, TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE transactiontypebaseconversion SET TransactionTypeConfigId = ?, FromTransactionTypeStatusId = ?, ToTransactionTypeStatusId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE:
@@ -353,7 +353,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM transactiondetaillog WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO transactiondetaillog (Id, TenantId, TransactionNo, TransactionTypeConfigId, TransactionTypeStatusId, BranchId, TransactionDate, Remarks, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO transactiondetaillog (Id, TenantId, TransactionNo, TransactionTypeConfigId, TransactionTypeStatusId, BranchId, TransactionDate, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE transactiondetaillog SET TransactionNo = ?, TransactionTypeConfigId = ?, TransactionTypeStatusId = ?, BranchId = ?, TransactionDate = ?, Remarks = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactiondetaillog WHERE Id = ? AND TenantId = ?',
@@ -368,7 +368,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM transactionitemdetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, ItemDetailId, BatchDetailId, Quantity, UOMId, Rate, Amount, TaxGroupId, TaxAmount, DiscountAmount, NetAmount, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, ItemDetailId, BatchDetailId, Quantity, UOMId, Rate, Amount, TaxGroupId, TaxAmount, DiscountAmount, NetAmount, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE transactionitemdetail SET TransactionDetailLogId = ?, ItemDetailId = ?, BatchDetailId = ?, Quantity = ?, UOMId = ?, Rate = ?, Amount = ?, TaxGroupId = ?, TaxAmount = ?, DiscountAmount = ?, NetAmount = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactionitemdetail WHERE Id = ? AND TenantId = ?',
@@ -383,7 +383,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM transactiontypeconversionmapper WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO transactiontypeconversionmapper (Id, TenantId, TransactionTypeBaseConversionId, FromTransactionDetailLogId, ToTransactionDetailLogId, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO transactiontypeconversionmapper (Id, TenantId, TransactionTypeBaseConversionId, FromTransactionDetailLogId, ToTransactionDetailLogId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE transactiontypeconversionmapper SET TransactionTypeBaseConversionId = ?, FromTransactionDetailLogId = ?, ToTransactionDetailLogId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE:
@@ -399,7 +399,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM paymentreceivedtype WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO paymentreceivedtype (Id, TenantId, Name, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO paymentreceivedtype (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE paymentreceivedtype SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentreceivedtype WHERE Id = ? AND TenantId = ?',
@@ -412,7 +412,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM paymentmode WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM paymentmode WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO paymentmode (Id, TenantId, Name, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO paymentmode (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE paymentmode SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentmode WHERE Id = ? AND TenantId = ?',
@@ -427,7 +427,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM paymentmodetransactiondetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO paymentmodetransactiondetail (Id, TenantId, PaymentModeId, TransactionDetailLogId, Amount, ReferenceNo, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO paymentmodetransactiondetail (Id, TenantId, PaymentModeId, TransactionDetailLogId, Amount, ReferenceNo, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE paymentmodetransactiondetail SET PaymentModeId = ?, TransactionDetailLogId = ?, Amount = ?, ReferenceNo = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE:
@@ -441,7 +441,7 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM paymentdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM paymentdetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO paymentdetail (Id, TenantId, PaymentReceivedTypeId, TransactionDetailLogId, Amount, PaymentDate, ReferenceNo, Remarks, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO paymentdetail (Id, TenantId, PaymentReceivedTypeId, TransactionDetailLogId, Amount, PaymentDate, ReferenceNo, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE paymentdetail SET PaymentReceivedTypeId = ?, TransactionDetailLogId = ?, Amount = ?, PaymentDate = ?, ReferenceNo = ?, Remarks = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentdetail WHERE Id = ? AND TenantId = ?',
@@ -455,7 +455,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM paymentbreakup WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO paymentbreakup (Id, TenantId, PaymentDetailId, PaymentModeId, Amount, ReferenceNo, Remarks, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO paymentbreakup (Id, TenantId, PaymentDetailId, PaymentModeId, Amount, ReferenceNo, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE paymentbreakup SET PaymentDetailId = ?, PaymentModeId = ?, Amount = ?, ReferenceNo = ?, Remarks = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentbreakup WHERE Id = ? AND TenantId = ?',
@@ -469,7 +469,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM transactiontype WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO transactiontype (Id, TenantId, Name, Description, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO transactiontype (Id, TenantId, Name, Description, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE transactiontype SET Name = ?, Description = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactiontype WHERE Id = ? AND TenantId = ?',
@@ -483,7 +483,7 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM accounttypebase WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO accounttypebase (Id, TenantId, Name, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO accounttypebase (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE accounttypebase SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM accounttypebase WHERE Id = ? AND TenantId = ?',
