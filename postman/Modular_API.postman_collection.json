@@ -35,6 +35,16 @@
       "key": "uom_id",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "category_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "record_id",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -585,6 +595,2978 @@
               "path": ["api", "uom", "{{uom_id}}"]
             },
             "description": "Delete a unit of measure by ID. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Category Module",
+      "item": [
+        {
+          "name": "Get All Categories",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Items per page (default: 10, max: 100)"
+                }
+              ]
+            },
+            "description": "Get all categories for the authenticated user's tenant with pagination support"
+          }
+        },
+        {
+          "name": "Get Category by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories/{{category_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories", "{{category_id}}"]
+            },
+            "description": "Get a specific category by its UUID"
+          }
+        },
+        {
+          "name": "Create Category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.success && jsonData.data && jsonData.data.Id) {",
+                  "        pm.collectionVariables.set('category_id', jsonData.data.Id);",
+                  "        console.log('✅ Category ID saved:', jsonData.data.Id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Electronics\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/categories",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories"]
+            },
+            "description": "Create a new category. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope. Name is required (max 100 chars), Active defaults to true."
+          }
+        },
+        {
+          "name": "Update Category",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Updated Electronics\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/categories/{{category_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories", "{{category_id}}"]
+            },
+            "description": "Update an existing category. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope. At least one field must be provided."
+          }
+        },
+        {
+          "name": "Delete Category",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories/{{category_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "categories", "{{category_id}}"]
+            },
+            "description": "Delete a category by ID. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transaction Type Config Module",
+      "item": [
+        {
+          "name": "Get All Transaction Type Configs",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypeconfigs?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypeconfigs"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction Type Config by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypeconfigs/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypeconfigs", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction Type Config",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"StartCounterNo\": 1,\n    \"Prefix\": \"INV\",\n    \"Format\": \"INV-{YYYY}-{0000}\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypeconfigs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypeconfigs"]
+            }
+          }
+        },
+        {
+          "name": "Update Transaction Type Config",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Prefix\": \"INV-NEW\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypeconfigs/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypeconfigs", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Transaction Type Config",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypeconfigs/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypeconfigs", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Organization Module",
+      "item": [
+        {
+          "name": "Get All Organizations",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/organizations?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "organizations"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Organization by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/organizations/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "organizations", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Organization",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Acme Corporation\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/organizations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "organizations"]
+            }
+          }
+        },
+        {
+          "name": "Update Organization",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Acme Corp Updated\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/organizations/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "organizations", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Organization",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/organizations/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "organizations", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "UOM Factor Module",
+      "item": [
+        {
+          "name": "Get All UOM Factors",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/uomfactors?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "uomfactors"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get UOM Factor by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/uomfactors/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "uomfactors", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create UOM Factor",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"PrimaryUOMId\": \"uuid-here\",\n    \"SecondaryUOMId\": \"uuid-here\",\n    \"Factor\": 1000,\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/uomfactors",
+              "host": ["{{base_url}}"],
+              "path": ["api", "uomfactors"]
+            }
+          }
+        },
+        {
+          "name": "Update UOM Factor",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Factor\": 500,\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/uomfactors/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "uomfactors", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete UOM Factor",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/uomfactors/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "uomfactors", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Account Type Module",
+      "item": [
+        {
+          "name": "Get All Account Types",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/accounttypes?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "accounttypes"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Account Type by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/accounttypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "accounttypes", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Account Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Asset\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/accounttypes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "accounttypes"]
+            }
+          }
+        },
+        {
+          "name": "Update Account Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Fixed Asset\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/accounttypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "accounttypes", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Account Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/accounttypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "accounttypes", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transaction Type Status Module",
+      "item": [
+        {
+          "name": "Get All Transaction Type Statuses",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypestatuses?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypestatuses"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction Type Status by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypestatuses/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypestatuses", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction Type Status",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Pending\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypestatuses",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypestatuses"]
+            }
+          }
+        },
+        {
+          "name": "Update Transaction Type Status",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Approved\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypestatuses/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypestatuses", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Transaction Type Status",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypestatuses/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypestatuses", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contact Address Type Module",
+      "item": [
+        {
+          "name": "Get All Contact Address Types",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/contactaddresstypes?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contactaddresstypes"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Contact Address Type by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/contactaddresstypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contactaddresstypes", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Contact Address Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Billing\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/contactaddresstypes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contactaddresstypes"]
+            }
+          }
+        },
+        {
+          "name": "Update Contact Address Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Shipping\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/contactaddresstypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contactaddresstypes", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Contact Address Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/contactaddresstypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contactaddresstypes", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tax Group Module",
+      "item": [
+        {
+          "name": "Get All Tax Groups",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/taxgroups?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxgroups"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Tax Group by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/taxgroups/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxgroups", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Tax Group",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"GST 18%\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/taxgroups",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxgroups"]
+            }
+          }
+        },
+        {
+          "name": "Update Tax Group",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"GST 12%\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/taxgroups/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxgroups", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Tax Group",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/taxgroups/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxgroups", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tax Group Tax Type Mapper Module",
+      "item": [
+        {
+          "name": "Get All Tax Group Tax Type Mappers",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/taxgrouptaxtypemappers?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxgrouptaxtypemappers"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Tax Group Tax Type Mapper by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/taxgrouptaxtypemappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxgrouptaxtypemappers", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Tax Group Tax Type Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"TaxGroupId\": \"uuid-here\",\n    \"TaxTypeId\": \"uuid-here\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/taxgrouptaxtypemappers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxgrouptaxtypemappers"]
+            }
+          }
+        },
+        {
+          "name": "Update Tax Group Tax Type Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n    \"Active\": false\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/taxgrouptaxtypemappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxgrouptaxtypemappers", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Tax Group Tax Type Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/taxgrouptaxtypemappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "taxgrouptaxtypemappers", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Map Provider Module",
+      "item": [
+        {
+          "name": "Get All Map Providers",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/mapproviders?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mapproviders"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Map Provider by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/mapproviders/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mapproviders", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Map Provider",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"ProviderName\": \"Google Maps\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/mapproviders",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mapproviders"]
+            }
+          }
+        },
+        {
+          "name": "Update Map Provider",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"ProviderName\": \"OpenStreetMap\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/mapproviders/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mapproviders", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Map Provider",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/mapproviders/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mapproviders", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Location Detail Module",
+      "item": [
+        {
+          "name": "Get All Location Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/locationdetails?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "locationdetails"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Location Detail by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/locationdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "locationdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Location Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Lat\": 12.9716,\n    \"Lng\": 77.5946,\n    \"CF1\": \"Custom Field 1\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/locationdetails",
+              "host": ["{{base_url}}"],
+              "path": ["api", "locationdetails"]
+            }
+          }
+        },
+        {
+          "name": "Update Location Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Lat\": 13.0827,\n    \"Lng\": 80.2707,\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/locationdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "locationdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Location Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/locationdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "locationdetails", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Map Provider Location Mapper Module",
+      "item": [
+        {
+          "name": "Get All Map Provider Location Mappers",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/mapproviderlocationmappers?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mapproviderlocationmappers"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Map Provider Location Mapper by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/mapproviderlocationmappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mapproviderlocationmappers", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Map Provider Location Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"MapProviderId\": \"uuid-here\",\n    \"LocationDetailId\": \"uuid-here\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/mapproviderlocationmappers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mapproviderlocationmappers"]
+            }
+          }
+        },
+        {
+          "name": "Update Map Provider Location Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n    \"Active\": false\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/mapproviderlocationmappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mapproviderlocationmappers", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Map Provider Location Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/mapproviderlocationmappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mapproviderlocationmappers", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contact Detail Module",
+      "item": [
+        {
+          "name": "Get All Contact Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/contactdetails?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contactdetails"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Contact Detail by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/contactdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contactdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Contact Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"FirstName\": \"John\",\n    \"LastName\": \"Doe\",\n    \"MobileNo\": \"+1234567890\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/contactdetails",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contactdetails"]
+            }
+          }
+        },
+        {
+          "name": "Update Contact Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"FirstName\": \"Jane\",\n    \"MobileNo\": \"+0987654321\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/contactdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contactdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Contact Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/contactdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contactdetails", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Address Detail Module",
+      "item": [
+        {
+          "name": "Get All Address Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/addressdetails?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "addressdetails"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Address Detail by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/addressdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "addressdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Address Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"AddressLine1\": \"123 Main Street\",\n    \"AddressLine2\": \"Apt 4B\",\n    \"City\": \"New York\",\n    \"State\": \"NY\",\n    \"Pincode\": \"10001\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/addressdetails",
+              "host": ["{{base_url}}"],
+              "path": ["api", "addressdetails"]
+            }
+          }
+        },
+        {
+          "name": "Update Address Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"City\": \"Los Angeles\",\n    \"State\": \"CA\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/addressdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "addressdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Address Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/addressdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "addressdetails", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cost Info Module",
+      "item": [
+        {
+          "name": "Get All Cost Infos",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/costinfos?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "costinfos"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Cost Info by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/costinfos/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "costinfos", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Cost Info",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Amount\": 100.50,\n    \"TaxGroupId\": \"uuid-here\",\n    \"IsTaxIncluded\": true,\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/costinfos",
+              "host": ["{{base_url}}"],
+              "path": ["api", "costinfos"]
+            }
+          }
+        },
+        {
+          "name": "Update Cost Info",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Amount\": 150.75,\n    \"IsTaxIncluded\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/costinfos/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "costinfos", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Cost Info",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/costinfos/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "costinfos", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Branch Detail Module",
+      "item": [
+        {
+          "name": "Get All Branch Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/branchdetails?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branchdetails"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Branch Detail by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/branchdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branchdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Branch Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Main Branch\",\n    \"AddressDetailId\": \"uuid-here\",\n    \"ContactDetailId\": \"uuid-here\",\n    \"OrganizationId\": \"uuid-here\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/branchdetails",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branchdetails"]
+            }
+          }
+        },
+        {
+          "name": "Update Branch Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Secondary Branch\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/branchdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branchdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Branch Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/branchdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branchdetails", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Branch User Group Mapper Module",
+      "item": [
+        {
+          "name": "Get All Branch User Group Mappers",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/branchusergroupmappers?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branchusergroupmappers"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Branch User Group Mapper by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/branchusergroupmappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branchusergroupmappers", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Branch User Group Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"BranchId\": \"uuid-here\",\n    \"UserGroupId\": \"uuid-here\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/branchusergroupmappers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branchusergroupmappers"]
+            }
+          }
+        },
+        {
+          "name": "Update Branch User Group Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n    \"Active\": false\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/branchusergroupmappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branchusergroupmappers", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Branch User Group Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/branchusergroupmappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "branchusergroupmappers", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Batch Detail Module",
+      "item": [
+        {
+          "name": "Get All Batch Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/batchdetails?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "batchdetails"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Batch Detail by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/batchdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "batchdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Batch Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"BatchNumber\": \"BATCH-001\",\n    \"ManufacturedDate\": \"2025-01-01\",\n    \"ExpiryDate\": \"2026-01-01\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/batchdetails",
+              "host": ["{{base_url}}"],
+              "path": ["api", "batchdetails"]
+            }
+          }
+        },
+        {
+          "name": "Update Batch Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"BatchNumber\": \"BATCH-002\",\n    \"ExpiryDate\": \"2027-01-01\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/batchdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "batchdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Batch Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/batchdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "batchdetails", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Item Detail Module",
+      "item": [
+        {
+          "name": "Get All Item Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/itemdetails?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "itemdetails"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Item Detail by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/itemdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "itemdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Item Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Widget A\",\n    \"Code\": \"WID-001\",\n    \"Description\": \"A high-quality widget\",\n    \"CategoryId\": \"uuid-here\",\n    \"UOMId\": \"uuid-here\",\n    \"SKU\": \"SKU123\",\n    \"Barcode\": \"1234567890\",\n    \"HSNCode\": \"1234\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/itemdetails",
+              "host": ["{{base_url}}"],
+              "path": ["api", "itemdetails"]
+            }
+          }
+        },
+        {
+          "name": "Update Item Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Widget B\",\n    \"Description\": \"An updated widget\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/itemdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "itemdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Item Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/itemdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "itemdetails", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transaction Type Base Conversion Module",
+      "item": [
+        {
+          "name": "Get All Transaction Type Base Conversions",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypebaseconversions?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypebaseconversions"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction Type Base Conversion by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypebaseconversions/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypebaseconversions", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction Type Base Conversion",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"TransactionTypeConfigId\": \"uuid-here\",\n    \"FromTransactionTypeStatusId\": \"uuid-here\",\n    \"ToTransactionTypeStatusId\": \"uuid-here\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypebaseconversions",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypebaseconversions"]
+            }
+          }
+        },
+        {
+          "name": "Update Transaction Type Base Conversion",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n    \"Active\": false\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypebaseconversions/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypebaseconversions", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Transaction Type Base Conversion",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypebaseconversions/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypebaseconversions", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transaction Detail Log Module",
+      "item": [
+        {
+          "name": "Get All Transaction Detail Logs",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiondetaillogs?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiondetaillogs"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction Detail Log by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiondetaillogs/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiondetaillogs", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction Detail Log",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"TransactionNo\": \"TXN-001\",\n    \"TransactionTypeConfigId\": \"uuid-here\",\n    \"TransactionTypeStatusId\": \"uuid-here\",\n    \"BranchId\": \"uuid-here\",\n    \"TransactionDate\": \"2025-01-31\",\n    \"Remarks\": \"Initial transaction\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactiondetaillogs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiondetaillogs"]
+            }
+          }
+        },
+        {
+          "name": "Update Transaction Detail Log",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Remarks\": \"Updated remarks\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactiondetaillogs/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiondetaillogs", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Transaction Detail Log",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/transactiondetaillogs/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiondetaillogs", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transaction Item Detail Module",
+      "item": [
+        {
+          "name": "Get All Transaction Item Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactionitemdetails?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactionitemdetails"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction Item Detail by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactionitemdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactionitemdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction Item Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"TransactionDetailLogId\": \"uuid-here\",\n    \"ItemDetailId\": \"uuid-here\",\n    \"Quantity\": 10,\n    \"UOMId\": \"uuid-here\",\n    \"Rate\": 50.00,\n    \"Amount\": 500.00,\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactionitemdetails",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactionitemdetails"]
+            }
+          }
+        },
+        {
+          "name": "Update Transaction Item Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Quantity\": 15,\n    \"Amount\": 750.00\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactionitemdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactionitemdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Transaction Item Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/transactionitemdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactionitemdetails", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transaction Type Conversion Mapper Module",
+      "item": [
+        {
+          "name": "Get All Transaction Type Conversion Mappers",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypeconversionmappers?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypeconversionmappers"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction Type Conversion Mapper by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypeconversionmappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "transactiontypeconversionmappers",
+                "{{record_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction Type Conversion Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"TransactionTypeBaseConversionId\": \"uuid-here\",\n    \"FromTransactionDetailLogId\": \"uuid-here\",\n    \"ToTransactionDetailLogId\": \"uuid-here\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypeconversionmappers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypeconversionmappers"]
+            }
+          }
+        },
+        {
+          "name": "Update Transaction Type Conversion Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n    \"Active\": false\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypeconversionmappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "transactiontypeconversionmappers",
+                "{{record_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Transaction Type Conversion Mapper",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypeconversionmappers/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "transactiontypeconversionmappers",
+                "{{record_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payment Received Type Module",
+      "item": [
+        {
+          "name": "Get All Payment Received Types",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/paymentreceivedtypes?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentreceivedtypes"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Payment Received Type by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/paymentreceivedtypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentreceivedtypes", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Payment Received Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Full Payment\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/paymentreceivedtypes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentreceivedtypes"]
+            }
+          }
+        },
+        {
+          "name": "Update Payment Received Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Partial Payment\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/paymentreceivedtypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentreceivedtypes", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Payment Received Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/paymentreceivedtypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentreceivedtypes", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payment Mode Module",
+      "item": [
+        {
+          "name": "Get All Payment Modes",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/paymentmodes?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentmodes"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Payment Mode by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/paymentmodes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentmodes", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Payment Mode",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Credit Card\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/paymentmodes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentmodes"]
+            }
+          }
+        },
+        {
+          "name": "Update Payment Mode",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Debit Card\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/paymentmodes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentmodes", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Payment Mode",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/paymentmodes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentmodes", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payment Mode Transaction Detail Module",
+      "item": [
+        {
+          "name": "Get All Payment Mode Transaction Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/paymentmodetransactiondetails?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentmodetransactiondetails"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Payment Mode Transaction Detail by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/paymentmodetransactiondetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentmodetransactiondetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Payment Mode Transaction Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"PaymentModeId\": \"uuid-here\",\n    \"TransactionDetailLogId\": \"uuid-here\",\n    \"Amount\": 500.00,\n    \"ReferenceNo\": \"REF-001\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/paymentmodetransactiondetails",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentmodetransactiondetails"]
+            }
+          }
+        },
+        {
+          "name": "Update Payment Mode Transaction Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Amount\": 750.00,\n    \"ReferenceNo\": \"REF-002\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/paymentmodetransactiondetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentmodetransactiondetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Payment Mode Transaction Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/paymentmodetransactiondetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentmodetransactiondetails", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payment Detail Module",
+      "item": [
+        {
+          "name": "Get All Payment Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/paymentdetails?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentdetails"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Payment Detail by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/paymentdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Payment Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"PaymentReceivedTypeId\": \"uuid-here\",\n    \"TransactionDetailLogId\": \"uuid-here\",\n    \"Amount\": 1000.00,\n    \"PaymentDate\": \"2025-01-31\",\n    \"ReferenceNo\": \"PAY-001\",\n    \"Remarks\": \"First payment\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/paymentdetails",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentdetails"]
+            }
+          }
+        },
+        {
+          "name": "Update Payment Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Amount\": 1500.00,\n    \"Remarks\": \"Updated payment\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/paymentdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentdetails", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Payment Detail",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/paymentdetails/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentdetails", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payment Breakup Module",
+      "item": [
+        {
+          "name": "Get All Payment Breakups",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/paymentbreakups?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentbreakups"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Payment Breakup by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/paymentbreakups/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentbreakups", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Payment Breakup",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"PaymentDetailId\": \"uuid-here\",\n    \"PaymentModeId\": \"uuid-here\",\n    \"Amount\": 500.00,\n    \"ReferenceNo\": \"BRK-001\",\n    \"Remarks\": \"First breakup\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/paymentbreakups",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentbreakups"]
+            }
+          }
+        },
+        {
+          "name": "Update Payment Breakup",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Amount\": 600.00,\n    \"Remarks\": \"Updated breakup\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/paymentbreakups/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentbreakups", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Payment Breakup",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/paymentbreakups/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "paymentbreakups", "{{record_id}}"]
+            }
           }
         }
       ]
