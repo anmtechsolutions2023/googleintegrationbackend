@@ -3598,6 +3598,214 @@
           }
         }
       ]
+    },
+    {
+      "name": "Transaction Type Module",
+      "item": [
+        {
+          "name": "Get All Transaction Types",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypes?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypes"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Transaction Type by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypes", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Invoice\",\n    \"Description\": \"Sales Invoice\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypes"]
+            }
+          }
+        },
+        {
+          "name": "Update Transaction Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Purchase Order\",\n    \"Description\": \"Purchase Order Transaction\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypes", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Transaction Type",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/transactiontypes/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactiontypes", "{{record_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Account Type Base Module",
+      "item": [
+        {
+          "name": "Get All Account Type Bases",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/accounttypebases?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "accounttypebases"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Account Type Base by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/accounttypebases/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "accounttypebases", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Create Account Type Base",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Asset\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/accounttypebases",
+              "host": ["{{base_url}}"],
+              "path": ["api", "accounttypebases"]
+            }
+          }
+        },
+        {
+          "name": "Update Account Type Base",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"Name\": \"Liability\",\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/accounttypebases/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "accounttypebases", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Account Type Base",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{app_token}}", "type": "string" }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/accounttypebases/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "accounttypebases", "{{record_id}}"]
+            }
+          }
+        }
+      ]
     }
   ]
 }

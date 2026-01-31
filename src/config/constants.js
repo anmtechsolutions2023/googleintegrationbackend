@@ -460,6 +460,34 @@ module.exports = {
         'UPDATE paymentbreakup SET PaymentDetailId = ?, PaymentModeId = ?, Amount = ?, ReferenceNo = ?, Remarks = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentbreakup WHERE Id = ? AND TenantId = ?',
     },
+
+    // Transaction Type Queries
+    TRANSACTION_TYPE: {
+      SELECT_ALL:
+        'SELECT * FROM transactiontype WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM transactiontype WHERE TenantId = ?',
+      SELECT_BY_ID:
+        'SELECT * FROM transactiontype WHERE Id = ? AND TenantId = ?',
+      INSERT:
+        'INSERT INTO transactiontype (Id, TenantId, Name, Description, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      UPDATE:
+        'UPDATE transactiontype SET Name = ?, Description = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM transactiontype WHERE Id = ? AND TenantId = ?',
+    },
+
+    // Account Type Base Queries
+    ACCOUNT_TYPE_BASE: {
+      SELECT_ALL:
+        'SELECT * FROM accounttypebase WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM accounttypebase WHERE TenantId = ?',
+      SELECT_BY_ID:
+        'SELECT * FROM accounttypebase WHERE Id = ? AND TenantId = ?',
+      INSERT:
+        'INSERT INTO accounttypebase (Id, TenantId, Name, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?)',
+      UPDATE:
+        'UPDATE accounttypebase SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM accounttypebase WHERE Id = ? AND TenantId = ?',
+    },
   },
   STATUSES: {
     SUCCESS: 'SUCCESS',

@@ -38,6 +38,8 @@ const paymentmodeRoutes = require('../modules/paymentmode/paymentmode.routes');
 const paymentmodetransactiondetailRoutes = require('../modules/paymentmodetransactiondetail/paymentmodetransactiondetail.routes');
 const paymentdetailRoutes = require('../modules/paymentdetail/paymentdetail.routes');
 const paymentbreakupRoutes = require('../modules/paymentbreakup/paymentbreakup.routes');
+const transactiontypeRoutes = require('../modules/transactiontype/transactiontype.routes');
+const accounttypebaseRoutes = require('../modules/accounttypebase/accounttypebase.routes');
 
 /**
  * Registers all application routes with the Express app.
@@ -161,6 +163,12 @@ const registerRoutes = (app) => {
   // Payment Breakup module
   app.use('/api/paymentbreakups', paymentbreakupRoutes);
 
+  // Transaction Type module
+  app.use('/api/transactiontypes', transactiontypeRoutes);
+
+  // Account Type Base module
+  app.use('/api/accounttypebases', accounttypebaseRoutes);
+
   // Health check / root endpoint
   app.get('/', (req, res) => {
     res.json({
@@ -219,6 +227,8 @@ const registerRoutes = (app) => {
         },
         { name: 'paymentdetails', path: '/api/paymentdetails' },
         { name: 'paymentbreakups', path: '/api/paymentbreakups' },
+        { name: 'transactiontypes', path: '/api/transactiontypes' },
+        { name: 'accounttypebases', path: '/api/accounttypebases' },
       ],
     });
   });
