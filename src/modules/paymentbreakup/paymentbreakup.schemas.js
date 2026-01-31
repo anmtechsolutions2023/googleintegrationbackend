@@ -22,10 +22,15 @@ const updateSchema = Joi.object({
 const paginationSchema = Joi.object({
   page: Joi.number().integer().min(1).optional().default(1),
   limit: Joi.number().integer().min(1).max(100).optional().default(10),
+  expand: Joi.boolean().optional().default(false),
 });
 
 const uuidParamSchema = Joi.object({
   id: Joi.string().uuid().required(),
+});
+
+const getByIdQuerySchema = Joi.object({
+  expand: Joi.boolean().optional().default(false),
 });
 
 module.exports = {
@@ -33,4 +38,5 @@ module.exports = {
   updateSchema,
   paginationSchema,
   uuidParamSchema,
+  getByIdQuerySchema,
 };

@@ -10,6 +10,11 @@
 
 ## Table of Contents
 
+- [Common Query Parameters (Pagination)](#common-query-parameters-pagination)
+- [Expand Query Parameter (Foreign Key Relations)](#expand-query-parameter-foreign-key-relations)
+
+### Modules
+
 1. [Authentication](#1-authentication-module)
 2. [Tenant Management](#2-tenant-module)
 3. [User Management](#3-user-module)
@@ -18,7 +23,7 @@
 6. [Audit](#6-audit-module)
 7. [Tax Types](#7-tax-type-module)
 8. [UOM (Unit of Measure)](#8-uom-module)
-9. [UOM Factor](#9-uom-factor-module)
+9. [UOM Factor](#9-uom-factor-module) ⚡
 10. [Category](#10-category-module)
 11. [Organization](#11-organization-module)
 12. [Account Type](#12-account-type-module)
@@ -26,28 +31,30 @@
 14. [Transaction Type](#14-transaction-type-module)
 15. [Transaction Type Config](#15-transaction-type-config-module)
 16. [Transaction Type Status](#16-transaction-type-status-module)
-17. [Transaction Type Base Conversion](#17-transaction-type-base-conversion-module)
-18. [Transaction Type Conversion Mapper](#18-transaction-type-conversion-mapper-module)
-19. [Transaction Detail Log](#19-transaction-detail-log-module)
-20. [Transaction Item Detail](#20-transaction-item-detail-module)
+17. [Transaction Type Base Conversion](#17-transaction-type-base-conversion-module) ⚡
+18. [Transaction Type Conversion Mapper](#18-transaction-type-conversion-mapper-module) ⚡
+19. [Transaction Detail Log](#19-transaction-detail-log-module) ⚡
+20. [Transaction Item Detail](#20-transaction-item-detail-module) ⚡
 21. [Tax Group](#21-tax-group-module)
-22. [Tax Group Tax Type Mapper](#22-tax-group-tax-type-mapper-module)
+22. [Tax Group Tax Type Mapper](#22-tax-group-tax-type-mapper-module) ⚡
 23. [Contact Address Type](#23-contact-address-type-module)
-24. [Contact Detail](#24-contact-detail-module)
-25. [Address Detail](#25-address-detail-module)
+24. [Contact Detail](#24-contact-detail-module) ⚡
+25. [Address Detail](#25-address-detail-module) ⚡
 26. [Location Detail](#26-location-detail-module)
 27. [Map Provider](#27-map-provider-module)
-28. [Map Provider Location Mapper](#28-map-provider-location-mapper-module)
-29. [Cost Info](#29-cost-info-module)
-30. [Branch Detail](#30-branch-detail-module)
-31. [Branch User Group Mapper](#31-branch-user-group-mapper-module)
+28. [Map Provider Location Mapper](#28-map-provider-location-mapper-module) ⚡
+29. [Cost Info](#29-cost-info-module) ⚡
+30. [Branch Detail](#30-branch-detail-module) ⚡
+31. [Branch User Group Mapper](#31-branch-user-group-mapper-module) ⚡
 32. [Batch Detail](#32-batch-detail-module)
-33. [Item Detail](#33-item-detail-module)
+33. [Item Detail](#33-item-detail-module) ⚡
 34. [Payment Received Type](#34-payment-received-type-module)
 35. [Payment Mode](#35-payment-mode-module)
-36. [Payment Mode Transaction Detail](#36-payment-mode-transaction-detail-module)
-37. [Payment Detail](#37-payment-detail-module)
-38. [Payment Breakup](#38-payment-breakup-module)
+36. [Payment Mode Transaction Detail](#36-payment-mode-transaction-detail-module) ⚡
+37. [Payment Detail](#37-payment-detail-module) ⚡
+38. [Payment Breakup](#38-payment-breakup-module) ⚡
+
+> ⚡ Supports `?expand=true` query parameter
 
 ---
 
@@ -128,6 +135,87 @@ All GET list endpoints support the following query parameters:
 | --------- | ------- | -------- | ------- | ---------------- | -------------------------- |
 | `page`    | integer | No       | 1       | min: 1           | Page number for pagination |
 | `limit`   | integer | No       | 10      | min: 1, max: 100 | Number of records per page |
+
+---
+
+## Expand Query Parameter (Foreign Key Relations)
+
+Modules with foreign key (FK) relationships support the `expand` query parameter to include related entity details in the response.
+
+| Parameter | Type    | Required | Default | Description                                        |
+| --------- | ------- | -------- | ------- | -------------------------------------------------- |
+| `expand`  | boolean | No       | false   | When `true`, includes related entity names/details |
+
+### Modules Supporting Expand
+
+The following 16 modules support `?expand=true`:
+
+| Module                             | Endpoint                                | Expanded Fields                                                       |
+| ---------------------------------- | --------------------------------------- | --------------------------------------------------------------------- |
+| UOM Factor                         | `/api/uomfactors`                       | `PrimaryUOMName`, `SecondaryUOMName`                                  |
+| Tax Group Tax Type Mapper          | `/api/taxgrouptaxtypemappers`           | `TaxGroupName`, `TaxTypeName`                                         |
+| Map Provider Location Mapper       | `/api/mapproviderlocationmappers`       | `ProviderName`, `Lat`, `Lng`                                          |
+| Contact Detail                     | `/api/contactdetails`                   | `ContactAddressTypeName`                                              |
+| Address Detail                     | `/api/addressdetails`                   | `MapProviderLocationMapperDetails`, `ContactAddressTypeName`          |
+| Cost Info                          | `/api/costinfos`                        | `TaxGroupName`                                                        |
+| Branch Detail                      | `/api/branchdetails`                    | `AddressDetails`, `ContactDetails`, `OrganizationName`                |
+| Branch User Group Mapper           | `/api/branchusergroupmappers`           | `BranchName`, `UserGroupName`                                         |
+| Item Detail                        | `/api/itemdetails`                      | `CategoryName`, `UOMName`, `CostInfoDetails`                          |
+| Transaction Type Base Conversion   | `/api/transactiontypebaseconversions`   | `TransactionTypeConfigPrefix`, `FromStatusName`, `ToStatusName`       |
+| Transaction Detail Log             | `/api/transactiondetaillogs`            | `TransactionTypeConfigPrefix`, `StatusName`, `BranchName`             |
+| Transaction Item Detail            | `/api/transactionitemdetails`           | `TransactionNo`, `ItemName`, `BatchNumber`, `UOMName`, `TaxGroupName` |
+| Transaction Type Conversion Mapper | `/api/transactiontypeconversionmappers` | `BaseConversionDetails`, `FromTransactionNo`, `ToTransactionNo`       |
+| Payment Mode Transaction Detail    | `/api/paymentmodetransactiondetails`    | `PaymentModeName`, `TransactionNo`                                    |
+| Payment Detail                     | `/api/paymentdetails`                   | `PaymentReceivedTypeName`, `TransactionNo`                            |
+| Payment Breakup                    | `/api/paymentbreakups`                  | `PaymentDetailRef`, `PaymentModeName`                                 |
+
+### Example Usage
+
+**Request without expand (default):**
+
+```
+GET /api/uomfactors?page=1&limit=10
+```
+
+**Response without expand:**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "Id": "...",
+      "PrimaryUOMId": "550e8400-e29b-41d4-a716-446655440000",
+      "SecondaryUOMId": "660e8400-e29b-41d4-a716-446655440001",
+      "Factor": 1000.0
+    }
+  ]
+}
+```
+
+**Request with expand:**
+
+```
+GET /api/uomfactors?page=1&limit=10&expand=true
+```
+
+**Response with expand:**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "Id": "...",
+      "PrimaryUOMId": "550e8400-e29b-41d4-a716-446655440000",
+      "PrimaryUOMName": "Kilogram",
+      "SecondaryUOMId": "660e8400-e29b-41d4-a716-446655440001",
+      "SecondaryUOMName": "Gram",
+      "Factor": 1000.0
+    }
+  ]
+}
+```
 
 ---
 
@@ -670,6 +758,8 @@ Logout user session.
 
 **Base Path:** `/api/uomfactors`
 
+> **Supports Expand:** This module supports `?expand=true` to include `PrimaryUOMName` and `SecondaryUOMName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint              | Description          | Auth | Scopes                               |
@@ -679,6 +769,36 @@ Logout user session.
 | `POST`   | `/api/uomfactors`     | Create UOM factor    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/uomfactors/:id` | Update UOM factor    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/uomfactors/:id` | Delete UOM factor    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/uomfactors - Get All UOM Factors
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                     |
+| --------- | ------- | -------- | ------- | ----------------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                                     |
+| `limit`   | integer | No       | 10      | Records per page                                |
+| `expand`  | boolean | No       | false   | Include `PrimaryUOMName` and `SecondaryUOMName` |
+
+**Response with `expand=true`:**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "Id": "770e8400-e29b-41d4-a716-446655440002",
+      "PrimaryUOMId": "550e8400-e29b-41d4-a716-446655440000",
+      "PrimaryUOMName": "Kilogram",
+      "SecondaryUOMId": "660e8400-e29b-41d4-a716-446655440001",
+      "SecondaryUOMName": "Gram",
+      "Factor": 1000.0,
+      "Active": true
+    }
+  ],
+  "pagination": { "page": 1, "limit": 10, "total": 1 }
+}
+```
 
 ### POST /api/uomfactors - Create UOM Factor
 
@@ -994,6 +1114,8 @@ Logout user session.
 
 **Base Path:** `/api/transactiontypebaseconversions`
 
+> **Supports Expand:** This module supports `?expand=true` to include `TransactionTypeConfigPrefix`, `FromStatusName`, and `ToStatusName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                                  | Description          | Auth | Scopes                               |
@@ -1003,6 +1125,16 @@ Logout user session.
 | `POST`   | `/api/transactiontypebaseconversions`     | Create conversion    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/transactiontypebaseconversions/:id` | Update conversion    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/transactiontypebaseconversions/:id` | Delete conversion    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/transactiontypebaseconversions - Get All Base Conversions
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                                             |
+| --------- | ------- | -------- | ------- | ----------------------------------------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                                                             |
+| `limit`   | integer | No       | 10      | Records per page                                                        |
+| `expand`  | boolean | No       | false   | Include `TransactionTypeConfigPrefix`, `FromStatusName`, `ToStatusName` |
 
 ### POST /api/transactiontypebaseconversions - Create Base Conversion
 
@@ -1030,6 +1162,8 @@ Logout user session.
 
 **Base Path:** `/api/transactiontypeconversionmappers`
 
+> **Supports Expand:** This module supports `?expand=true` to include `BaseConversionDetails`, `FromTransactionNo`, and `ToTransactionNo`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                                    | Description      | Auth | Scopes                               |
@@ -1039,6 +1173,16 @@ Logout user session.
 | `POST`   | `/api/transactiontypeconversionmappers`     | Create mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/transactiontypeconversionmappers/:id` | Update mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/transactiontypeconversionmappers/:id` | Delete mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/transactiontypeconversionmappers - Get All Conversion Mappers
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                                             |
+| --------- | ------- | -------- | ------- | ----------------------------------------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                                                             |
+| `limit`   | integer | No       | 10      | Records per page                                                        |
+| `expand`  | boolean | No       | false   | Include `BaseConversionDetails`, `FromTransactionNo`, `ToTransactionNo` |
 
 ### POST /api/transactiontypeconversionmappers - Create Conversion Mapper
 
@@ -1066,6 +1210,8 @@ Logout user session.
 
 **Base Path:** `/api/transactiondetaillogs`
 
+> **Supports Expand:** This module supports `?expand=true` to include `TransactionTypeConfigPrefix`, `StatusName`, and `BranchName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                         | Description   | Auth | Scopes                               |
@@ -1075,6 +1221,16 @@ Logout user session.
 | `POST`   | `/api/transactiondetaillogs`     | Create log    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/transactiondetaillogs/:id` | Update log    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/transactiondetaillogs/:id` | Delete log    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/transactiondetaillogs - Get All Transaction Detail Logs
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                                       |
+| --------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                                                       |
+| `limit`   | integer | No       | 10      | Records per page                                                  |
+| `expand`  | boolean | No       | false   | Include `TransactionTypeConfigPrefix`, `StatusName`, `BranchName` |
 
 ### POST /api/transactiondetaillogs - Create Transaction Detail Log
 
@@ -1130,6 +1286,8 @@ Logout user session.
 
 **Base Path:** `/api/transactionitemdetails`
 
+> **Supports Expand:** This module supports `?expand=true` to include `TransactionNo`, `ItemName`, `BatchNumber`, `UOMName`, and `TaxGroupName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                          | Description           | Auth | Scopes                               |
@@ -1139,6 +1297,16 @@ Logout user session.
 | `POST`   | `/api/transactionitemdetails`     | Create item detail    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/transactionitemdetails/:id` | Update item detail    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/transactionitemdetails/:id` | Delete item detail    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/transactionitemdetails - Get All Transaction Item Details
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                                                   |
+| --------- | ------- | -------- | ------- | ----------------------------------------------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                                                                   |
+| `limit`   | integer | No       | 10      | Records per page                                                              |
+| `expand`  | boolean | No       | false   | Include `TransactionNo`, `ItemName`, `BatchNumber`, `UOMName`, `TaxGroupName` |
 
 ### POST /api/transactionitemdetails - Create Transaction Item Detail
 
@@ -1214,6 +1382,8 @@ Logout user session.
 
 **Base Path:** `/api/taxgrouptaxtypemappers`
 
+> **Supports Expand:** This module supports `?expand=true` to include `TaxGroupName` and `TaxTypeName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                          | Description      | Auth | Scopes                               |
@@ -1223,6 +1393,16 @@ Logout user session.
 | `POST`   | `/api/taxgrouptaxtypemappers`     | Create mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/taxgrouptaxtypemappers/:id` | Update mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/taxgrouptaxtypemappers/:id` | Delete mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/taxgrouptaxtypemappers - Get All Tax Group Tax Type Mappers
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                              |
+| --------- | ------- | -------- | ------- | ---------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                              |
+| `limit`   | integer | No       | 10      | Records per page                         |
+| `expand`  | boolean | No       | false   | Include `TaxGroupName` and `TaxTypeName` |
 
 ### POST /api/taxgrouptaxtypemappers - Create Tax Group Tax Type Mapper
 
@@ -1280,6 +1460,8 @@ Logout user session.
 
 **Base Path:** `/api/contactdetails`
 
+> **Supports Expand:** This module supports `?expand=true` to include `ContactAddressTypeName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                  | Description       | Auth | Scopes                               |
@@ -1289,6 +1471,16 @@ Logout user session.
 | `POST`   | `/api/contactdetails`     | Create contact    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/contactdetails/:id` | Update contact    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/contactdetails/:id` | Delete contact    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/contactdetails - Get All Contact Details
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                      |
+| --------- | ------- | -------- | ------- | -------------------------------- |
+| `page`    | integer | No       | 1       | Page number                      |
+| `limit`   | integer | No       | 10      | Records per page                 |
+| `expand`  | boolean | No       | false   | Include `ContactAddressTypeName` |
 
 ### POST /api/contactdetails - Create Contact Detail
 
@@ -1353,6 +1545,8 @@ Logout user session.
 
 **Base Path:** `/api/addressdetails`
 
+> **Supports Expand:** This module supports `?expand=true` to include `MapProviderLocationMapperDetails` and `ContactAddressTypeName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                  | Description       | Auth | Scopes                               |
@@ -1362,6 +1556,16 @@ Logout user session.
 | `POST`   | `/api/addressdetails`     | Create address    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/addressdetails/:id` | Update address    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/addressdetails/:id` | Delete address    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/addressdetails - Get All Address Details
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                                          |
+| --------- | ------- | -------- | ------- | -------------------------------------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                                                          |
+| `limit`   | integer | No       | 10      | Records per page                                                     |
+| `expand`  | boolean | No       | false   | Include `MapProviderLocationMapperDetails`, `ContactAddressTypeName` |
 
 ### POST /api/addressdetails - Create Address Detail
 
@@ -1473,6 +1677,8 @@ Logout user session.
 
 **Base Path:** `/api/mapproviderlocationmappers`
 
+> **Supports Expand:** This module supports `?expand=true` to include `ProviderName`, `Lat`, and `Lng`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                              | Description      | Auth | Scopes                               |
@@ -1482,6 +1688,16 @@ Logout user session.
 | `POST`   | `/api/mapproviderlocationmappers`     | Create mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/mapproviderlocationmappers/:id` | Update mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/mapproviderlocationmappers/:id` | Delete mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/mapproviderlocationmappers - Get All Map Provider Location Mappers
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                          |
+| --------- | ------- | -------- | ------- | ------------------------------------ |
+| `page`    | integer | No       | 1       | Page number                          |
+| `limit`   | integer | No       | 10      | Records per page                     |
+| `expand`  | boolean | No       | false   | Include `ProviderName`, `Lat`, `Lng` |
 
 ### POST /api/mapproviderlocationmappers - Create Map Provider Location Mapper
 
@@ -1507,6 +1723,8 @@ Logout user session.
 
 **Base Path:** `/api/costinfos`
 
+> **Supports Expand:** This module supports `?expand=true` to include `TaxGroupName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint             | Description         | Auth | Scopes                               |
@@ -1516,6 +1734,16 @@ Logout user session.
 | `POST`   | `/api/costinfos`     | Create cost info    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/costinfos/:id` | Update cost info    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/costinfos/:id` | Delete cost info    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/costinfos - Get All Cost Infos
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description            |
+| --------- | ------- | -------- | ------- | ---------------------- |
+| `page`    | integer | No       | 1       | Page number            |
+| `limit`   | integer | No       | 10      | Records per page       |
+| `expand`  | boolean | No       | false   | Include `TaxGroupName` |
 
 ### POST /api/costinfos - Create Cost Info
 
@@ -1543,6 +1771,8 @@ Logout user session.
 
 **Base Path:** `/api/branchdetails`
 
+> **Supports Expand:** This module supports `?expand=true` to include `AddressDetails`, `ContactDetails`, and `OrganizationName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                 | Description      | Auth | Scopes                               |
@@ -1552,6 +1782,16 @@ Logout user session.
 | `POST`   | `/api/branchdetails`     | Create branch    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/branchdetails/:id` | Update branch    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/branchdetails/:id` | Delete branch    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/branchdetails - Get All Branch Details
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                                    |
+| --------- | ------- | -------- | ------- | -------------------------------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                                                    |
+| `limit`   | integer | No       | 10      | Records per page                                               |
+| `expand`  | boolean | No       | false   | Include `AddressDetails`, `ContactDetails`, `OrganizationName` |
 
 ### POST /api/branchdetails - Create Branch Detail
 
@@ -1581,6 +1821,8 @@ Logout user session.
 
 **Base Path:** `/api/branchusergroupmappers`
 
+> **Supports Expand:** This module supports `?expand=true` to include `BranchName` and `UserGroupName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                          | Description      | Auth | Scopes                               |
@@ -1590,6 +1832,16 @@ Logout user session.
 | `POST`   | `/api/branchusergroupmappers`     | Create mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/branchusergroupmappers/:id` | Update mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/branchusergroupmappers/:id` | Delete mapper    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/branchusergroupmappers - Get All Branch User Group Mappers
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                              |
+| --------- | ------- | -------- | ------- | ---------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                              |
+| `limit`   | integer | No       | 10      | Records per page                         |
+| `expand`  | boolean | No       | false   | Include `BranchName` and `UserGroupName` |
 
 ### POST /api/branchusergroupmappers - Create Branch User Group Mapper
 
@@ -1651,6 +1903,8 @@ Logout user session.
 
 **Base Path:** `/api/itemdetails`
 
+> **Supports Expand:** This module supports `?expand=true` to include `CategoryName`, `UOMName`, and `CostInfoDetails`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint               | Description    | Auth | Scopes                               |
@@ -1660,6 +1914,16 @@ Logout user session.
 | `POST`   | `/api/itemdetails`     | Create item    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/itemdetails/:id` | Update item    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/itemdetails/:id` | Delete item    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/itemdetails - Get All Item Details
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                          |
+| --------- | ------- | -------- | ------- | ---------------------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                                          |
+| `limit`   | integer | No       | 10      | Records per page                                     |
+| `expand`  | boolean | No       | false   | Include `CategoryName`, `UOMName`, `CostInfoDetails` |
 
 ### POST /api/itemdetails - Create Item Detail
 
@@ -1788,6 +2052,8 @@ Logout user session.
 
 **Base Path:** `/api/paymentmodetransactiondetails`
 
+> **Supports Expand:** This module supports `?expand=true` to include `PaymentModeName` and `TransactionNo`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                                 | Description      | Auth | Scopes                               |
@@ -1797,6 +2063,16 @@ Logout user session.
 | `POST`   | `/api/paymentmodetransactiondetails`     | Create detail    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/paymentmodetransactiondetails/:id` | Update detail    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/paymentmodetransactiondetails/:id` | Delete detail    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/paymentmodetransactiondetails - Get All Payment Mode Transaction Details
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                   |
+| --------- | ------- | -------- | ------- | --------------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                                   |
+| `limit`   | integer | No       | 10      | Records per page                              |
+| `expand`  | boolean | No       | false   | Include `PaymentModeName` and `TransactionNo` |
 
 ### POST /api/paymentmodetransactiondetails - Create Payment Mode Transaction Detail
 
@@ -1826,6 +2102,8 @@ Logout user session.
 
 **Base Path:** `/api/paymentdetails`
 
+> **Supports Expand:** This module supports `?expand=true` to include `PaymentReceivedTypeName` and `TransactionNo`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                  | Description              | Auth | Scopes                               |
@@ -1835,6 +2113,16 @@ Logout user session.
 | `POST`   | `/api/paymentdetails`     | Create payment detail    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/paymentdetails/:id` | Update payment detail    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/paymentdetails/:id` | Delete payment detail    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/paymentdetails - Get All Payment Details
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                           |
+| --------- | ------- | -------- | ------- | ----------------------------------------------------- |
+| `page`    | integer | No       | 1       | Page number                                           |
+| `limit`   | integer | No       | 10      | Records per page                                      |
+| `expand`  | boolean | No       | false   | Include `PaymentReceivedTypeName` and `TransactionNo` |
 
 ### POST /api/paymentdetails - Create Payment Detail
 
@@ -1868,6 +2156,8 @@ Logout user session.
 
 **Base Path:** `/api/paymentbreakups`
 
+> **Supports Expand:** This module supports `?expand=true` to include `PaymentDetailRef` and `PaymentModeName`.
+
 ### Endpoints Overview
 
 | Method   | Endpoint                   | Description       | Auth | Scopes                               |
@@ -1877,6 +2167,16 @@ Logout user session.
 | `POST`   | `/api/paymentbreakups`     | Create breakup    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `PUT`    | `/api/paymentbreakups/:id` | Update breakup    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
 | `DELETE` | `/api/paymentbreakups/:id` | Delete breakup    | Yes  | `TENANT:ADMIN`, `TENANT:SUPER_ADMIN` |
+
+### GET /api/paymentbreakups - Get All Payment Breakups
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Default | Description                                      |
+| --------- | ------- | -------- | ------- | ------------------------------------------------ |
+| `page`    | integer | No       | 1       | Page number                                      |
+| `limit`   | integer | No       | 10      | Records per page                                 |
+| `expand`  | boolean | No       | false   | Include `PaymentDetailRef` and `PaymentModeName` |
 
 ### POST /api/paymentbreakups - Create Payment Breakup
 

@@ -45,8 +45,9 @@ class PaymentDetailService extends BaseCRUDService {
 
 const service = new PaymentDetailService();
 module.exports = {
-  getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
-  getById: (id, tenantId) => service.getById(id, tenantId),
+  getAll: (tenantId, page, limit, expand) =>
+    service.getAll(tenantId, page, limit, expand),
+  getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),
   create: (data, tenantId, userEmail) =>
     service.create(data, tenantId, userEmail),
   update: (id, data, tenantId, userEmail) =>

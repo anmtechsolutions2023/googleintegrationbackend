@@ -111,8 +111,24 @@ module.exports = {
     UOM_FACTOR: {
       SELECT_ALL:
         'SELECT * FROM uomfactor WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT uf.*, 
+          pu.UnitName AS PrimaryUOMName, 
+          su.UnitName AS SecondaryUOMName
+        FROM uomfactor uf
+        LEFT JOIN UOM pu ON uf.PrimaryUOMId = pu.Id AND pu.TenantId = uf.TenantId
+        LEFT JOIN UOM su ON uf.SecondaryUOMId = su.Id AND su.TenantId = uf.TenantId
+        WHERE uf.TenantId = ? ORDER BY uf.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM uomfactor WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM uomfactor WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT uf.*, 
+          pu.UnitName AS PrimaryUOMName, 
+          su.UnitName AS SecondaryUOMName
+        FROM uomfactor uf
+        LEFT JOIN UOM pu ON uf.PrimaryUOMId = pu.Id AND pu.TenantId = uf.TenantId
+        LEFT JOIN UOM su ON uf.SecondaryUOMId = su.Id AND su.TenantId = uf.TenantId
+        WHERE uf.Id = ? AND uf.TenantId = ?`,
       INSERT:
         'INSERT INTO uomfactor (Id, TenantId, PrimaryUOMId, SecondaryUOMId, Factor, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -181,10 +197,28 @@ module.exports = {
     TAX_GROUP_TAX_TYPE_MAPPER: {
       SELECT_ALL:
         'SELECT * FROM taxgrouptaxtypemapper WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT tgm.*, 
+          tg.Name AS TaxGroupName, 
+          tt.Name AS TaxTypeName, 
+          tt.Value AS TaxTypeValue
+        FROM taxgrouptaxtypemapper tgm
+        LEFT JOIN taxgroup tg ON tgm.TaxGroupId = tg.Id AND tg.TenantId = tgm.TenantId
+        LEFT JOIN TaxTypes tt ON tgm.TaxTypeId = tt.Id AND tt.TenantId = tgm.TenantId
+        WHERE tgm.TenantId = ? ORDER BY tgm.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM taxgrouptaxtypemapper WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM taxgrouptaxtypemapper WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT tgm.*, 
+          tg.Name AS TaxGroupName, 
+          tt.Name AS TaxTypeName, 
+          tt.Value AS TaxTypeValue
+        FROM taxgrouptaxtypemapper tgm
+        LEFT JOIN taxgroup tg ON tgm.TaxGroupId = tg.Id AND tg.TenantId = tgm.TenantId
+        LEFT JOIN TaxTypes tt ON tgm.TaxTypeId = tt.Id AND tt.TenantId = tgm.TenantId
+        WHERE tgm.Id = ? AND tgm.TenantId = ?`,
       INSERT:
         'INSERT INTO taxgrouptaxtypemapper (Id, TenantId, TaxGroupId, TaxTypeId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -223,10 +257,26 @@ module.exports = {
     MAP_PROVIDER_LOCATION_MAPPER: {
       SELECT_ALL:
         'SELECT * FROM mapproviderlocationmapper WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT mplm.*, 
+          mp.ProviderName AS MapProviderName, 
+          ld.Lat, ld.Lng, ld.CF1, ld.CF2, ld.CF3, ld.CF4
+        FROM mapproviderlocationmapper mplm
+        LEFT JOIN mapprovider mp ON mplm.MapProviderId = mp.Id AND mp.TenantId = mplm.TenantId
+        LEFT JOIN locationdetail ld ON mplm.LocationDetailId = ld.Id AND ld.TenantId = mplm.TenantId
+        WHERE mplm.TenantId = ? ORDER BY mplm.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM mapproviderlocationmapper WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM mapproviderlocationmapper WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT mplm.*, 
+          mp.ProviderName AS MapProviderName, 
+          ld.Lat, ld.Lng, ld.CF1, ld.CF2, ld.CF3, ld.CF4
+        FROM mapproviderlocationmapper mplm
+        LEFT JOIN mapprovider mp ON mplm.MapProviderId = mp.Id AND mp.TenantId = mplm.TenantId
+        LEFT JOIN locationdetail ld ON mplm.LocationDetailId = ld.Id AND ld.TenantId = mplm.TenantId
+        WHERE mplm.Id = ? AND mplm.TenantId = ?`,
       INSERT:
         'INSERT INTO mapproviderlocationmapper (Id, TenantId, MapProviderId, LocationDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -239,8 +289,20 @@ module.exports = {
     CONTACT_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM contactdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT cd.*, 
+          cat.Name AS ContactAddressTypeName
+        FROM contactdetail cd
+        LEFT JOIN contactaddresstype cat ON cd.ContactAddressTypeId = cat.Id AND cat.TenantId = cd.TenantId
+        WHERE cd.TenantId = ? ORDER BY cd.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM contactdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM contactdetail WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT cd.*, 
+          cat.Name AS ContactAddressTypeName
+        FROM contactdetail cd
+        LEFT JOIN contactaddresstype cat ON cd.ContactAddressTypeId = cat.Id AND cat.TenantId = cd.TenantId
+        WHERE cd.Id = ? AND cd.TenantId = ?`,
       INSERT:
         'INSERT INTO contactdetail (Id, TenantId, FirstName, LastName, MobileNo, AltMobileNo, Landline1, LandLine2, Ext1, Ext2, ContactAddressTypeId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -252,8 +314,32 @@ module.exports = {
     ADDRESS_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM addressdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT ad.*, 
+          cat.Name AS ContactAddressTypeName,
+          mplm.MapProviderId, mplm.LocationDetailId,
+          mp.ProviderName AS MapProviderName,
+          ld.Lat, ld.Lng
+        FROM addressdetail ad
+        LEFT JOIN contactaddresstype cat ON ad.ContactAddressTypeId = cat.Id AND cat.TenantId = ad.TenantId
+        LEFT JOIN mapproviderlocationmapper mplm ON ad.MapProviderLocationMapperId = mplm.Id AND mplm.TenantId = ad.TenantId
+        LEFT JOIN mapprovider mp ON mplm.MapProviderId = mp.Id AND mp.TenantId = ad.TenantId
+        LEFT JOIN locationdetail ld ON mplm.LocationDetailId = ld.Id AND ld.TenantId = ad.TenantId
+        WHERE ad.TenantId = ? ORDER BY ad.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM addressdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM addressdetail WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT ad.*, 
+          cat.Name AS ContactAddressTypeName,
+          mplm.MapProviderId, mplm.LocationDetailId,
+          mp.ProviderName AS MapProviderName,
+          ld.Lat, ld.Lng
+        FROM addressdetail ad
+        LEFT JOIN contactaddresstype cat ON ad.ContactAddressTypeId = cat.Id AND cat.TenantId = ad.TenantId
+        LEFT JOIN mapproviderlocationmapper mplm ON ad.MapProviderLocationMapperId = mplm.Id AND mplm.TenantId = ad.TenantId
+        LEFT JOIN mapprovider mp ON mplm.MapProviderId = mp.Id AND mp.TenantId = ad.TenantId
+        LEFT JOIN locationdetail ld ON mplm.LocationDetailId = ld.Id AND ld.TenantId = ad.TenantId
+        WHERE ad.Id = ? AND ad.TenantId = ?`,
       INSERT:
         'INSERT INTO addressdetail (Id, TenantId, AddressLine1, AddressLine2, City, State, Pincode, MapProviderLocationMapperId, Landmark, ContactAddressTypeId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -265,8 +351,20 @@ module.exports = {
     COST_INFO: {
       SELECT_ALL:
         'SELECT * FROM costinfo WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT ci.*, 
+          tg.Name AS TaxGroupName
+        FROM costinfo ci
+        LEFT JOIN taxgroup tg ON ci.TaxGroupId = tg.Id AND tg.TenantId = ci.TenantId
+        WHERE ci.TenantId = ? ORDER BY ci.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM costinfo WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM costinfo WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT ci.*, 
+          tg.Name AS TaxGroupName
+        FROM costinfo ci
+        LEFT JOIN taxgroup tg ON ci.TaxGroupId = tg.Id AND tg.TenantId = ci.TenantId
+        WHERE ci.Id = ? AND ci.TenantId = ?`,
       INSERT:
         'INSERT INTO costinfo (Id, TenantId, Amount, TaxGroupId, IsTaxIncluded, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -278,8 +376,28 @@ module.exports = {
     BRANCH_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM branchdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT bd.*, 
+          o.Name AS OrganizationName,
+          cd.FirstName AS ContactFirstName, cd.LastName AS ContactLastName, cd.MobileNo AS ContactMobile,
+          ad.AddressLine1, ad.AddressLine2, ad.City, ad.State, ad.Pincode
+        FROM branchdetail bd
+        LEFT JOIN organizationdetail o ON bd.OrganizationId = o.Id AND o.TenantId = bd.TenantId
+        LEFT JOIN contactdetail cd ON bd.ContactDetailId = cd.Id AND cd.TenantId = bd.TenantId
+        LEFT JOIN addressdetail ad ON bd.AddressDetailId = ad.Id AND ad.TenantId = bd.TenantId
+        WHERE bd.TenantId = ? ORDER BY bd.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM branchdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM branchdetail WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT bd.*, 
+          o.Name AS OrganizationName,
+          cd.FirstName AS ContactFirstName, cd.LastName AS ContactLastName, cd.MobileNo AS ContactMobile,
+          ad.AddressLine1, ad.AddressLine2, ad.City, ad.State, ad.Pincode
+        FROM branchdetail bd
+        LEFT JOIN organizationdetail o ON bd.OrganizationId = o.Id AND o.TenantId = bd.TenantId
+        LEFT JOIN contactdetail cd ON bd.ContactDetailId = cd.Id AND cd.TenantId = bd.TenantId
+        LEFT JOIN addressdetail ad ON bd.AddressDetailId = ad.Id AND ad.TenantId = bd.TenantId
+        WHERE bd.Id = ? AND bd.TenantId = ?`,
       INSERT:
         'INSERT INTO branchdetail (Id, TenantId, Name, AddressDetailId, ContactDetailId, OrganizationId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -291,10 +409,22 @@ module.exports = {
     BRANCH_USER_GROUP_MAPPER: {
       SELECT_ALL:
         'SELECT * FROM branchusergroupmapper WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT bugm.*, 
+          bd.Name AS BranchName
+        FROM branchusergroupmapper bugm
+        LEFT JOIN branchdetail bd ON bugm.BranchId = bd.Id AND bd.TenantId = bugm.TenantId
+        WHERE bugm.TenantId = ? ORDER BY bugm.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM branchusergroupmapper WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM branchusergroupmapper WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT bugm.*, 
+          bd.Name AS BranchName
+        FROM branchusergroupmapper bugm
+        LEFT JOIN branchdetail bd ON bugm.BranchId = bd.Id AND bd.TenantId = bugm.TenantId
+        WHERE bugm.Id = ? AND bugm.TenantId = ?`,
       INSERT:
         'INSERT INTO branchusergroupmapper (Id, TenantId, BranchId, UserGroupId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -319,8 +449,32 @@ module.exports = {
     ITEM_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM itemdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT i.*, 
+          c.Name AS CategoryName,
+          u.UnitName AS UOMName,
+          ci.Amount AS CostAmount, ci.IsTaxIncluded,
+          tg.Name AS TaxGroupName
+        FROM itemdetail i
+        LEFT JOIN CategoryDetail c ON i.CategoryId = c.Id AND c.TenantId = i.TenantId
+        LEFT JOIN UOM u ON i.UOMId = u.Id AND u.TenantId = i.TenantId
+        LEFT JOIN costinfo ci ON i.CostInfoId = ci.Id AND ci.TenantId = i.TenantId
+        LEFT JOIN taxgroup tg ON ci.TaxGroupId = tg.Id AND tg.TenantId = i.TenantId
+        WHERE i.TenantId = ? ORDER BY i.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM itemdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM itemdetail WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT i.*, 
+          c.Name AS CategoryName,
+          u.UnitName AS UOMName,
+          ci.Amount AS CostAmount, ci.IsTaxIncluded,
+          tg.Name AS TaxGroupName
+        FROM itemdetail i
+        LEFT JOIN CategoryDetail c ON i.CategoryId = c.Id AND c.TenantId = i.TenantId
+        LEFT JOIN UOM u ON i.UOMId = u.Id AND u.TenantId = i.TenantId
+        LEFT JOIN costinfo ci ON i.CostInfoId = ci.Id AND ci.TenantId = i.TenantId
+        LEFT JOIN taxgroup tg ON ci.TaxGroupId = tg.Id AND tg.TenantId = i.TenantId
+        WHERE i.Id = ? AND i.TenantId = ?`,
       INSERT:
         'INSERT INTO itemdetail (Id, TenantId, Name, Code, Description, CategoryId, UOMId, CostInfoId, SKU, Barcode, HSNCode, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -332,10 +486,30 @@ module.exports = {
     TRANSACTION_TYPE_BASE_CONVERSION: {
       SELECT_ALL:
         'SELECT * FROM transactiontypebaseconversion WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT ttbc.*, 
+          ttc.Prefix AS TransactionTypeConfigPrefix, ttc.Format AS TransactionTypeConfigFormat,
+          fts.Name AS FromStatusName,
+          tts.Name AS ToStatusName
+        FROM transactiontypebaseconversion ttbc
+        LEFT JOIN transactiontypeconfig ttc ON ttbc.TransactionTypeConfigId = ttc.Id AND ttc.TenantId = ttbc.TenantId
+        LEFT JOIN transactiontypestatus fts ON ttbc.FromTransactionTypeStatusId = fts.Id AND fts.TenantId = ttbc.TenantId
+        LEFT JOIN transactiontypestatus tts ON ttbc.ToTransactionTypeStatusId = tts.Id AND tts.TenantId = ttbc.TenantId
+        WHERE ttbc.TenantId = ? ORDER BY ttbc.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM transactiontypebaseconversion WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM transactiontypebaseconversion WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT ttbc.*, 
+          ttc.Prefix AS TransactionTypeConfigPrefix, ttc.Format AS TransactionTypeConfigFormat,
+          fts.Name AS FromStatusName,
+          tts.Name AS ToStatusName
+        FROM transactiontypebaseconversion ttbc
+        LEFT JOIN transactiontypeconfig ttc ON ttbc.TransactionTypeConfigId = ttc.Id AND ttc.TenantId = ttbc.TenantId
+        LEFT JOIN transactiontypestatus fts ON ttbc.FromTransactionTypeStatusId = fts.Id AND fts.TenantId = ttbc.TenantId
+        LEFT JOIN transactiontypestatus tts ON ttbc.ToTransactionTypeStatusId = tts.Id AND tts.TenantId = ttbc.TenantId
+        WHERE ttbc.Id = ? AND ttbc.TenantId = ?`,
       INSERT:
         'INSERT INTO transactiontypebaseconversion (Id, TenantId, TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -348,10 +522,30 @@ module.exports = {
     TRANSACTION_DETAIL_LOG: {
       SELECT_ALL:
         'SELECT * FROM transactiondetaillog WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT tdl.*, 
+          ttc.Prefix AS TransactionTypeConfigPrefix, ttc.Format AS TransactionTypeConfigFormat,
+          tts.Name AS TransactionStatusName,
+          bd.Name AS BranchName
+        FROM transactiondetaillog tdl
+        LEFT JOIN transactiontypeconfig ttc ON tdl.TransactionTypeConfigId = ttc.Id AND ttc.TenantId = tdl.TenantId
+        LEFT JOIN transactiontypestatus tts ON tdl.TransactionTypeStatusId = tts.Id AND tts.TenantId = tdl.TenantId
+        LEFT JOIN branchdetail bd ON tdl.BranchId = bd.Id AND bd.TenantId = tdl.TenantId
+        WHERE tdl.TenantId = ? ORDER BY tdl.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM transactiondetaillog WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM transactiondetaillog WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT tdl.*, 
+          ttc.Prefix AS TransactionTypeConfigPrefix, ttc.Format AS TransactionTypeConfigFormat,
+          tts.Name AS TransactionStatusName,
+          bd.Name AS BranchName
+        FROM transactiondetaillog tdl
+        LEFT JOIN transactiontypeconfig ttc ON tdl.TransactionTypeConfigId = ttc.Id AND ttc.TenantId = tdl.TenantId
+        LEFT JOIN transactiontypestatus tts ON tdl.TransactionTypeStatusId = tts.Id AND tts.TenantId = tdl.TenantId
+        LEFT JOIN branchdetail bd ON tdl.BranchId = bd.Id AND bd.TenantId = tdl.TenantId
+        WHERE tdl.Id = ? AND tdl.TenantId = ?`,
       INSERT:
         'INSERT INTO transactiondetaillog (Id, TenantId, TransactionNo, TransactionTypeConfigId, TransactionTypeStatusId, BranchId, TransactionDate, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -363,10 +557,38 @@ module.exports = {
     TRANSACTION_ITEM_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM transactionitemdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT tid.*, 
+          tdl.TransactionNo,
+          i.Name AS ItemName, i.Code AS ItemCode,
+          bd.BatchNumber,
+          u.UnitName AS UOMName,
+          tg.Name AS TaxGroupName
+        FROM transactionitemdetail tid
+        LEFT JOIN transactiondetaillog tdl ON tid.TransactionDetailLogId = tdl.Id AND tdl.TenantId = tid.TenantId
+        LEFT JOIN itemdetail i ON tid.ItemDetailId = i.Id AND i.TenantId = tid.TenantId
+        LEFT JOIN batchdetail bd ON tid.BatchDetailId = bd.Id AND bd.TenantId = tid.TenantId
+        LEFT JOIN UOM u ON tid.UOMId = u.Id AND u.TenantId = tid.TenantId
+        LEFT JOIN taxgroup tg ON tid.TaxGroupId = tg.Id AND tg.TenantId = tid.TenantId
+        WHERE tid.TenantId = ? ORDER BY tid.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM transactionitemdetail WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM transactionitemdetail WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT tid.*, 
+          tdl.TransactionNo,
+          i.Name AS ItemName, i.Code AS ItemCode,
+          bd.BatchNumber,
+          u.UnitName AS UOMName,
+          tg.Name AS TaxGroupName
+        FROM transactionitemdetail tid
+        LEFT JOIN transactiondetaillog tdl ON tid.TransactionDetailLogId = tdl.Id AND tdl.TenantId = tid.TenantId
+        LEFT JOIN itemdetail i ON tid.ItemDetailId = i.Id AND i.TenantId = tid.TenantId
+        LEFT JOIN batchdetail bd ON tid.BatchDetailId = bd.Id AND bd.TenantId = tid.TenantId
+        LEFT JOIN UOM u ON tid.UOMId = u.Id AND u.TenantId = tid.TenantId
+        LEFT JOIN taxgroup tg ON tid.TaxGroupId = tg.Id AND tg.TenantId = tid.TenantId
+        WHERE tid.Id = ? AND tid.TenantId = ?`,
       INSERT:
         'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, ItemDetailId, BatchDetailId, Quantity, UOMId, Rate, Amount, TaxGroupId, TaxAmount, DiscountAmount, NetAmount, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -378,10 +600,26 @@ module.exports = {
     TRANSACTION_TYPE_CONVERSION_MAPPER: {
       SELECT_ALL:
         'SELECT * FROM transactiontypeconversionmapper WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT ttcm.*, 
+          ftdl.TransactionNo AS FromTransactionNo,
+          ttdl.TransactionNo AS ToTransactionNo
+        FROM transactiontypeconversionmapper ttcm
+        LEFT JOIN transactiondetaillog ftdl ON ttcm.FromTransactionDetailLogId = ftdl.Id AND ftdl.TenantId = ttcm.TenantId
+        LEFT JOIN transactiondetaillog ttdl ON ttcm.ToTransactionDetailLogId = ttdl.Id AND ttdl.TenantId = ttcm.TenantId
+        WHERE ttcm.TenantId = ? ORDER BY ttcm.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM transactiontypeconversionmapper WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM transactiontypeconversionmapper WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT ttcm.*, 
+          ftdl.TransactionNo AS FromTransactionNo,
+          ttdl.TransactionNo AS ToTransactionNo
+        FROM transactiontypeconversionmapper ttcm
+        LEFT JOIN transactiondetaillog ftdl ON ttcm.FromTransactionDetailLogId = ftdl.Id AND ftdl.TenantId = ttcm.TenantId
+        LEFT JOIN transactiondetaillog ttdl ON ttcm.ToTransactionDetailLogId = ttdl.Id AND ttdl.TenantId = ttcm.TenantId
+        WHERE ttcm.Id = ? AND ttcm.TenantId = ?`,
       INSERT:
         'INSERT INTO transactiontypeconversionmapper (Id, TenantId, TransactionTypeBaseConversionId, FromTransactionDetailLogId, ToTransactionDetailLogId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -422,10 +660,26 @@ module.exports = {
     PAYMENT_MODE_TRANSACTION_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM paymentmodetransactiondetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT pmtd.*, 
+          pm.Name AS PaymentModeName,
+          tdl.TransactionNo
+        FROM paymentmodetransactiondetail pmtd
+        LEFT JOIN paymentmode pm ON pmtd.PaymentModeId = pm.Id AND pm.TenantId = pmtd.TenantId
+        LEFT JOIN transactiondetaillog tdl ON pmtd.TransactionDetailLogId = tdl.Id AND tdl.TenantId = pmtd.TenantId
+        WHERE pmtd.TenantId = ? ORDER BY pmtd.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM paymentmodetransactiondetail WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM paymentmodetransactiondetail WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT pmtd.*, 
+          pm.Name AS PaymentModeName,
+          tdl.TransactionNo
+        FROM paymentmodetransactiondetail pmtd
+        LEFT JOIN paymentmode pm ON pmtd.PaymentModeId = pm.Id AND pm.TenantId = pmtd.TenantId
+        LEFT JOIN transactiondetaillog tdl ON pmtd.TransactionDetailLogId = tdl.Id AND tdl.TenantId = pmtd.TenantId
+        WHERE pmtd.Id = ? AND pmtd.TenantId = ?`,
       INSERT:
         'INSERT INTO paymentmodetransactiondetail (Id, TenantId, PaymentModeId, TransactionDetailLogId, Amount, ReferenceNo, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -438,8 +692,24 @@ module.exports = {
     PAYMENT_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM paymentdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT pd.*, 
+          prt.Name AS PaymentReceivedTypeName,
+          tdl.TransactionNo
+        FROM paymentdetail pd
+        LEFT JOIN paymentreceivedtype prt ON pd.PaymentReceivedTypeId = prt.Id AND prt.TenantId = pd.TenantId
+        LEFT JOIN transactiondetaillog tdl ON pd.TransactionDetailLogId = tdl.Id AND tdl.TenantId = pd.TenantId
+        WHERE pd.TenantId = ? ORDER BY pd.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM paymentdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM paymentdetail WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT pd.*, 
+          prt.Name AS PaymentReceivedTypeName,
+          tdl.TransactionNo
+        FROM paymentdetail pd
+        LEFT JOIN paymentreceivedtype prt ON pd.PaymentReceivedTypeId = prt.Id AND prt.TenantId = pd.TenantId
+        LEFT JOIN transactiondetaillog tdl ON pd.TransactionDetailLogId = tdl.Id AND tdl.TenantId = pd.TenantId
+        WHERE pd.Id = ? AND pd.TenantId = ?`,
       INSERT:
         'INSERT INTO paymentdetail (Id, TenantId, PaymentReceivedTypeId, TransactionDetailLogId, Amount, PaymentDate, ReferenceNo, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -451,9 +721,25 @@ module.exports = {
     PAYMENT_BREAKUP: {
       SELECT_ALL:
         'SELECT * FROM paymentbreakup WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT pb.*, 
+          pm.Name AS PaymentModeName,
+          pd.Amount AS PaymentDetailAmount, pd.PaymentDate, pd.ReferenceNo AS PaymentDetailReferenceNo
+        FROM paymentbreakup pb
+        LEFT JOIN paymentmode pm ON pb.PaymentModeId = pm.Id AND pm.TenantId = pb.TenantId
+        LEFT JOIN paymentdetail pd ON pb.PaymentDetailId = pd.Id AND pd.TenantId = pb.TenantId
+        WHERE pb.TenantId = ? ORDER BY pb.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM paymentbreakup WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM paymentbreakup WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT pb.*, 
+          pm.Name AS PaymentModeName,
+          pd.Amount AS PaymentDetailAmount, pd.PaymentDate, pd.ReferenceNo AS PaymentDetailReferenceNo
+        FROM paymentbreakup pb
+        LEFT JOIN paymentmode pm ON pb.PaymentModeId = pm.Id AND pm.TenantId = pb.TenantId
+        LEFT JOIN paymentdetail pd ON pb.PaymentDetailId = pd.Id AND pd.TenantId = pb.TenantId
+        WHERE pb.Id = ? AND pb.TenantId = ?`,
       INSERT:
         'INSERT INTO paymentbreakup (Id, TenantId, PaymentDetailId, PaymentModeId, Amount, ReferenceNo, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:

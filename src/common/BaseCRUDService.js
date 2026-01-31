@@ -41,10 +41,16 @@ class BaseCRUDService {
    * @param {string} tenantId - Tenant ID
    * @param {number} page - Page number
    * @param {number} limit - Items per page
+   * @param {boolean} expand - Whether to include related entity details (default: false)
    * @returns {Promise<Object>} Paginated results
    */
-  async getAll(tenantId, page = 1, limit = 10) {
-    logger.info(`Fetching all ${this.entityName}s`, { tenantId, page, limit });
+  async getAll(tenantId, page = 1, limit = 10, expand = false) {
+    logger.info(`Fetching all ${this.entityName}s`, {
+      tenantId,
+      page,
+      limit,
+      expand,
+    });
 
     // Validate tenantId
     if (!tenantId) {
@@ -68,18 +74,24 @@ class BaseCRUDService {
       ]);
       const total = extractCount(countResult);
 
+      // Determine which query to use based on expand parameter
+      const selectQuery =
+        expand && this.queries.SELECT_ALL_WITH_DETAILS
+          ? this.queries.SELECT_ALL_WITH_DETAILS
+          : this.queries.SELECT_ALL;
+
       // Get paginated data using safe string interpolation (MySQL doesn't support LIMIT/OFFSET placeholders)
-      const baseQueryWithTenant = this.queries.SELECT_ALL.replace(
-        '?',
-        `'${tenantId}'`
-      );
+      const baseQueryWithTenant = selectQuery.replace('?', `'${tenantId}'`);
       const paginatedQuery = buildPaginatedQuery(
         baseQueryWithTenant,
         limitNum,
         offset
       );
 
-      logger.info(`Executing paginated query:`, { query: paginatedQuery });
+      logger.info(`Executing paginated query:`, {
+        query: paginatedQuery,
+        expand,
+      });
 
       const [rows] = await connection.query(paginatedQuery);
 
@@ -90,6 +102,7 @@ class BaseCRUDService {
         count: rows.length,
         total,
         page: pageNum,
+        expand,
       });
 
       return {
@@ -103,16 +116,20 @@ class BaseCRUDService {
    * Get a single record by ID.
    * @param {string} id - Record ID
    * @param {string} tenantId - Tenant ID
+   * @param {boolean} expand - Whether to include related entity details (default: false)
    * @returns {Promise<Object>} Record object
    */
-  async getById(id, tenantId) {
-    logger.info(`Fetching ${this.entityName} by ID`, { id, tenantId });
+  async getById(id, tenantId, expand = false) {
+    logger.info(`Fetching ${this.entityName} by ID`, { id, tenantId, expand });
 
     return await withConnection(async (connection) => {
-      const [rows] = await connection.execute(this.queries.SELECT_BY_ID, [
-        id,
-        tenantId,
-      ]);
+      // Determine which query to use based on expand parameter
+      const selectQuery =
+        expand && this.queries.SELECT_BY_ID_WITH_DETAILS
+          ? this.queries.SELECT_BY_ID_WITH_DETAILS
+          : this.queries.SELECT_BY_ID;
+
+      const [rows] = await connection.execute(selectQuery, [id, tenantId]);
 
       if (rows.length === 0) {
         logger.warn(`${this.entityName} not found`, { id, tenantId });
@@ -122,7 +139,11 @@ class BaseCRUDService {
         );
       }
 
-      logger.info(`${this.entityName} fetched successfully`, { id, tenantId });
+      logger.info(`${this.entityName} fetched successfully`, {
+        id,
+        tenantId,
+        expand,
+      });
       return rows[0];
     });
   }
