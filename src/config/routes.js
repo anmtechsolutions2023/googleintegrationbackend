@@ -9,6 +9,7 @@ const dataRoutes = require('../modules/data/data.routes');
 const auditRoutes = require('../modules/audit/audit.routes');
 const userRoutes = require('../modules/user/user.routes');
 const taxtypeRoutes = require('../modules/taxtype/taxtype.routes');
+const uomRoutes = require('../modules/uom/uom.routes');
 
 /**
  * Registers all application routes with the Express app.
@@ -36,6 +37,9 @@ const registerRoutes = (app) => {
   // Tax Type module - Tax type CRUD operations
   app.use('/api/taxtypes', taxtypeRoutes);
 
+  // UOM module - Unit of Measure CRUD operations
+  app.use('/api/uom', uomRoutes);
+
   // Health check / root endpoint
   app.get('/', (req, res) => {
     res.json({
@@ -50,6 +54,7 @@ const registerRoutes = (app) => {
         { name: 'audit', path: '/api/audit' },
         { name: 'user', path: '/api/user' },
         { name: 'taxtypes', path: '/api/taxtypes' },
+        { name: 'uom', path: '/api/uom' },
       ],
     });
   });

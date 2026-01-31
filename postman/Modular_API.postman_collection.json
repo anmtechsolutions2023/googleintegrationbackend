@@ -30,6 +30,11 @@
       "key": "tax_type_id",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "uom_id",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -413,6 +418,173 @@
               "path": ["api", "taxtypes", "{{tax_type_id}}"]
             },
             "description": "Delete a tax type by ID. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope."
+          }
+        }
+      ]
+    },
+    {
+      "name": "UOM Module",
+      "item": [
+        {
+          "name": "Get All UOMs",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/uom?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "uom"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Items per page (default: 10, max: 100)"
+                }
+              ]
+            },
+            "description": "Get all units of measure for the authenticated user's tenant with pagination support"
+          }
+        },
+        {
+          "name": "Get UOM by ID",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/uom/{{uom_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "uom", "{{uom_id}}"]
+            },
+            "description": "Get a specific unit of measure by its UUID"
+          }
+        },
+        {
+          "name": "Create UOM",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.success && jsonData.data && jsonData.data.Id) {",
+                  "        pm.collectionVariables.set('uom_id', jsonData.data.Id);",
+                  "        console.log('✅ UOM ID saved:', jsonData.data.Id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"UnitName\": \"Kilogram\",\n    \"IsPrimary\": true,\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/uom",
+              "host": ["{{base_url}}"],
+              "path": ["api", "uom"]
+            },
+            "description": "Create a new unit of measure. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope. UnitName is required (max 100 chars), IsPrimary defaults to false, Active defaults to true."
+          }
+        },
+        {
+          "name": "Update UOM",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"UnitName\": \"Gram\",\n    \"IsPrimary\": false,\n    \"Active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/uom/{{uom_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "uom", "{{uom_id}}"]
+            },
+            "description": "Update an existing unit of measure. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope. At least one field must be provided."
+          }
+        },
+        {
+          "name": "Delete UOM",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{app_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/uom/{{uom_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "uom", "{{uom_id}}"]
+            },
+            "description": "Delete a unit of measure by ID. Requires TENANT_ADMIN or TENANT_SUPER_ADMIN scope."
           }
         }
       ]

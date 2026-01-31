@@ -49,6 +49,19 @@ module.exports = {
         'UPDATE TaxTypes SET Name = ?, Value = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM TaxTypes WHERE Id = ? AND TenantId = ?',
     },
+
+    // UOM (Unit of Measure) Queries
+    UOM: {
+      SELECT_ALL:
+        'SELECT * FROM UOM WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM UOM WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM UOM WHERE Id = ? AND TenantId = ?',
+      INSERT:
+        'INSERT INTO UOM (Id, TenantId, UnitName, IsPrimary, Active, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      UPDATE:
+        'UPDATE UOM SET UnitName = ?, IsPrimary = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM UOM WHERE Id = ? AND TenantId = ?',
+    },
   },
   STATUSES: {
     SUCCESS: 'SUCCESS',
