@@ -66,15 +66,15 @@ module.exports = {
     // Category Queries
     CATEGORY: {
       SELECT_ALL:
-        'SELECT * FROM CategoryDetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
-      COUNT: 'SELECT COUNT(*) as total FROM CategoryDetail WHERE TenantId = ?',
+        'SELECT * FROM categorydetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM categorydetail WHERE TenantId = ?',
       SELECT_BY_ID:
-        'SELECT * FROM CategoryDetail WHERE Id = ? AND TenantId = ?',
+        'SELECT * FROM categorydetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO CategoryDetail (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO categorydetail (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE CategoryDetail SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
-      DELETE: 'DELETE FROM CategoryDetail WHERE Id = ? AND TenantId = ?',
+        'UPDATE categorydetail SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM categorydetail WHERE Id = ? AND TenantId = ?',
     },
 
     // Transaction Type Config Queries
@@ -111,24 +111,10 @@ module.exports = {
     UOM_FACTOR: {
       SELECT_ALL:
         'SELECT * FROM uomfactor WHERE TenantId = ? ORDER BY CreatedOn DESC',
-      SELECT_ALL_WITH_DETAILS: `
-        SELECT uf.*, 
-          pu.UnitName AS PrimaryUOMName, 
-          su.UnitName AS SecondaryUOMName
-        FROM uomfactor uf
-        LEFT JOIN UOM pu ON uf.PrimaryUOMId = pu.Id AND pu.TenantId = uf.TenantId
-        LEFT JOIN UOM su ON uf.SecondaryUOMId = su.Id AND su.TenantId = uf.TenantId
-        WHERE uf.TenantId = ? ORDER BY uf.CreatedOn DESC`,
+      SELECT_ALL_WITH_DETAILS: `SELECT t.*, ref0.UnitName AS PrimaryUnitName, ref1.UnitName AS SecondaryUnitName FROM uomfactor t LEFT JOIN UOM ref0 ON t.PrimaryUOMId = ref0.Id LEFT JOIN UOM ref1 ON t.SecondaryUOMId = ref1.Id WHERE t.TenantId = ? ORDER BY t.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM uomfactor WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM uomfactor WHERE Id = ? AND TenantId = ?',
-      SELECT_BY_ID_WITH_DETAILS: `
-        SELECT uf.*, 
-          pu.UnitName AS PrimaryUOMName, 
-          su.UnitName AS SecondaryUOMName
-        FROM uomfactor uf
-        LEFT JOIN UOM pu ON uf.PrimaryUOMId = pu.Id AND pu.TenantId = uf.TenantId
-        LEFT JOIN UOM su ON uf.SecondaryUOMId = su.Id AND su.TenantId = uf.TenantId
-        WHERE uf.Id = ? AND uf.TenantId = ?`,
+      SELECT_BY_ID_WITH_DETAILS: `SELECT t.*, ref0.UnitName AS PrimaryUnitName, ref1.UnitName AS SecondaryUnitName FROM uomfactor t LEFT JOIN UOM ref0 ON t.PrimaryUOMId = ref0.Id LEFT JOIN UOM ref1 ON t.SecondaryUOMId = ref1.Id WHERE t.Id = ? AND t.TenantId = ?`,
       INSERT:
         'INSERT INTO uomfactor (Id, TenantId, PrimaryUOMId, SecondaryUOMId, Factor, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -377,15 +363,13 @@ module.exports = {
       SELECT_ALL:
         'SELECT * FROM branchdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `
-        SELECT bd.*, 
-          o.Name AS OrganizationName,
-          cd.FirstName AS ContactFirstName, cd.LastName AS ContactLastName, cd.MobileNo AS ContactMobile,
-          ad.AddressLine1, ad.AddressLine2, ad.City, ad.State, ad.Pincode
-        FROM branchdetail bd
-        LEFT JOIN organizationdetail o ON bd.OrganizationId = o.Id AND o.TenantId = bd.TenantId
-        LEFT JOIN contactdetail cd ON bd.ContactDetailId = cd.Id AND cd.TenantId = bd.TenantId
-        LEFT JOIN addressdetail ad ON bd.AddressDetailId = ad.Id AND ad.TenantId = bd.TenantId
-        WHERE bd.TenantId = ? ORDER BY bd.CreatedOn DESC`,
+        SELECT t.*, o.Name AS OrgName, CONCAT(c.FirstName, ' ', c.LastName) AS ContactName, a.City, a.AddressLine1, conf.Prefix 
+        FROM branchdetail t 
+        LEFT JOIN organizationdetail o ON t.OrganizationDetailId = o.Id 
+        LEFT JOIN contactdetail c ON t.ContactDetailId = c.Id 
+        LEFT JOIN addressdetail a ON t.AddressDetailId = a.Id 
+        LEFT JOIN transactiontypeconfig conf ON t.TransactionTypeConfigId = conf.Id 
+        WHERE t.TenantId = ?`,
       COUNT: 'SELECT COUNT(*) as total FROM branchdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM branchdetail WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `
@@ -394,14 +378,14 @@ module.exports = {
           cd.FirstName AS ContactFirstName, cd.LastName AS ContactLastName, cd.MobileNo AS ContactMobile,
           ad.AddressLine1, ad.AddressLine2, ad.City, ad.State, ad.Pincode
         FROM branchdetail bd
-        LEFT JOIN organizationdetail o ON bd.OrganizationId = o.Id AND o.TenantId = bd.TenantId
+        LEFT JOIN organizationdetail o ON bd.OrganizationDetailId = o.Id AND o.TenantId = bd.TenantId
         LEFT JOIN contactdetail cd ON bd.ContactDetailId = cd.Id AND cd.TenantId = bd.TenantId
         LEFT JOIN addressdetail ad ON bd.AddressDetailId = ad.Id AND ad.TenantId = bd.TenantId
         WHERE bd.Id = ? AND bd.TenantId = ?`,
       INSERT:
-        'INSERT INTO branchdetail (Id, TenantId, Name, AddressDetailId, ContactDetailId, OrganizationId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO branchdetail (Id, TenantId, OrganizationDetailId, ContactDetailId, AddressDetailId, TransactionTypeConfigId, BranchName, TINNo, GSTIN, PAN, CF1, CF2, CF3, CF4, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE branchdetail SET Name = ?, AddressDetailId = ?, ContactDetailId = ?, OrganizationId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE branchdetail SET OrganizationDetailId = ?, ContactDetailId = ?, AddressDetailId = ?, TransactionTypeConfigId = ?, BranchName = ?, TINNo = ?, GSTIN = ?, PAN = ?, CF1 = ?, CF2 = ?, CF3 = ?, CF4 = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM branchdetail WHERE Id = ? AND TenantId = ?',
     },
 
@@ -411,7 +395,7 @@ module.exports = {
         'SELECT * FROM branchusergroupmapper WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `
         SELECT bugm.*, 
-          bd.Name AS BranchName
+          bd.BranchName AS BranchName
         FROM branchusergroupmapper bugm
         LEFT JOIN branchdetail bd ON bugm.BranchId = bd.Id AND bd.TenantId = bugm.TenantId
         WHERE bugm.TenantId = ? ORDER BY bugm.CreatedOn DESC`,
@@ -421,7 +405,7 @@ module.exports = {
         'SELECT * FROM branchusergroupmapper WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `
         SELECT bugm.*, 
-          bd.Name AS BranchName
+          bd.BranchName AS BranchName
         FROM branchusergroupmapper bugm
         LEFT JOIN branchdetail bd ON bugm.BranchId = bd.Id AND bd.TenantId = bugm.TenantId
         WHERE bugm.Id = ? AND bugm.TenantId = ?`,
@@ -436,12 +420,13 @@ module.exports = {
     BATCH_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM batchdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `SELECT t.*, cost.Amount, u.UnitName, b.BranchName FROM batchdetail t LEFT JOIN costinfo cost ON t.CostInfoId = cost.Id LEFT JOIN UOM u ON t.UOMId = u.Id LEFT JOIN branchdetail b ON t.BranchDetailId = b.Id WHERE t.TenantId = ?`,
       COUNT: 'SELECT COUNT(*) as total FROM batchdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM batchdetail WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO batchdetail (Id, TenantId, BatchNumber, ManufacturedDate, ExpiryDate, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO batchdetail (Id, TenantId, BatchNo, Barcode, MfgDate, Expdate, PurchaseDate, IsNonReturnable, CostInfoId, UOMId, Quantity, MapProviderLocationMapperId, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE batchdetail SET BatchNumber = ?, ManufacturedDate = ?, ExpiryDate = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE batchdetail SET BatchNo = ?, Barcode = ?, MfgDate = ?, Expdate = ?, PurchaseDate = ?, IsNonReturnable = ?, CostInfoId = ?, UOMId = ?, Quantity = ?, MapProviderLocationMapperId = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM batchdetail WHERE Id = ? AND TenantId = ?',
     },
 
@@ -449,18 +434,7 @@ module.exports = {
     ITEM_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM itemdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
-      SELECT_ALL_WITH_DETAILS: `
-        SELECT i.*, 
-          c.Name AS CategoryName,
-          u.UnitName AS UOMName,
-          ci.Amount AS CostAmount, ci.IsTaxIncluded,
-          tg.Name AS TaxGroupName
-        FROM itemdetail i
-        LEFT JOIN CategoryDetail c ON i.CategoryId = c.Id AND c.TenantId = i.TenantId
-        LEFT JOIN UOM u ON i.UOMId = u.Id AND u.TenantId = i.TenantId
-        LEFT JOIN costinfo ci ON i.CostInfoId = ci.Id AND ci.TenantId = i.TenantId
-        LEFT JOIN taxgroup tg ON ci.TaxGroupId = tg.Id AND tg.TenantId = i.TenantId
-        WHERE i.TenantId = ? ORDER BY i.CreatedOn DESC`,
+      SELECT_ALL_WITH_DETAILS: `SELECT t.*, b.BatchNo, cat.Name AS CategoryName FROM itemdetail t LEFT JOIN batchdetail b ON t.BatchDetailId = b.Id LEFT JOIN categorydetail cat ON t.CategoryId = cat.Id WHERE t.TenantId = ?`,
       COUNT: 'SELECT COUNT(*) as total FROM itemdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM itemdetail WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `
@@ -470,7 +444,7 @@ module.exports = {
           ci.Amount AS CostAmount, ci.IsTaxIncluded,
           tg.Name AS TaxGroupName
         FROM itemdetail i
-        LEFT JOIN CategoryDetail c ON i.CategoryId = c.Id AND c.TenantId = i.TenantId
+        LEFT JOIN categorydetail c ON i.CategoryId = c.Id AND c.TenantId = i.TenantId
         LEFT JOIN UOM u ON i.UOMId = u.Id AND u.TenantId = i.TenantId
         LEFT JOIN costinfo ci ON i.CostInfoId = ci.Id AND ci.TenantId = i.TenantId
         LEFT JOIN taxgroup tg ON ci.TaxGroupId = tg.Id AND tg.TenantId = i.TenantId
@@ -557,20 +531,7 @@ module.exports = {
     TRANSACTION_ITEM_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM transactionitemdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
-      SELECT_ALL_WITH_DETAILS: `
-        SELECT tid.*, 
-          tdl.TransactionNo,
-          i.Name AS ItemName, i.Code AS ItemCode,
-          bd.BatchNumber,
-          u.UnitName AS UOMName,
-          tg.Name AS TaxGroupName
-        FROM transactionitemdetail tid
-        LEFT JOIN transactiondetaillog tdl ON tid.TransactionDetailLogId = tdl.Id AND tdl.TenantId = tid.TenantId
-        LEFT JOIN itemdetail i ON tid.ItemDetailId = i.Id AND i.TenantId = tid.TenantId
-        LEFT JOIN batchdetail bd ON tid.BatchDetailId = bd.Id AND bd.TenantId = tid.TenantId
-        LEFT JOIN UOM u ON tid.UOMId = u.Id AND u.TenantId = tid.TenantId
-        LEFT JOIN taxgroup tg ON tid.TaxGroupId = tg.Id AND tg.TenantId = tid.TenantId
-        WHERE tid.TenantId = ? ORDER BY tid.CreatedOn DESC`,
+      SELECT_ALL_WITH_DETAILS: `SELECT t.*, log.TransactionDateTime, item.SKU, item.Type AS ItemType FROM transactionitemdetail t LEFT JOIN transactiondetaillog log ON t.TransactionDetailLogId = log.Id LEFT JOIN itemdetail item ON t.ItemId = item.Id WHERE t.TenantId = ?`,
       COUNT:
         'SELECT COUNT(*) as total FROM transactionitemdetail WHERE TenantId = ?',
       SELECT_BY_ID:
@@ -722,13 +683,13 @@ module.exports = {
       SELECT_ALL:
         'SELECT * FROM paymentbreakup WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `
-        SELECT pb.*, 
-          pm.Name AS PaymentModeName,
-          pd.Amount AS PaymentDetailAmount, pd.PaymentDate, pd.ReferenceNo AS PaymentDetailReferenceNo
-        FROM paymentbreakup pb
-        LEFT JOIN paymentmode pm ON pb.PaymentModeId = pm.Id AND pm.TenantId = pb.TenantId
-        LEFT JOIN paymentdetail pd ON pb.PaymentDetailId = pd.Id AND pd.TenantId = pb.TenantId
-        WHERE pb.TenantId = ? ORDER BY pb.CreatedOn DESC`,
+        SELECT t.*, acc.Name AS AccountName, pay.TotalAmount, pmt.RefNo, prt.Type AS ReceivedTypeName 
+        FROM paymentbreakup t 
+        LEFT JOIN accounttypebase acc ON t.AccountTypeBaseId = acc.Id 
+        LEFT JOIN paymentdetail pay ON t.PaymentDetailId = pay.Id 
+        LEFT JOIN paymentmodetransactiondetail pmt ON t.PaymentModeTransactionDetailId = pmt.Id 
+        LEFT JOIN paymentreceivedtype prt ON t.PaymentReceivedTypeId = prt.Id 
+        WHERE t.TenantId = ?`,
       COUNT: 'SELECT COUNT(*) as total FROM paymentbreakup WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM paymentbreakup WHERE Id = ? AND TenantId = ?',
@@ -798,4 +759,4 @@ module.exports = {
     BILLING_READ: 'billing:READ',
     BILLING_WRITE: 'billing:WRITE',
   },
-};
+}

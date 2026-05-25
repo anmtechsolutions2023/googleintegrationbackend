@@ -13,6 +13,8 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: config.DATABASE.CONNECTION_LIMIT,
   queueLimit: config.DATABASE.QUEUE_LIMIT,
+  // Use UTC timezone for consistent date handling between app and DB
+  timezone: 'Z',
 })
 
 module.exports = pool
