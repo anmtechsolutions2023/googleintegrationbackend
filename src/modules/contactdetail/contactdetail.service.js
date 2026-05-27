@@ -33,6 +33,7 @@ class ContactDetailService extends BaseCRUDService {
       data.MobileNo !== undefined ? data.MobileNo : existing.MobileNo,
       data.AltMobileNo !== undefined ? data.AltMobileNo : existing.AltMobileNo,
       data.Landline1 !== undefined ? data.Landline1 : existing.Landline1,
+      // DB column is LandLine2 (after migration rename from Landline2)
       data.LandLine2 !== undefined ? data.LandLine2 : existing.LandLine2,
       data.Ext1 !== undefined ? data.Ext1 : existing.Ext1,
       data.Ext2 !== undefined ? data.Ext2 : existing.Ext2,

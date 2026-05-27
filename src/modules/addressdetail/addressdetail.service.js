@@ -19,6 +19,7 @@ class AddressDetailService extends BaseCRUDService {
       data.MapProviderLocationMapperId || null,
       data.Landmark || null,
       data.ContactAddressTypeId || null,
+      data.TagName,
       data.Active !== undefined ? data.Active : true,
       userEmail,
       userEmail,
@@ -43,6 +44,7 @@ class AddressDetailService extends BaseCRUDService {
       data.ContactAddressTypeId !== undefined
         ? data.ContactAddressTypeId
         : existing.ContactAddressTypeId,
+      data.TagName !== undefined ? data.TagName : existing.TagName,
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,
       id,

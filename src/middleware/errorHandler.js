@@ -17,19 +17,33 @@ const errorHandler = (err, req, res, next) => {
 
   // Handle MySQL duplicate entry error (ER_DUP_ENTRY, errno 1062)
   if (err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
-    // Extract field name from error message for better context
-    let fieldName = 'value'
     const match = err.message?.match(/for key '([^']+)'/)
-    if (match && match[1]) {
-      // Extract field name from constraint name (e.g., 'TaxTypes.Name' -> 'Name')
-      const parts = match[1].split('.')
-      fieldName = parts[parts.length - 1]
+    const constraintKey = match && match[1] ? match[1].split('.').pop() : null
+
+    // Friendly messages for named composite constraints
+    const CONSTRAINT_MESSAGES = {
+      uk_contact_name_mobile:
+        'A contact with this FirstName, LastName and MobileNo combination already exists.',
+      uk_mplm_tagname:
+        'A map provider location mapper with this TagName already exists.',
+      uk_ad_tagname:
+        'An address detail with this TagName already exists.',
+      uk_ttc_tagname:
+        'A transaction type config with this TagName already exists.',
+    }
+
+    let message
+    if (constraintKey && CONSTRAINT_MESSAGES[constraintKey]) {
+      message = CONSTRAINT_MESSAGES[constraintKey]
+    } else {
+      const fieldName = constraintKey || 'value'
+      message = `A record with this ${fieldName} already exists.`
     }
 
     return res.status(MESSAGES.HTTP_STATUS.CONFLICT).json({
       success: false,
       status: MESSAGES.HTTP_STATUS.CONFLICT,
-      message: `A record with this ${fieldName} already exists.`,
+      message,
       error: 'DUPLICATE_ENTRY',
     })
   }

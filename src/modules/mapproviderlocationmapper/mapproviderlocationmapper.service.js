@@ -13,6 +13,7 @@ class MapProviderLocationMapperService extends BaseCRUDService {
       tenantId,
       data.MapProviderId,
       data.LocationDetailId,
+      data.TagName,
       data.Active !== undefined ? data.Active : true,
       userEmail,
       userEmail,
@@ -27,6 +28,7 @@ class MapProviderLocationMapperService extends BaseCRUDService {
       data.LocationDetailId !== undefined
         ? data.LocationDetailId
         : existing.LocationDetailId,
+      data.TagName !== undefined ? data.TagName : existing.TagName,
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,
       id,

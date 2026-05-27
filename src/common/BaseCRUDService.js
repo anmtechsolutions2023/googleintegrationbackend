@@ -225,7 +225,10 @@ class BaseCRUDService {
         query: this.queries.UPDATE,
       })
 
-      await connection.execute(this.queries.UPDATE, params)
+      // Sanitize undefined values to null so mysql2 doesn't throw
+      const sanitizedParams = params.map((p) => (p === undefined ? null : p))
+
+      await connection.execute(this.queries.UPDATE, sanitizedParams)
 
       logger.info(`${this.entityName} updated successfully`, { id, tenantId })
 

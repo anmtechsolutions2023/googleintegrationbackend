@@ -86,9 +86,9 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM transactiontypeconfig WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO transactiontypeconfig (Id, TenantId, StartCounterNo, Prefix, Format, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO transactiontypeconfig (Id, TenantId, StartCounterNo, Prefix, Format, TagName, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE transactiontypeconfig SET StartCounterNo = ?, Prefix = ?, Format = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE transactiontypeconfig SET StartCounterNo = ?, Prefix = ?, Format = ?, TagName = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactiontypeconfig WHERE Id = ? AND TenantId = ?',
     },
 
@@ -264,28 +264,33 @@ module.exports = {
         LEFT JOIN locationdetail ld ON mplm.LocationDetailId = ld.Id AND ld.TenantId = mplm.TenantId
         WHERE mplm.Id = ? AND mplm.TenantId = ?`,
       INSERT:
-        'INSERT INTO mapproviderlocationmapper (Id, TenantId, MapProviderId, LocationDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO mapproviderlocationmapper (Id, TenantId, MapProviderId, LocationDetailId, TagName, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE mapproviderlocationmapper SET MapProviderId = ?, LocationDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE mapproviderlocationmapper SET MapProviderId = ?, LocationDetailId = ?, TagName = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE:
         'DELETE FROM mapproviderlocationmapper WHERE Id = ? AND TenantId = ?',
     },
 
     // Contact Detail Queries
     CONTACT_DETAIL: {
-      SELECT_ALL:
-        'SELECT * FROM contactdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL: `
+        SELECT cd.*, cat.Name AS ContactAddressTypeName
+        FROM contactdetail cd
+        LEFT JOIN contactaddresstype cat ON cd.ContactAddressTypeId = cat.Id AND cat.TenantId = cd.TenantId
+        WHERE cd.TenantId = ? ORDER BY cd.CreatedOn DESC`,
       SELECT_ALL_WITH_DETAILS: `
-        SELECT cd.*, 
-          cat.Name AS ContactAddressTypeName
+        SELECT cd.*, cat.Name AS ContactAddressTypeName
         FROM contactdetail cd
         LEFT JOIN contactaddresstype cat ON cd.ContactAddressTypeId = cat.Id AND cat.TenantId = cd.TenantId
         WHERE cd.TenantId = ? ORDER BY cd.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM contactdetail WHERE TenantId = ?',
-      SELECT_BY_ID: 'SELECT * FROM contactdetail WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID: `
+        SELECT cd.*, cat.Name AS ContactAddressTypeName
+        FROM contactdetail cd
+        LEFT JOIN contactaddresstype cat ON cd.ContactAddressTypeId = cat.Id AND cat.TenantId = cd.TenantId
+        WHERE cd.Id = ? AND cd.TenantId = ?`,
       SELECT_BY_ID_WITH_DETAILS: `
-        SELECT cd.*, 
-          cat.Name AS ContactAddressTypeName
+        SELECT cd.*, cat.Name AS ContactAddressTypeName
         FROM contactdetail cd
         LEFT JOIN contactaddresstype cat ON cd.ContactAddressTypeId = cat.Id AND cat.TenantId = cd.TenantId
         WHERE cd.Id = ? AND cd.TenantId = ?`,
@@ -327,9 +332,9 @@ module.exports = {
         LEFT JOIN locationdetail ld ON mplm.LocationDetailId = ld.Id AND ld.TenantId = ad.TenantId
         WHERE ad.Id = ? AND ad.TenantId = ?`,
       INSERT:
-        'INSERT INTO addressdetail (Id, TenantId, AddressLine1, AddressLine2, City, State, Pincode, MapProviderLocationMapperId, Landmark, ContactAddressTypeId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO addressdetail (Id, TenantId, AddressLine1, AddressLine2, City, State, Pincode, MapProviderLocationMapperId, Landmark, ContactAddressTypeId, TagName, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE addressdetail SET AddressLine1 = ?, AddressLine2 = ?, City = ?, State = ?, Pincode = ?, MapProviderLocationMapperId = ?, Landmark = ?, ContactAddressTypeId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE addressdetail SET AddressLine1 = ?, AddressLine2 = ?, City = ?, State = ?, Pincode = ?, MapProviderLocationMapperId = ?, Landmark = ?, ContactAddressTypeId = ?, TagName = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM addressdetail WHERE Id = ? AND TenantId = ?',
     },
 

@@ -56,6 +56,7 @@ create table if not exists transactiontypeconfig
     StartCounterNo varchar(50) not null,
     Prefix varchar(50) not null,
     Format varchar(100) not null,
+    TagName varchar(100) null,
     Active tinyint(1) not null,
     TenantId varchar(50) not null,
     CreatedOn datetime,
@@ -63,8 +64,14 @@ create table if not exists transactiontypeconfig
     UpdatedOn datetime,
     UpdatedBy varchar(50),
     PRIMARY KEY (Id),
-    UNIQUE (StartCounterNo, Prefix, Format, TenantId)
+    UNIQUE (StartCounterNo, Prefix, Format, TenantId),
+    UNIQUE KEY uk_ttc_tagname (TagName)
 );
+
+-- Migration: add TagName to existing transactiontypeconfig tables
+-- Run these statements once on existing databases:
+-- ALTER TABLE transactiontypeconfig ADD COLUMN TagName varchar(100) NULL AFTER Format;
+-- ALTER TABLE transactiontypeconfig ADD UNIQUE KEY uk_ttc_tagname (TagName);
 
 -- Organization Detail table
 create table if not exists organizationdetail
@@ -245,6 +252,7 @@ create table if not exists mapproviderlocationmapper
 	Id varchar(50) not null,
     MapProviderId varchar(50) not null,
     LocationDetailId varchar(50) not null,
+    TagName varchar(100) null,
     TenantId varchar(50) not null,
     Active tinyint(1) not null,
     CreatedOn datetime,
@@ -253,9 +261,15 @@ create table if not exists mapproviderlocationmapper
     UpdatedBy varchar(50),
     PRIMARY KEY (Id),
     UNIQUE (MapProviderId, LocationDetailId, TenantId),
+    UNIQUE KEY uk_mplm_tagname (TagName),
     FOREIGN KEY (MapProviderId) REFERENCES mapprovider(Id),
     FOREIGN KEY (LocationDetailId) REFERENCES locationdetail(Id)
 );
+
+-- Migration: add TagName to existing mapproviderlocationmapper tables
+-- Run these statements once on existing databases:
+-- ALTER TABLE mapproviderlocationmapper ADD COLUMN TagName varchar(100) NULL AFTER LocationDetailId;
+-- ALTER TABLE mapproviderlocationmapper ADD UNIQUE KEY uk_mplm_tagname (TagName);
 
 -- Contact Detail table
 create table if not exists contactdetail
@@ -266,10 +280,10 @@ create table if not exists contactdetail
     MobileNo varchar(50),
     AltMobileNo varchar(50),
     Landline1 varchar(50),
-    Landline2 varchar(50),
+    LandLine2 varchar(50),
     Ext1 varchar(50),
     Ext2 varchar(50),
-    ContactAddressTypeId varchar(50) not null,
+    ContactAddressTypeId varchar(50),
     TenantId varchar(50) not null,
     Active tinyint(1) not null,
     CreatedOn datetime,
@@ -277,9 +291,89 @@ create table if not exists contactdetail
     UpdatedOn datetime,
     UpdatedBy varchar(50),
     PRIMARY KEY (Id),
-    UNIQUE (FirstName, LastName, ContactAddressTypeId, TenantId),
+    CONSTRAINT uk_contact_name_mobile UNIQUE (FirstName, LastName, MobileNo, TenantId),
     FOREIGN KEY (ContactAddressTypeId) REFERENCES contactaddresstype(Id)
 );
+
+-- ============================================================
+-- Migration: contactdetail table — run once on existing DB
+-- Safe to re-run (checks before each step)
+-- ============================================================
+
+DROP PROCEDURE IF EXISTS migrate_contactdetail;
+
+DELIMITER //
+
+CREATE PROCEDURE migrate_contactdetail()
+BEGIN
+
+    -- Step 1: Rename Landline2 -> LandLine2 (only if old name still exists)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'contactdetail'
+          AND COLUMN_NAME  = 'Landline2'
+    ) THEN
+        ALTER TABLE contactdetail CHANGE Landline2 LandLine2 VARCHAR(50);
+    END IF;
+
+    -- Step 2: Drop every unique index except PRIMARY and uk_contact_name_mobile
+    BEGIN
+        DECLARE v_done  INT DEFAULT 0;
+        DECLARE v_idx   VARCHAR(255);
+        DECLARE cur CURSOR FOR
+            SELECT DISTINCT INDEX_NAME
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME   = 'contactdetail'
+              AND INDEX_NAME  NOT IN ('PRIMARY', 'uk_contact_name_mobile')
+              AND NON_UNIQUE   = 0;
+        DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = 1;
+
+        OPEN cur;
+        drop_loop: LOOP
+            FETCH cur INTO v_idx;
+            IF v_done THEN LEAVE drop_loop; END IF;
+            SET @drop_sql = CONCAT('ALTER TABLE contactdetail DROP INDEX `', v_idx, '`');
+            PREPARE stmt FROM @drop_sql;
+            EXECUTE stmt;
+            DEALLOCATE PREPARE stmt;
+        END LOOP;
+        CLOSE cur;
+    END;
+
+    -- Step 3: Add new composite unique constraint (if not already present)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'contactdetail'
+          AND INDEX_NAME   = 'uk_contact_name_mobile'
+    ) THEN
+        ALTER TABLE contactdetail
+            ADD CONSTRAINT uk_contact_name_mobile
+            UNIQUE (FirstName, LastName, MobileNo, TenantId);
+    END IF;
+
+    -- Step 4: Make ContactAddressTypeId nullable (if still defined as NOT NULL)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'contactdetail'
+          AND COLUMN_NAME  = 'ContactAddressTypeId'
+          AND IS_NULLABLE  = 'NO'
+    ) THEN
+        ALTER TABLE contactdetail
+            MODIFY ContactAddressTypeId VARCHAR(50) NULL;
+    END IF;
+
+END //
+
+DELIMITER ;
+
+CALL migrate_contactdetail();
+DROP PROCEDURE IF EXISTS migrate_contactdetail;
+
+-- ============================================================
 
 -- Address Detail table
 create table if not exists addressdetail
@@ -293,6 +387,7 @@ create table if not exists addressdetail
     MapProviderLocationMapperId varchar(50) not null,
     Landmark varchar(50),
     ContactAddressTypeId varchar(50) not null,
+    TagName varchar(100) null,
     TenantId varchar(50) not null,
     Active tinyint(1) not null,
     CreatedOn datetime,
@@ -301,9 +396,15 @@ create table if not exists addressdetail
     UpdatedBy varchar(50),
     PRIMARY KEY (Id),
     UNIQUE (AddressLine1, City, ContactAddressTypeId, TenantId),
+    UNIQUE KEY uk_ad_tagname (TagName),
     FOREIGN KEY (ContactAddressTypeId) REFERENCES contactaddresstype(Id),
     FOREIGN KEY (MapProviderLocationMapperId) REFERENCES mapproviderlocationmapper(Id)
 );
+
+-- Migration: add TagName to existing addressdetail tables
+-- Run these statements once on existing databases:
+-- ALTER TABLE addressdetail ADD COLUMN TagName varchar(100) NULL AFTER ContactAddressTypeId;
+-- ALTER TABLE addressdetail ADD UNIQUE KEY uk_ad_tagname (TagName);
 
 -- Cost Info table
 create table if not exists costinfo

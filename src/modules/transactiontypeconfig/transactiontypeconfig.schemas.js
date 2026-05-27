@@ -7,6 +7,7 @@ const createTransactionTypeConfigSchema = Joi.object({
   StartCounterNo: Joi.number().integer().min(0).required(),
   Prefix: Joi.string().max(50).trim().allow('').optional(),
   Format: Joi.string().max(100).trim().required(),
+  TagName: Joi.string().max(100).required(),
   Active: Joi.boolean().optional().default(true),
 });
 
@@ -14,6 +15,7 @@ const updateTransactionTypeConfigSchema = Joi.object({
   StartCounterNo: Joi.number().integer().min(0).optional(),
   Prefix: Joi.string().max(50).trim().allow('').optional(),
   Format: Joi.string().max(100).trim().optional(),
+  TagName: Joi.string().max(100).optional(),
   Active: Joi.boolean().optional(),
 }).min(1);
 

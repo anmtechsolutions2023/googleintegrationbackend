@@ -4,12 +4,14 @@ const Joi = require('joi');
 const createSchema = Joi.object({
   MapProviderId: Joi.string().uuid().required(),
   LocationDetailId: Joi.string().uuid().required(),
+  TagName: Joi.string().max(100).required(),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   MapProviderId: Joi.string().uuid().optional(),
   LocationDetailId: Joi.string().uuid().optional(),
+  TagName: Joi.string().max(100).optional(),
   Active: Joi.boolean().optional(),
 }).min(1);
 

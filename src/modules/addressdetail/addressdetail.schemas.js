@@ -10,6 +10,7 @@ const createSchema = Joi.object({
   MapProviderLocationMapperId: Joi.string().uuid().optional().allow(null),
   Landmark: Joi.string().optional().max(255).trim().allow(null, ''),
   ContactAddressTypeId: Joi.string().uuid().optional().allow(null),
+  TagName: Joi.string().max(100).required(),
   Active: Joi.boolean().optional().default(true),
 });
 
@@ -22,6 +23,7 @@ const updateSchema = Joi.object({
   MapProviderLocationMapperId: Joi.string().uuid().optional().allow(null),
   Landmark: Joi.string().optional().max(255).trim().allow(null, ''),
   ContactAddressTypeId: Joi.string().uuid().optional().allow(null),
+  TagName: Joi.string().max(100).optional(),
   Active: Joi.boolean().optional(),
 }).min(1);
 
