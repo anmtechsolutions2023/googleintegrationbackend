@@ -8,6 +8,23 @@ class TransactionDetailLogService extends BaseCRUDService {
   }
 
   prepareInsertParams(id, data, tenantId, userEmail) {
+    const normalizeDate = (val) => {
+      if (!val && val !== 0) return null
+      if (val instanceof Date && !isNaN(val))
+        return val.toISOString().split('T')[0]
+      if (typeof val === 'string') {
+        // DD-MM-YYYY must be checked FIRST — generic JS parse misreads it as MM-DD-YYYY
+        const m = val.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
+        if (m)
+          return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+        // ISO or other standard formats — parse as UTC to avoid timezone shift
+        const d = new Date(val.includes('T') ? val : val + 'T00:00:00Z')
+        if (!isNaN(d)) return d.toISOString().split('T')[0]
+        return null
+      }
+      return null
+    }
+
     return [
       id,
       tenantId,
@@ -15,7 +32,7 @@ class TransactionDetailLogService extends BaseCRUDService {
       data.TransactionTypeConfigId,
       data.TransactionTypeStatusId || null,
       data.BranchId || null,
-      data.TransactionDate || null,
+      normalizeDate(data.TransactionDate),
       data.Remarks || null,
       data.Active !== undefined ? data.Active : true,
       userEmail,
@@ -24,20 +41,29 @@ class TransactionDetailLogService extends BaseCRUDService {
   }
 
   prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+    const normalizeDate = (val) => {
+      if (!val && val !== 0) return null
+      if (val instanceof Date && !isNaN(val))
+        return val.toISOString().split('T')[0]
+      if (typeof val === 'string') {
+        // DD-MM-YYYY must be checked FIRST — generic JS parse misreads it as MM-DD-YYYY
+        const m = val.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
+        if (m)
+          return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+        // ISO or other standard formats — parse as UTC to avoid timezone shift
+        const d = new Date(val.includes('T') ? val : val + 'T00:00:00Z')
+        if (!isNaN(d)) return d.toISOString().split('T')[0]
+        return null
+      }
+      return null
+    }
+
     return [
-      data.TransactionNo !== undefined
-        ? data.TransactionNo
-        : existing.TransactionNo,
-      data.TransactionTypeConfigId !== undefined
-        ? data.TransactionTypeConfigId
-        : existing.TransactionTypeConfigId,
-      data.TransactionTypeStatusId !== undefined
-        ? data.TransactionTypeStatusId
-        : existing.TransactionTypeStatusId,
+      data.TransactionNo !== undefined ? data.TransactionNo : existing.TransactionNo,
+      data.TransactionTypeConfigId !== undefined ? data.TransactionTypeConfigId : existing.TransactionTypeConfigId,
+      data.TransactionTypeStatusId !== undefined ? data.TransactionTypeStatusId : existing.TransactionTypeStatusId,
       data.BranchId !== undefined ? data.BranchId : existing.BranchId,
-      data.TransactionDate !== undefined
-        ? data.TransactionDate
-        : existing.TransactionDate,
+      normalizeDate(data.TransactionDate !== undefined ? data.TransactionDate : existing.TransactionDate),
       data.Remarks !== undefined ? data.Remarks : existing.Remarks,
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,

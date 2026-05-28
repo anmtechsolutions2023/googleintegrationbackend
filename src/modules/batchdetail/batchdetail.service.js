@@ -13,20 +13,15 @@ class BatchDetailService extends BaseCRUDService {
       if (val instanceof Date && !isNaN(val))
         return val.toISOString().split('.')[0].replace('T', ' ')
       if (typeof val === 'string') {
-        // Try JS parse
-        const d = new Date(val)
-        if (!isNaN(d)) return d.toISOString().split('.')[0].replace('T', ' ')
-        // Try DD-MM-YYYY or D-M-YYYY
+        // DD-MM-YYYY must be checked FIRST — generic JS parse misreads it as MM-DD-YYYY
         const m = val.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
         if (m) {
-          const dd = m[1].padStart(2, '0')
-          const mm = m[2].padStart(2, '0')
-          const yyyy = m[3]
-          const iso = `${yyyy}-${mm}-${dd}`
-          const d2 = new Date(iso)
-          if (!isNaN(d2))
-            return d2.toISOString().split('.')[0].replace('T', ' ')
+          const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+          return iso + ' 00:00:00'
         }
+        // ISO or other standard formats — parse as UTC to avoid timezone shift
+        const d = new Date(val.includes('T') ? val : val + 'T00:00:00Z')
+        if (!isNaN(d)) return d.toISOString().split('.')[0].replace('T', ' ')
         return null
       }
       return null
@@ -58,18 +53,15 @@ class BatchDetailService extends BaseCRUDService {
       if (val instanceof Date && !isNaN(val))
         return val.toISOString().split('.')[0].replace('T', ' ')
       if (typeof val === 'string') {
-        const d = new Date(val)
-        if (!isNaN(d)) return d.toISOString().split('.')[0].replace('T', ' ')
+        // DD-MM-YYYY must be checked FIRST — generic JS parse misreads it as MM-DD-YYYY
         const m = val.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
         if (m) {
-          const dd = m[1].padStart(2, '0')
-          const mm = m[2].padStart(2, '0')
-          const yyyy = m[3]
-          const iso = `${yyyy}-${mm}-${dd}`
-          const d2 = new Date(iso)
-          if (!isNaN(d2))
-            return d2.toISOString().split('.')[0].replace('T', ' ')
+          const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+          return iso + ' 00:00:00'
         }
+        // ISO or other standard formats — parse as UTC to avoid timezone shift
+        const d = new Date(val.includes('T') ? val : val + 'T00:00:00Z')
+        if (!isNaN(d)) return d.toISOString().split('.')[0].replace('T', ' ')
         return null
       }
       return null

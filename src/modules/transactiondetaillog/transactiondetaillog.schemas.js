@@ -6,7 +6,9 @@ const createSchema = Joi.object({
   TransactionTypeConfigId: Joi.string().uuid().required(),
   TransactionTypeStatusId: Joi.string().uuid().optional().allow(null),
   BranchId: Joi.string().uuid().optional().allow(null),
-  TransactionDate: Joi.date().optional().allow(null),
+  TransactionDate: Joi.alternatives()
+    .try(Joi.date().iso(), Joi.string().regex(/^\d{1,2}-\d{1,2}-\d{4}$/))
+    .required(),
   Remarks: Joi.string().optional().max(1000).trim().allow(null, ''),
   Active: Joi.boolean().optional().default(true),
 });
@@ -16,7 +18,9 @@ const updateSchema = Joi.object({
   TransactionTypeConfigId: Joi.string().uuid().optional(),
   TransactionTypeStatusId: Joi.string().uuid().optional().allow(null),
   BranchId: Joi.string().uuid().optional().allow(null),
-  TransactionDate: Joi.date().optional().allow(null),
+  TransactionDate: Joi.alternatives()
+    .try(Joi.date().iso(), Joi.string().regex(/^\d{1,2}-\d{1,2}-\d{4}$/))
+    .optional(),
   Remarks: Joi.string().optional().max(1000).trim().allow(null, ''),
   Active: Joi.boolean().optional(),
 }).min(1);

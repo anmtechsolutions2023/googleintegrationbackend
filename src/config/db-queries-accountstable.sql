@@ -675,44 +675,311 @@ DROP PROCEDURE IF EXISTS migrate_itemdetail;
 
 -- Transaction Type Base Conversion  table
 create table if not exists transactiontypebaseconversion (
-	Id varchar(50) not null,   
-    FromTransactionTypeId varchar(50) not null,
-    ToTransactionTypeId varchar(50) not null,
+	Id varchar(50) not null,
     TenantId varchar(50) not null,
+    TransactionTypeConfigId varchar(50) not null,
+    FromTransactionTypeStatusId varchar(50) not null,
+    ToTransactionTypeStatusId varchar(50) not null,
     Active tinyint(1) not null,
     CreatedOn datetime,
     CreatedBy varchar(50),
     UpdatedOn datetime,
     UpdatedBy varchar(50),
     PRIMARY KEY (Id),
-    UNIQUE (FromTransactionTypeId, ToTransactionTypeId, TenantId),
-    FOREIGN KEY (FromTransactionTypeId) REFERENCES transactiontype(Id),
-    FOREIGN KEY (ToTransactionTypeId) REFERENCES transactiontype(Id)
+    UNIQUE (TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, TenantId),
+    FOREIGN KEY (TransactionTypeConfigId) REFERENCES transactiontypeconfig(Id),
+    FOREIGN KEY (FromTransactionTypeStatusId) REFERENCES transactiontypestatus(Id),
+    FOREIGN KEY (ToTransactionTypeStatusId) REFERENCES transactiontypestatus(Id)
 );
+
+-- Migration: redesign transactiontypebaseconversion for existing databases
+-- Old schema had FromTransactionTypeId/ToTransactionTypeId (FK to transactiontype)
+-- New schema uses TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId
+
+DROP PROCEDURE IF EXISTS migrate_transactiontypebaseconversion;
+
+DELIMITER //
+
+CREATE PROCEDURE migrate_transactiontypebaseconversion()
+BEGIN
+
+    -- Step 1: Drop FK on FromTransactionTypeId (must happen before dropping its index/column)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'transactiontypebaseconversion'
+          AND COLUMN_NAME  = 'FromTransactionTypeId'
+    ) THEN
+        BEGIN
+            DECLARE v_fk VARCHAR(255) DEFAULT NULL;
+            SELECT CONSTRAINT_NAME INTO v_fk
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME   = 'transactiontypebaseconversion'
+              AND COLUMN_NAME  = 'FromTransactionTypeId'
+              AND REFERENCED_TABLE_NAME IS NOT NULL
+            LIMIT 1;
+            IF v_fk IS NOT NULL THEN
+                SET @drop_fk = CONCAT('ALTER TABLE transactiontypebaseconversion DROP FOREIGN KEY `', v_fk, '`');
+                PREPARE stmt FROM @drop_fk; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+            END IF;
+        END;
+    END IF;
+
+    -- Step 2: Drop FK on ToTransactionTypeId (must happen before dropping its index/column)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'transactiontypebaseconversion'
+          AND COLUMN_NAME  = 'ToTransactionTypeId'
+    ) THEN
+        BEGIN
+            DECLARE v_fk2 VARCHAR(255) DEFAULT NULL;
+            SELECT CONSTRAINT_NAME INTO v_fk2
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME   = 'transactiontypebaseconversion'
+              AND COLUMN_NAME  = 'ToTransactionTypeId'
+              AND REFERENCED_TABLE_NAME IS NOT NULL
+            LIMIT 1;
+            IF v_fk2 IS NOT NULL THEN
+                SET @drop_fk2 = CONCAT('ALTER TABLE transactiontypebaseconversion DROP FOREIGN KEY `', v_fk2, '`');
+                PREPARE stmt FROM @drop_fk2; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+            END IF;
+        END;
+    END IF;
+
+    -- Step 3: Drop old unique indexes (FKs already removed so this is now safe)
+    BEGIN
+        DECLARE v_done INT DEFAULT 0;
+        DECLARE v_idx  VARCHAR(255);
+        DECLARE cur CURSOR FOR
+            SELECT DISTINCT INDEX_NAME
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME   = 'transactiontypebaseconversion'
+              AND INDEX_NAME  NOT IN ('PRIMARY', 'uk_ttbc_config_from_to_tenant')
+              AND NON_UNIQUE   = 0;
+        DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = 1;
+
+        OPEN cur;
+        drop_loop: LOOP
+            FETCH cur INTO v_idx;
+            IF v_done THEN LEAVE drop_loop; END IF;
+            SET @drop_sql = CONCAT('ALTER TABLE transactiontypebaseconversion DROP INDEX `', v_idx, '`');
+            PREPARE stmt FROM @drop_sql;
+            EXECUTE stmt;
+            DEALLOCATE PREPARE stmt;
+        END LOOP;
+        CLOSE cur;
+    END;
+
+    -- Step 4: Drop old columns (indexes on them were already removed above)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'transactiontypebaseconversion'
+          AND COLUMN_NAME  = 'FromTransactionTypeId'
+    ) THEN
+        ALTER TABLE transactiontypebaseconversion DROP COLUMN FromTransactionTypeId;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'transactiontypebaseconversion'
+          AND COLUMN_NAME  = 'ToTransactionTypeId'
+    ) THEN
+        ALTER TABLE transactiontypebaseconversion DROP COLUMN ToTransactionTypeId;
+    END IF;
+
+    -- Step 5: Truncate stale rows (old schema data is incompatible with new structure)
+    -- Disable FK checks so child table (transactiontypeconversionmapper) doesn't block truncate
+    SET FOREIGN_KEY_CHECKS = 0;
+    TRUNCATE TABLE transactiontypebaseconversion;
+    TRUNCATE TABLE transactiontypeconversionmapper;
+    SET FOREIGN_KEY_CHECKS = 1;
+
+    -- Step 6: Add TransactionTypeConfigId (if missing)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'transactiontypebaseconversion'
+          AND COLUMN_NAME  = 'TransactionTypeConfigId'
+    ) THEN
+        ALTER TABLE transactiontypebaseconversion ADD COLUMN TransactionTypeConfigId varchar(50) NOT NULL AFTER TenantId;
+        ALTER TABLE transactiontypebaseconversion ADD FOREIGN KEY (TransactionTypeConfigId) REFERENCES transactiontypeconfig(Id);
+    END IF;
+
+    -- Step 7: Add FromTransactionTypeStatusId (if missing)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'transactiontypebaseconversion'
+          AND COLUMN_NAME  = 'FromTransactionTypeStatusId'
+    ) THEN
+        ALTER TABLE transactiontypebaseconversion ADD COLUMN FromTransactionTypeStatusId varchar(50) NOT NULL AFTER TransactionTypeConfigId;
+        ALTER TABLE transactiontypebaseconversion ADD FOREIGN KEY (FromTransactionTypeStatusId) REFERENCES transactiontypestatus(Id);
+    END IF;
+
+    -- Step 8: Add ToTransactionTypeStatusId (if missing)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'transactiontypebaseconversion'
+          AND COLUMN_NAME  = 'ToTransactionTypeStatusId'
+    ) THEN
+        ALTER TABLE transactiontypebaseconversion ADD COLUMN ToTransactionTypeStatusId varchar(50) NOT NULL AFTER FromTransactionTypeStatusId;
+        ALTER TABLE transactiontypebaseconversion ADD FOREIGN KEY (ToTransactionTypeStatusId) REFERENCES transactiontypestatus(Id);
+    END IF;
+
+    -- Step 9: Add new unique constraint (if missing)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'transactiontypebaseconversion'
+          AND INDEX_NAME   = 'uk_ttbc_config_from_to_tenant'
+    ) THEN
+        ALTER TABLE transactiontypebaseconversion
+            ADD CONSTRAINT uk_ttbc_config_from_to_tenant
+            UNIQUE (TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, TenantId);
+    END IF;
+
+END //
+
+DELIMITER ;
+
+CALL migrate_transactiontypebaseconversion();
+DROP PROCEDURE IF EXISTS migrate_transactiontypebaseconversion;
 
 -- Transaction Detail log table
 create table if not exists transactiondetaillog
 (
-	Id varchar(50) not null,    
-    AccountTypeBaseId varchar(50) not null,
-    UserId varchar(50) not null,
-    TransactionDateTime varchar(50) not null,
-    Description varchar(100),
-    BranchDetailId varchar(50) not null,
-	CF1 varchar(50),
-    CF2 varchar(50),
-    CF3 varchar(50),
-    CF4 varchar(50),      
+	Id varchar(50) not null,
     TenantId varchar(50) not null,
+    TransactionNo varchar(50) not null,
+    TransactionTypeConfigId varchar(50) not null,
+    TransactionTypeStatusId varchar(50) null,
+    BranchId varchar(50) null,
+    TransactionDate date not null,
+    Remarks varchar(500) null,
     Active tinyint(1) not null,
     CreatedOn datetime,
     CreatedBy varchar(50),
     UpdatedOn datetime,
     UpdatedBy varchar(50),
-    PRIMARY KEY (Id),    
-    FOREIGN KEY (AccountTypeBaseId) REFERENCES accounttypebase(Id),
-    FOREIGN KEY (BranchDetailId) REFERENCES branchdetail(Id)
+    PRIMARY KEY (Id),
+    FOREIGN KEY (TransactionTypeConfigId) REFERENCES transactiontypeconfig(Id),
+    FOREIGN KEY (TransactionTypeStatusId) REFERENCES transactiontypestatus(Id),
+    FOREIGN KEY (BranchId) REFERENCES branchdetail(Id)
 );
+
+-- Migration: redesign transactiondetaillog for existing databases
+
+DROP PROCEDURE IF EXISTS migrate_transactiondetaillog;
+
+DELIMITER //
+
+CREATE PROCEDURE migrate_transactiondetaillog()
+BEGIN
+
+    -- Step 1: Disable FK checks and truncate all dependent tables
+    SET FOREIGN_KEY_CHECKS = 0;
+    TRUNCATE TABLE transactionitemdetail;
+    TRUNCATE TABLE transactiontypeconversionmapper;
+    TRUNCATE TABLE paymentbreakup;
+    TRUNCATE TABLE paymentdetail;
+    TRUNCATE TABLE transactiondetaillog;
+    SET FOREIGN_KEY_CHECKS = 1;
+
+    -- Step 2: Drop FK on AccountTypeBaseId (if exists)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'AccountTypeBaseId'
+    ) THEN
+        BEGIN
+            DECLARE v_fk1 VARCHAR(255) DEFAULT NULL;
+            SELECT CONSTRAINT_NAME INTO v_fk1 FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog'
+              AND COLUMN_NAME = 'AccountTypeBaseId' AND REFERENCED_TABLE_NAME IS NOT NULL LIMIT 1;
+            IF v_fk1 IS NOT NULL THEN
+                SET @sql1 = CONCAT('ALTER TABLE transactiondetaillog DROP FOREIGN KEY `', v_fk1, '`');
+                PREPARE stmt FROM @sql1; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+            END IF;
+        END;
+        ALTER TABLE transactiondetaillog DROP COLUMN AccountTypeBaseId;
+    END IF;
+
+    -- Step 3: Drop FK on BranchDetailId (if exists)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'BranchDetailId'
+    ) THEN
+        BEGIN
+            DECLARE v_fk2 VARCHAR(255) DEFAULT NULL;
+            SELECT CONSTRAINT_NAME INTO v_fk2 FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog'
+              AND COLUMN_NAME = 'BranchDetailId' AND REFERENCED_TABLE_NAME IS NOT NULL LIMIT 1;
+            IF v_fk2 IS NOT NULL THEN
+                SET @sql2 = CONCAT('ALTER TABLE transactiondetaillog DROP FOREIGN KEY `', v_fk2, '`');
+                PREPARE stmt FROM @sql2; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+            END IF;
+        END;
+        ALTER TABLE transactiondetaillog DROP COLUMN BranchDetailId;
+    END IF;
+
+    -- Step 4: Drop remaining old columns (no FKs)
+    IF EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'UserId') THEN
+        ALTER TABLE transactiondetaillog DROP COLUMN UserId;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'TransactionDateTime') THEN
+        ALTER TABLE transactiondetaillog DROP COLUMN TransactionDateTime;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'Description') THEN
+        ALTER TABLE transactiondetaillog DROP COLUMN Description;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'CF1') THEN
+        ALTER TABLE transactiondetaillog DROP COLUMN CF1;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'CF2') THEN
+        ALTER TABLE transactiondetaillog DROP COLUMN CF2;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'CF3') THEN
+        ALTER TABLE transactiondetaillog DROP COLUMN CF3;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'CF4') THEN
+        ALTER TABLE transactiondetaillog DROP COLUMN CF4;
+    END IF;
+
+    -- Step 5: Add new columns (table is empty so NOT NULL is safe)
+    IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'TransactionNo') THEN
+        ALTER TABLE transactiondetaillog ADD COLUMN TransactionNo varchar(50) NOT NULL AFTER TenantId;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'TransactionTypeConfigId') THEN
+        ALTER TABLE transactiondetaillog ADD COLUMN TransactionTypeConfigId varchar(50) NOT NULL AFTER TransactionNo;
+        ALTER TABLE transactiondetaillog ADD FOREIGN KEY (TransactionTypeConfigId) REFERENCES transactiontypeconfig(Id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'TransactionTypeStatusId') THEN
+        ALTER TABLE transactiondetaillog ADD COLUMN TransactionTypeStatusId varchar(50) NULL AFTER TransactionTypeConfigId;
+        ALTER TABLE transactiondetaillog ADD FOREIGN KEY (TransactionTypeStatusId) REFERENCES transactiontypestatus(Id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'BranchId') THEN
+        ALTER TABLE transactiondetaillog ADD COLUMN BranchId varchar(50) NULL AFTER TransactionTypeStatusId;
+        ALTER TABLE transactiondetaillog ADD FOREIGN KEY (BranchId) REFERENCES branchdetail(Id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'TransactionDate') THEN
+        ALTER TABLE transactiondetaillog ADD COLUMN TransactionDate date NOT NULL AFTER BranchId;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiondetaillog' AND COLUMN_NAME = 'Remarks') THEN
+        ALTER TABLE transactiondetaillog ADD COLUMN Remarks varchar(500) NULL AFTER TransactionDate;
+    END IF;
+
+END //
+
+DELIMITER ;
+
+CALL migrate_transactiondetaillog();
+DROP PROCEDURE IF EXISTS migrate_transactiondetaillog;
 
 -- Transaction Item Detail table
 create table if not exists transactionitemdetail
