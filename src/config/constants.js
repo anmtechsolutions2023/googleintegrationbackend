@@ -439,7 +439,7 @@ module.exports = {
     ITEM_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM itemdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
-      SELECT_ALL_WITH_DETAILS: `SELECT t.*, b.BatchNo, cat.Name AS CategoryName FROM itemdetail t LEFT JOIN batchdetail b ON t.BatchDetailId = b.Id LEFT JOIN categorydetail cat ON t.CategoryId = cat.Id WHERE t.TenantId = ?`,
+      SELECT_ALL_WITH_DETAILS: `SELECT t.*, cat.Name AS CategoryName, u.UnitName AS UOMName, ci.Amount AS CostAmount FROM itemdetail t LEFT JOIN categorydetail cat ON t.CategoryId = cat.Id AND cat.TenantId = t.TenantId LEFT JOIN UOM u ON t.UOMId = u.Id AND u.TenantId = t.TenantId LEFT JOIN costinfo ci ON t.CostInfoId = ci.Id AND ci.TenantId = t.TenantId WHERE t.TenantId = ?`,
       COUNT: 'SELECT COUNT(*) as total FROM itemdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM itemdetail WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `

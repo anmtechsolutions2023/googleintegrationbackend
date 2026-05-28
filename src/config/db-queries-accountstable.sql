@@ -477,16 +477,16 @@ create table if not exists batchdetail
 (
 	Id varchar(50) not null,
     BatchNo varchar(50) not null,
-    Barcode varchar(50) not null,
-    MfgDate datetime not null,
-    Expdate datetime not null,
-    PurchaseDate datetime not null,
+    Barcode varchar(50) null,
+    MfgDate datetime null,
+    Expdate datetime null,
+    PurchaseDate datetime null,
     IsNonReturnable tinyint(1) not null,
-    CostInfoId varchar(50) not null,
-    UOMId varchar(50) not null,
-    Quantity varchar(50) not null,
-    MapProviderLocationMapperId varchar(50) not null,
-    BranchDetailId varchar(50) not null,    
+    CostInfoId varchar(50) null,
+    UOMId varchar(50) null,
+    Quantity varchar(50) null,
+    MapProviderLocationMapperId varchar(50) null,
+    BranchDetailId varchar(50) null,
     TenantId varchar(50) not null,
     Active tinyint(1) not null,
     CreatedOn datetime,
@@ -501,15 +501,30 @@ create table if not exists batchdetail
     FOREIGN KEY (BranchDetailId) REFERENCES branchdetail(Id)
 );
 
+-- Migration: make optional batchdetail columns nullable on existing databases
+-- Run these statements once on existing databases:
+-- ALTER TABLE batchdetail MODIFY Barcode varchar(50) NULL;
+-- ALTER TABLE batchdetail MODIFY MfgDate datetime NULL;
+-- ALTER TABLE batchdetail MODIFY Expdate datetime NULL;
+-- ALTER TABLE batchdetail MODIFY PurchaseDate datetime NULL;
+-- ALTER TABLE batchdetail MODIFY CostInfoId varchar(50) NULL;
+-- ALTER TABLE batchdetail MODIFY UOMId varchar(50) NULL;
+-- ALTER TABLE batchdetail MODIFY Quantity varchar(50) NULL;
+-- ALTER TABLE batchdetail MODIFY MapProviderLocationMapperId varchar(50) NULL;
+-- ALTER TABLE batchdetail MODIFY BranchDetailId varchar(50) NULL;
+
 -- Item Detail table
 create table if not exists itemdetail (
-	Id varchar(50) not null,
-    Type varchar(50) not null,
-    HSNCode varchar(50),
-    SKU varchar(50),    
-    BatchDetailId varchar(50) not null,
-    CategoryId varchar(50) not null,
-    Description varchar(50),    
+    Id varchar(50) not null,
+    Name varchar(255) not null,
+    Code varchar(50) null,
+    Description varchar(1000) null,
+    CategoryId varchar(50) null,
+    UOMId varchar(50) null,
+    CostInfoId varchar(50) null,
+    SKU varchar(50) null,
+    Barcode varchar(50) null,
+    HSNCode varchar(50) null,
     TenantId varchar(50) not null,
     Active tinyint(1) not null,
     CreatedOn datetime,
@@ -517,10 +532,146 @@ create table if not exists itemdetail (
     UpdatedOn datetime,
     UpdatedBy varchar(50),
     PRIMARY KEY (Id),
-    UNIQUE (Type, TenantId),
-    FOREIGN KEY (BatchDetailId) REFERENCES batchdetail(Id),
-    FOREIGN KEY (CategoryId) REFERENCES categorydetail(Id)
+    UNIQUE (Name, TenantId),
+    FOREIGN KEY (CategoryId) REFERENCES categorydetail(Id),
+    FOREIGN KEY (UOMId) REFERENCES UOM(Id),
+    FOREIGN KEY (CostInfoId) REFERENCES costinfo(Id)
 );
+
+-- Migration: align itemdetail with updated schema on existing databases
+
+DROP PROCEDURE IF EXISTS migrate_itemdetail;
+
+DELIMITER //
+
+CREATE PROCEDURE migrate_itemdetail()
+BEGIN
+
+    -- Step 1: Rename Type -> Name (only if Type column still exists)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'itemdetail'
+          AND COLUMN_NAME  = 'Type'
+    ) THEN
+        ALTER TABLE itemdetail CHANGE Type Name varchar(255) NOT NULL;
+    END IF;
+
+    -- Step 2: Add Code column (if missing)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'itemdetail'
+          AND COLUMN_NAME  = 'Code'
+    ) THEN
+        ALTER TABLE itemdetail ADD COLUMN Code varchar(50) NULL AFTER Name;
+    END IF;
+
+    -- Step 3: Widen Description and make nullable
+    ALTER TABLE itemdetail MODIFY Description varchar(1000) NULL;
+
+    -- Step 4: Make CategoryId nullable
+    ALTER TABLE itemdetail MODIFY CategoryId varchar(50) NULL;
+
+    -- Step 5: Add UOMId column (if missing)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'itemdetail'
+          AND COLUMN_NAME  = 'UOMId'
+    ) THEN
+        ALTER TABLE itemdetail ADD COLUMN UOMId varchar(50) NULL AFTER CategoryId;
+        ALTER TABLE itemdetail ADD FOREIGN KEY (UOMId) REFERENCES UOM(Id);
+    END IF;
+
+    -- Step 6: Add CostInfoId column (if missing)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'itemdetail'
+          AND COLUMN_NAME  = 'CostInfoId'
+    ) THEN
+        ALTER TABLE itemdetail ADD COLUMN CostInfoId varchar(50) NULL AFTER UOMId;
+        ALTER TABLE itemdetail ADD FOREIGN KEY (CostInfoId) REFERENCES costinfo(Id);
+    END IF;
+
+    -- Step 7: Add Barcode column (if missing)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'itemdetail'
+          AND COLUMN_NAME  = 'Barcode'
+    ) THEN
+        ALTER TABLE itemdetail ADD COLUMN Barcode varchar(50) NULL AFTER SKU;
+    END IF;
+
+    -- Step 8: Drop FK on BatchDetailId, then drop the column (if it still exists)
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'itemdetail'
+          AND COLUMN_NAME  = 'BatchDetailId'
+    ) THEN
+        BEGIN
+            DECLARE v_fk VARCHAR(255) DEFAULT NULL;
+            SELECT CONSTRAINT_NAME INTO v_fk
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA  = DATABASE()
+              AND TABLE_NAME    = 'itemdetail'
+              AND COLUMN_NAME   = 'BatchDetailId'
+              AND REFERENCED_TABLE_NAME IS NOT NULL
+            LIMIT 1;
+
+            IF v_fk IS NOT NULL THEN
+                SET @drop_fk = CONCAT('ALTER TABLE itemdetail DROP FOREIGN KEY `', v_fk, '`');
+                PREPARE stmt FROM @drop_fk;
+                EXECUTE stmt;
+                DEALLOCATE PREPARE stmt;
+            END IF;
+        END;
+        ALTER TABLE itemdetail DROP COLUMN BatchDetailId;
+    END IF;
+
+    -- Step 9: Replace old unique index (Type, TenantId) with (Name, TenantId)
+    BEGIN
+        DECLARE v_done INT DEFAULT 0;
+        DECLARE v_idx  VARCHAR(255);
+        DECLARE cur CURSOR FOR
+            SELECT DISTINCT INDEX_NAME
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME   = 'itemdetail'
+              AND INDEX_NAME  NOT IN ('PRIMARY', 'uk_itemdetail_name_tenant')
+              AND NON_UNIQUE   = 0;
+        DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = 1;
+
+        OPEN cur;
+        drop_loop: LOOP
+            FETCH cur INTO v_idx;
+            IF v_done THEN LEAVE drop_loop; END IF;
+            SET @drop_sql = CONCAT('ALTER TABLE itemdetail DROP INDEX `', v_idx, '`');
+            PREPARE stmt FROM @drop_sql;
+            EXECUTE stmt;
+            DEALLOCATE PREPARE stmt;
+        END LOOP;
+        CLOSE cur;
+    END;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME   = 'itemdetail'
+          AND INDEX_NAME   = 'uk_itemdetail_name_tenant'
+    ) THEN
+        ALTER TABLE itemdetail ADD CONSTRAINT uk_itemdetail_name_tenant UNIQUE (Name, TenantId);
+    END IF;
+
+END //
+
+DELIMITER ;
+
+CALL migrate_itemdetail();
+DROP PROCEDURE IF EXISTS migrate_itemdetail;
 
 -- Transaction Type Base Conversion  table
 create table if not exists transactiontypebaseconversion (
