@@ -5,6 +5,7 @@ const createSchema = Joi.object({
   TransactionTypeConfigId: Joi.string().uuid().required(),
   FromTransactionTypeStatusId: Joi.string().uuid().required(),
   ToTransactionTypeStatusId: Joi.string().uuid().required(),
+  Tag: Joi.string().max(100).optional().allow(null, ''),
   Active: Joi.boolean().optional().default(true),
 });
 
@@ -12,6 +13,7 @@ const updateSchema = Joi.object({
   TransactionTypeConfigId: Joi.string().uuid().optional(),
   FromTransactionTypeStatusId: Joi.string().uuid().optional(),
   ToTransactionTypeStatusId: Joi.string().uuid().optional(),
+  Tag: Joi.string().max(100).optional().allow(null, ''),
   Active: Joi.boolean().optional(),
 }).min(1);
 

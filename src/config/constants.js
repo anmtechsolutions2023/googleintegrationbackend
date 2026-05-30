@@ -490,9 +490,9 @@ module.exports = {
         LEFT JOIN transactiontypestatus tts ON ttbc.ToTransactionTypeStatusId = tts.Id AND tts.TenantId = ttbc.TenantId
         WHERE ttbc.Id = ? AND ttbc.TenantId = ?`,
       INSERT:
-        'INSERT INTO transactiontypebaseconversion (Id, TenantId, TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO transactiontypebaseconversion (Id, TenantId, TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, Tag, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE transactiontypebaseconversion SET TransactionTypeConfigId = ?, FromTransactionTypeStatusId = ?, ToTransactionTypeStatusId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE transactiontypebaseconversion SET TransactionTypeConfigId = ?, FromTransactionTypeStatusId = ?, ToTransactionTypeStatusId = ?, Tag = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE:
         'DELETE FROM transactiontypebaseconversion WHERE Id = ? AND TenantId = ?',
     },
@@ -568,29 +568,33 @@ module.exports = {
       SELECT_ALL:
         'SELECT * FROM transactiontypeconversionmapper WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `
-        SELECT ttcm.*, 
-          ftdl.TransactionNo AS FromTransactionNo,
-          ttdl.TransactionNo AS ToTransactionNo
+        SELECT ttcm.*,
+          ttbc.TransactionTypeConfigId,
+          tdl.TransactionNo, tdl.TransactionDate,
+          tts.Name AS TransactionTypeStatusName
         FROM transactiontypeconversionmapper ttcm
-        LEFT JOIN transactiondetaillog ftdl ON ttcm.FromTransactionDetailLogId = ftdl.Id AND ftdl.TenantId = ttcm.TenantId
-        LEFT JOIN transactiondetaillog ttdl ON ttcm.ToTransactionDetailLogId = ttdl.Id AND ttdl.TenantId = ttcm.TenantId
+        LEFT JOIN transactiontypebaseconversion ttbc ON ttcm.TransactionTypeBaseCoversionId = ttbc.Id AND ttbc.TenantId = ttcm.TenantId
+        LEFT JOIN transactiondetaillog tdl ON ttcm.TransactionDetailLogId = tdl.Id AND tdl.TenantId = ttcm.TenantId
+        LEFT JOIN transactiontypestatus tts ON ttcm.TransactionTypeStatusId = tts.Id AND tts.TenantId = ttcm.TenantId
         WHERE ttcm.TenantId = ? ORDER BY ttcm.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM transactiontypeconversionmapper WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM transactiontypeconversionmapper WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `
-        SELECT ttcm.*, 
-          ftdl.TransactionNo AS FromTransactionNo,
-          ttdl.TransactionNo AS ToTransactionNo
+        SELECT ttcm.*,
+          ttbc.TransactionTypeConfigId,
+          tdl.TransactionNo, tdl.TransactionDate,
+          tts.Name AS TransactionTypeStatusName
         FROM transactiontypeconversionmapper ttcm
-        LEFT JOIN transactiondetaillog ftdl ON ttcm.FromTransactionDetailLogId = ftdl.Id AND ftdl.TenantId = ttcm.TenantId
-        LEFT JOIN transactiondetaillog ttdl ON ttcm.ToTransactionDetailLogId = ttdl.Id AND ttdl.TenantId = ttcm.TenantId
+        LEFT JOIN transactiontypebaseconversion ttbc ON ttcm.TransactionTypeBaseCoversionId = ttbc.Id AND ttbc.TenantId = ttcm.TenantId
+        LEFT JOIN transactiondetaillog tdl ON ttcm.TransactionDetailLogId = tdl.Id AND tdl.TenantId = ttcm.TenantId
+        LEFT JOIN transactiontypestatus tts ON ttcm.TransactionTypeStatusId = tts.Id AND tts.TenantId = ttcm.TenantId
         WHERE ttcm.Id = ? AND ttcm.TenantId = ?`,
       INSERT:
-        'INSERT INTO transactiontypeconversionmapper (Id, TenantId, TransactionTypeBaseConversionId, FromTransactionDetailLogId, ToTransactionDetailLogId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO transactiontypeconversionmapper (Id, TenantId, TransactionTypeBaseCoversionId, TransactionDetailLogId, TransactionTypeStatusId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE transactiontypeconversionmapper SET TransactionTypeBaseConversionId = ?, FromTransactionDetailLogId = ?, ToTransactionDetailLogId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE transactiontypeconversionmapper SET TransactionTypeBaseCoversionId = ?, TransactionDetailLogId = ?, TransactionTypeStatusId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE:
         'DELETE FROM transactiontypeconversionmapper WHERE Id = ? AND TenantId = ?',
     },

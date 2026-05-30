@@ -2,16 +2,16 @@
 const Joi = require('joi');
 
 const createSchema = Joi.object({
-  TransactionTypeBaseConversionId: Joi.string().uuid().required(),
-  FromTransactionDetailLogId: Joi.string().uuid().required(),
-  ToTransactionDetailLogId: Joi.string().uuid().required(),
+  TransactionTypeBaseCoversionId: Joi.string().uuid().required(),
+  TransactionDetailLogId: Joi.string().uuid().required(),
+  TransactionTypeStatusId: Joi.string().uuid().required(),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
-  TransactionTypeBaseConversionId: Joi.string().uuid().optional(),
-  FromTransactionDetailLogId: Joi.string().uuid().optional(),
-  ToTransactionDetailLogId: Joi.string().uuid().optional(),
+  TransactionTypeBaseCoversionId: Joi.string().uuid().optional(),
+  TransactionDetailLogId: Joi.string().uuid().optional(),
+  TransactionTypeStatusId: Joi.string().uuid().optional(),
   Active: Joi.boolean().optional(),
 }).min(1);
 

@@ -14,9 +14,9 @@ class TransactionTypeConversionMapperService extends BaseCRUDService {
     return [
       id,
       tenantId,
-      data.TransactionTypeBaseConversionId,
-      data.FromTransactionDetailLogId,
-      data.ToTransactionDetailLogId,
+      data.TransactionTypeBaseCoversionId,
+      data.TransactionDetailLogId,
+      data.TransactionTypeStatusId,
       data.Active !== undefined ? data.Active : true,
       userEmail,
       userEmail,
@@ -25,15 +25,9 @@ class TransactionTypeConversionMapperService extends BaseCRUDService {
 
   prepareUpdateParams(data, existing, userEmail, id, tenantId) {
     return [
-      data.TransactionTypeBaseConversionId !== undefined
-        ? data.TransactionTypeBaseConversionId
-        : existing.TransactionTypeBaseConversionId,
-      data.FromTransactionDetailLogId !== undefined
-        ? data.FromTransactionDetailLogId
-        : existing.FromTransactionDetailLogId,
-      data.ToTransactionDetailLogId !== undefined
-        ? data.ToTransactionDetailLogId
-        : existing.ToTransactionDetailLogId,
+      data.TransactionTypeBaseCoversionId !== undefined ? data.TransactionTypeBaseCoversionId : existing.TransactionTypeBaseCoversionId,
+      data.TransactionDetailLogId !== undefined ? data.TransactionDetailLogId : existing.TransactionDetailLogId,
+      data.TransactionTypeStatusId !== undefined ? data.TransactionTypeStatusId : existing.TransactionTypeStatusId,
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,
       id,

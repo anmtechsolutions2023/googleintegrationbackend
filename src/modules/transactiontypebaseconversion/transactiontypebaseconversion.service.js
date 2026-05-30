@@ -17,6 +17,7 @@ class TransactionTypeBaseConversionService extends BaseCRUDService {
       data.TransactionTypeConfigId,
       data.FromTransactionTypeStatusId,
       data.ToTransactionTypeStatusId,
+      data.Tag || null,
       data.Active !== undefined ? data.Active : true,
       userEmail,
       userEmail,
@@ -25,15 +26,10 @@ class TransactionTypeBaseConversionService extends BaseCRUDService {
 
   prepareUpdateParams(data, existing, userEmail, id, tenantId) {
     return [
-      data.TransactionTypeConfigId !== undefined
-        ? data.TransactionTypeConfigId
-        : existing.TransactionTypeConfigId,
-      data.FromTransactionTypeStatusId !== undefined
-        ? data.FromTransactionTypeStatusId
-        : existing.FromTransactionTypeStatusId,
-      data.ToTransactionTypeStatusId !== undefined
-        ? data.ToTransactionTypeStatusId
-        : existing.ToTransactionTypeStatusId,
+      data.TransactionTypeConfigId !== undefined ? data.TransactionTypeConfigId : existing.TransactionTypeConfigId,
+      data.FromTransactionTypeStatusId !== undefined ? data.FromTransactionTypeStatusId : existing.FromTransactionTypeStatusId,
+      data.ToTransactionTypeStatusId !== undefined ? data.ToTransactionTypeStatusId : existing.ToTransactionTypeStatusId,
+      data.Tag !== undefined ? (data.Tag || null) : existing.Tag,
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,
       id,

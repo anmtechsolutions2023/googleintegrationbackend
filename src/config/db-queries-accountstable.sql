@@ -680,6 +680,7 @@ create table if not exists transactiontypebaseconversion (
     TransactionTypeConfigId varchar(50) not null,
     FromTransactionTypeStatusId varchar(50) not null,
     ToTransactionTypeStatusId varchar(50) not null,
+    Tag varchar(100) null,
     Active tinyint(1) not null,
     CreatedOn datetime,
     CreatedBy varchar(50),
@@ -687,10 +688,28 @@ create table if not exists transactiontypebaseconversion (
     UpdatedBy varchar(50),
     PRIMARY KEY (Id),
     UNIQUE (TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, TenantId),
+    UNIQUE KEY uk_ttbc_tag_tenant (Tag, TenantId),
     FOREIGN KEY (TransactionTypeConfigId) REFERENCES transactiontypeconfig(Id),
     FOREIGN KEY (FromTransactionTypeStatusId) REFERENCES transactiontypestatus(Id),
     FOREIGN KEY (ToTransactionTypeStatusId) REFERENCES transactiontypestatus(Id)
 );
+
+-- Migration: add Tag column to transactiontypebaseconversion for existing databases
+DROP PROCEDURE IF EXISTS migrate_ttbc_add_tag;
+DELIMITER //
+CREATE PROCEDURE migrate_ttbc_add_tag()
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactiontypebaseconversion' AND COLUMN_NAME = 'Tag'
+    ) THEN
+        ALTER TABLE transactiontypebaseconversion ADD COLUMN Tag varchar(100) NULL AFTER ToTransactionTypeStatusId;
+        ALTER TABLE transactiontypebaseconversion ADD CONSTRAINT uk_ttbc_tag_tenant UNIQUE (Tag, TenantId);
+    END IF;
+END //
+DELIMITER ;
+CALL migrate_ttbc_add_tag();
+DROP PROCEDURE IF EXISTS migrate_ttbc_add_tag;
 
 -- Migration: redesign transactiontypebaseconversion for existing databases
 -- Old schema had FromTransactionTypeId/ToTransactionTypeId (FK to transactiontype)
