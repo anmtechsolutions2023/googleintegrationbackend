@@ -3,17 +3,23 @@ const Joi = require('joi');
 
 const createSchema = Joi.object({
   PaymentModeId: Joi.string().uuid().required(),
-  TransactionDetailLogId: Joi.string().uuid().required(),
-  Amount: Joi.number().precision(4).required(),
-  ReferenceNo: Joi.string().optional().max(100).trim().allow(null, ''),
+  RefNo: Joi.string().optional().max(50).trim().allow(null, ''),
+  Comment: Joi.string().optional().max(100).trim().allow(null, ''),
+  CF1: Joi.string().optional().max(50).trim().allow(null, ''),
+  CF2: Joi.string().optional().max(50).trim().allow(null, ''),
+  CF3: Joi.string().optional().max(50).trim().allow(null, ''),
+  CF4: Joi.string().optional().max(50).trim().allow(null, ''),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   PaymentModeId: Joi.string().uuid().optional(),
-  TransactionDetailLogId: Joi.string().uuid().optional(),
-  Amount: Joi.number().precision(4).optional(),
-  ReferenceNo: Joi.string().optional().max(100).trim().allow(null, ''),
+  RefNo: Joi.string().optional().max(50).trim().allow(null, ''),
+  Comment: Joi.string().optional().max(100).trim().allow(null, ''),
+  CF1: Joi.string().optional().max(50).trim().allow(null, ''),
+  CF2: Joi.string().optional().max(50).trim().allow(null, ''),
+  CF3: Joi.string().optional().max(50).trim().allow(null, ''),
+  CF4: Joi.string().optional().max(50).trim().allow(null, ''),
   Active: Joi.boolean().optional(),
 }).min(1);
 

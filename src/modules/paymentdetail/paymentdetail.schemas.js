@@ -2,22 +2,26 @@
 const Joi = require('joi');
 
 const createSchema = Joi.object({
-  PaymentReceivedTypeId: Joi.string().uuid().required(),
+  AccountTypeBaseId: Joi.string().uuid().required(),
   TransactionDetailLogId: Joi.string().uuid().required(),
-  Amount: Joi.number().precision(4).required(),
-  PaymentDate: Joi.date().optional().allow(null),
-  ReferenceNo: Joi.string().optional().max(100).trim().allow(null, ''),
-  Remarks: Joi.string().optional().max(500).trim().allow(null, ''),
+  TotalAmount: Joi.string().required().max(50),
+  GrossAmount: Joi.string().required().max(50),
+  DiscountAmount: Joi.string().optional().max(100).allow(null, ''),
+  RoundOff: Joi.string().optional().max(50).allow(null, ''),
+  TaxesAmount: Joi.string().optional().max(50).allow(null, ''),
+  UserId: Joi.string().uuid().optional().allow(null, ''),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
-  PaymentReceivedTypeId: Joi.string().uuid().optional(),
+  AccountTypeBaseId: Joi.string().uuid().optional(),
   TransactionDetailLogId: Joi.string().uuid().optional(),
-  Amount: Joi.number().precision(4).optional(),
-  PaymentDate: Joi.date().optional().allow(null),
-  ReferenceNo: Joi.string().optional().max(100).trim().allow(null, ''),
-  Remarks: Joi.string().optional().max(500).trim().allow(null, ''),
+  TotalAmount: Joi.string().optional().max(50),
+  GrossAmount: Joi.string().optional().max(50),
+  DiscountAmount: Joi.string().optional().max(100).allow(null, ''),
+  RoundOff: Joi.string().optional().max(50).allow(null, ''),
+  TaxesAmount: Joi.string().optional().max(50).allow(null, ''),
+  UserId: Joi.string().uuid().optional().allow(null, ''),
   Active: Joi.boolean().optional(),
 }).min(1);
 

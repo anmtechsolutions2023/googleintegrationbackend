@@ -2,12 +2,12 @@
 const Joi = require('joi');
 
 const createSchema = Joi.object({
-  Name: Joi.string().required().max(100).trim(),
+  Type: Joi.string().required().max(50).trim(),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
-  Name: Joi.string().optional().max(100).trim(),
+  Type: Joi.string().optional().max(50).trim(),
   Active: Joi.boolean().optional(),
 }).min(1);
 

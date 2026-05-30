@@ -1101,17 +1101,21 @@ create table if not exists paymentdetail
     TotalAmount varchar(50) not null,
     TaxesAmount varchar(50),
     GrossAmount varchar(50) not null,    
-    UserId varchar(50) not null,    
+    UserId varchar(50) null,
     TenantId varchar(50) not null,
     Active tinyint(1) not null,
     CreatedOn datetime,
     CreatedBy varchar(50),
     UpdatedOn datetime,
     UpdatedBy varchar(50),
-    PRIMARY KEY (Id),    
+    PRIMARY KEY (Id),
     FOREIGN KEY (AccountTypeBaseId) REFERENCES accounttypebase(Id),
     FOREIGN KEY (TransactionDetailLogId) REFERENCES transactiondetaillog(Id)
 );
+
+-- Migration: make UserId nullable in paymentdetail for existing databases
+-- Run once on existing databases:
+-- ALTER TABLE paymentdetail MODIFY UserId varchar(50) NULL;
 
 -- Payment Breakup table
 create table if not exists paymentbreakup

@@ -11,12 +11,14 @@ class PaymentDetailService extends BaseCRUDService {
     return [
       id,
       tenantId,
-      data.PaymentReceivedTypeId,
+      data.AccountTypeBaseId,
       data.TransactionDetailLogId,
-      data.Amount,
-      data.PaymentDate || null,
-      data.ReferenceNo || null,
-      data.Remarks || null,
+      data.DiscountAmount || null,
+      data.RoundOff || null,
+      data.TotalAmount,
+      data.TaxesAmount || null,
+      data.GrossAmount,
+      data.UserId || null,
       data.Active !== undefined ? data.Active : true,
       userEmail,
       userEmail,
@@ -25,16 +27,14 @@ class PaymentDetailService extends BaseCRUDService {
 
   prepareUpdateParams(data, existing, userEmail, id, tenantId) {
     return [
-      data.PaymentReceivedTypeId !== undefined
-        ? data.PaymentReceivedTypeId
-        : existing.PaymentReceivedTypeId,
-      data.TransactionDetailLogId !== undefined
-        ? data.TransactionDetailLogId
-        : existing.TransactionDetailLogId,
-      data.Amount !== undefined ? data.Amount : existing.Amount,
-      data.PaymentDate !== undefined ? data.PaymentDate : existing.PaymentDate,
-      data.ReferenceNo !== undefined ? data.ReferenceNo : existing.ReferenceNo,
-      data.Remarks !== undefined ? data.Remarks : existing.Remarks,
+      data.AccountTypeBaseId !== undefined ? data.AccountTypeBaseId : existing.AccountTypeBaseId,
+      data.TransactionDetailLogId !== undefined ? data.TransactionDetailLogId : existing.TransactionDetailLogId,
+      data.DiscountAmount !== undefined ? data.DiscountAmount : existing.DiscountAmount,
+      data.RoundOff !== undefined ? data.RoundOff : existing.RoundOff,
+      data.TotalAmount !== undefined ? data.TotalAmount : existing.TotalAmount,
+      data.TaxesAmount !== undefined ? data.TaxesAmount : existing.TaxesAmount,
+      data.GrossAmount !== undefined ? data.GrossAmount : existing.GrossAmount,
+      data.UserId !== undefined ? data.UserId : existing.UserId,
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,
       id,

@@ -608,9 +608,9 @@ module.exports = {
       SELECT_BY_ID:
         'SELECT * FROM paymentreceivedtype WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO paymentreceivedtype (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO paymentreceivedtype (Id, TenantId, Type, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE paymentreceivedtype SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE paymentreceivedtype SET Type = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentreceivedtype WHERE Id = ? AND TenantId = ?',
     },
 
@@ -621,9 +621,9 @@ module.exports = {
       COUNT: 'SELECT COUNT(*) as total FROM paymentmode WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM paymentmode WHERE Id = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO paymentmode (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO paymentmode (Id, TenantId, Type, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE paymentmode SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE paymentmode SET Type = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentmode WHERE Id = ? AND TenantId = ?',
     },
 
@@ -632,29 +632,25 @@ module.exports = {
       SELECT_ALL:
         'SELECT * FROM paymentmodetransactiondetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `
-        SELECT pmtd.*, 
-          pm.Name AS PaymentModeName,
-          tdl.TransactionNo
+        SELECT pmtd.*,
+          pm.Type AS PaymentModeType
         FROM paymentmodetransactiondetail pmtd
         LEFT JOIN paymentmode pm ON pmtd.PaymentModeId = pm.Id AND pm.TenantId = pmtd.TenantId
-        LEFT JOIN transactiondetaillog tdl ON pmtd.TransactionDetailLogId = tdl.Id AND tdl.TenantId = pmtd.TenantId
         WHERE pmtd.TenantId = ? ORDER BY pmtd.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM paymentmodetransactiondetail WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM paymentmodetransactiondetail WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `
-        SELECT pmtd.*, 
-          pm.Name AS PaymentModeName,
-          tdl.TransactionNo
+        SELECT pmtd.*,
+          pm.Type AS PaymentModeType
         FROM paymentmodetransactiondetail pmtd
         LEFT JOIN paymentmode pm ON pmtd.PaymentModeId = pm.Id AND pm.TenantId = pmtd.TenantId
-        LEFT JOIN transactiondetaillog tdl ON pmtd.TransactionDetailLogId = tdl.Id AND tdl.TenantId = pmtd.TenantId
         WHERE pmtd.Id = ? AND pmtd.TenantId = ?`,
       INSERT:
-        'INSERT INTO paymentmodetransactiondetail (Id, TenantId, PaymentModeId, TransactionDetailLogId, Amount, ReferenceNo, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO paymentmodetransactiondetail (Id, TenantId, PaymentModeId, RefNo, Comment, CF1, CF2, CF3, CF4, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE paymentmodetransactiondetail SET PaymentModeId = ?, TransactionDetailLogId = ?, Amount = ?, ReferenceNo = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE paymentmodetransactiondetail SET PaymentModeId = ?, RefNo = ?, Comment = ?, CF1 = ?, CF2 = ?, CF3 = ?, CF4 = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE:
         'DELETE FROM paymentmodetransactiondetail WHERE Id = ? AND TenantId = ?',
     },
@@ -664,27 +660,27 @@ module.exports = {
       SELECT_ALL:
         'SELECT * FROM paymentdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `
-        SELECT pd.*, 
-          prt.Name AS PaymentReceivedTypeName,
-          tdl.TransactionNo
+        SELECT pd.*,
+          atb.Name AS AccountTypeName,
+          tdl.TransactionNo, tdl.TransactionDate
         FROM paymentdetail pd
-        LEFT JOIN paymentreceivedtype prt ON pd.PaymentReceivedTypeId = prt.Id AND prt.TenantId = pd.TenantId
+        LEFT JOIN accounttypebase atb ON pd.AccountTypeBaseId = atb.Id AND atb.TenantId = pd.TenantId
         LEFT JOIN transactiondetaillog tdl ON pd.TransactionDetailLogId = tdl.Id AND tdl.TenantId = pd.TenantId
         WHERE pd.TenantId = ? ORDER BY pd.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM paymentdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM paymentdetail WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `
-        SELECT pd.*, 
-          prt.Name AS PaymentReceivedTypeName,
-          tdl.TransactionNo
+        SELECT pd.*,
+          atb.Name AS AccountTypeName,
+          tdl.TransactionNo, tdl.TransactionDate
         FROM paymentdetail pd
-        LEFT JOIN paymentreceivedtype prt ON pd.PaymentReceivedTypeId = prt.Id AND prt.TenantId = pd.TenantId
+        LEFT JOIN accounttypebase atb ON pd.AccountTypeBaseId = atb.Id AND atb.TenantId = pd.TenantId
         LEFT JOIN transactiondetaillog tdl ON pd.TransactionDetailLogId = tdl.Id AND tdl.TenantId = pd.TenantId
         WHERE pd.Id = ? AND pd.TenantId = ?`,
       INSERT:
-        'INSERT INTO paymentdetail (Id, TenantId, PaymentReceivedTypeId, TransactionDetailLogId, Amount, PaymentDate, ReferenceNo, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO paymentdetail (Id, TenantId, AccountTypeBaseId, TransactionDetailLogId, DiscountAmount, RoundOff, TotalAmount, TaxesAmount, GrossAmount, UserId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE paymentdetail SET PaymentReceivedTypeId = ?, TransactionDetailLogId = ?, Amount = ?, PaymentDate = ?, ReferenceNo = ?, Remarks = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE paymentdetail SET AccountTypeBaseId = ?, TransactionDetailLogId = ?, DiscountAmount = ?, RoundOff = ?, TotalAmount = ?, TaxesAmount = ?, GrossAmount = ?, UserId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentdetail WHERE Id = ? AND TenantId = ?',
     },
 

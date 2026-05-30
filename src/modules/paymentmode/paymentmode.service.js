@@ -11,7 +11,7 @@ class PaymentModeService extends BaseCRUDService {
     return [
       id,
       tenantId,
-      data.Name,
+      data.Type,
       data.Active !== undefined ? data.Active : true,
       userEmail,
       userEmail,
@@ -20,7 +20,7 @@ class PaymentModeService extends BaseCRUDService {
 
   prepareUpdateParams(data, existing, userEmail, id, tenantId) {
     return [
-      data.Name !== undefined ? data.Name : existing.Name,
+      data.Type !== undefined ? data.Type : existing.Type,
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,
       id,
