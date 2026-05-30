@@ -17,13 +17,16 @@ const {
   updateTransactionTypeSchema,
   paginationSchema,
   uuidParamSchema,
+  getByIdQuerySchema,
 } = require('./transactiontype.schemas');
 
 const getAll = asyncHandler(async (req, res) => {
+  const expand = req.query.expand === 'true' || req.query.expand === true;
   const result = await service.getAll(
     req.user.tid,
     req.query.page,
-    req.query.limit
+    req.query.limit,
+    expand
   );
   paginatedResponse(
     res,
@@ -34,7 +37,8 @@ const getAll = asyncHandler(async (req, res) => {
 });
 
 const getById = asyncHandler(async (req, res) => {
-  const data = await service.getById(req.params.id, req.user.tid);
+  const expand = req.query.expand === 'true' || req.query.expand === true;
+  const data = await service.getById(req.params.id, req.user.tid, expand);
   successResponse(res, data, 'Transaction type retrieved successfully');
 });
 
@@ -60,7 +64,7 @@ const deleteById = asyncHandler(async (req, res) => {
 
 module.exports = {
   getAll: [validateQuery(paginationSchema), getAll],
-  getById: [validateParams(uuidParamSchema), getById],
+  getById: [validateParams(uuidParamSchema), validateQuery(getByIdQuerySchema), getById],
   create: [validateBody(createTransactionTypeSchema), create],
   update: [
     validateParams(uuidParamSchema),

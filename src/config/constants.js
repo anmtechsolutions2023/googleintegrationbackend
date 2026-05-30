@@ -717,13 +717,23 @@ module.exports = {
     TRANSACTION_TYPE: {
       SELECT_ALL:
         'SELECT * FROM transactiontype WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT tt.*, ttc.Prefix AS TransactionTypeConfigPrefix, ttc.Format AS TransactionTypeConfigFormat
+        FROM transactiontype tt
+        LEFT JOIN transactiontypeconfig ttc ON tt.TransactionTypeConfigId = ttc.Id AND ttc.TenantId = tt.TenantId
+        WHERE tt.TenantId = ? ORDER BY tt.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM transactiontype WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM transactiontype WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID_WITH_DETAILS: `
+        SELECT tt.*, ttc.Prefix AS TransactionTypeConfigPrefix, ttc.Format AS TransactionTypeConfigFormat
+        FROM transactiontype tt
+        LEFT JOIN transactiontypeconfig ttc ON tt.TransactionTypeConfigId = ttc.Id AND ttc.TenantId = tt.TenantId
+        WHERE tt.Id = ? AND tt.TenantId = ?`,
       INSERT:
-        'INSERT INTO transactiontype (Id, TenantId, Name, Description, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO transactiontype (Id, TenantId, Name, TransactionTypeConfigId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE transactiontype SET Name = ?, Description = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE transactiontype SET Name = ?, TransactionTypeConfigId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactiontype WHERE Id = ? AND TenantId = ?',
     },
 
