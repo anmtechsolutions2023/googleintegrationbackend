@@ -3,31 +3,15 @@ const Joi = require('joi');
 
 const createSchema = Joi.object({
   TransactionDetailLogId: Joi.string().uuid().required(),
-  ItemDetailId: Joi.string().uuid().required(),
-  BatchDetailId: Joi.string().uuid().optional().allow(null),
-  Quantity: Joi.number().precision(4).required(),
-  UOMId: Joi.string().uuid().optional().allow(null),
-  Rate: Joi.number().precision(4).optional().allow(null),
-  Amount: Joi.number().precision(4).optional().allow(null),
-  TaxGroupId: Joi.string().uuid().optional().allow(null),
-  TaxAmount: Joi.number().precision(4).optional().allow(null),
-  DiscountAmount: Joi.number().precision(4).optional().allow(null),
-  NetAmount: Joi.number().precision(4).optional().allow(null),
+  ItemId: Joi.string().uuid().required(),
+  Comment: Joi.string().optional().max(100).trim().allow(null, ''),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   TransactionDetailLogId: Joi.string().uuid().optional(),
-  ItemDetailId: Joi.string().uuid().optional(),
-  BatchDetailId: Joi.string().uuid().optional().allow(null),
-  Quantity: Joi.number().precision(4).optional(),
-  UOMId: Joi.string().uuid().optional().allow(null),
-  Rate: Joi.number().precision(4).optional().allow(null),
-  Amount: Joi.number().precision(4).optional().allow(null),
-  TaxGroupId: Joi.string().uuid().optional().allow(null),
-  TaxAmount: Joi.number().precision(4).optional().allow(null),
-  DiscountAmount: Joi.number().precision(4).optional().allow(null),
-  NetAmount: Joi.number().precision(4).optional().allow(null),
+  ItemId: Joi.string().uuid().optional(),
+  Comment: Joi.string().optional().max(100).trim().allow(null, ''),
   Active: Joi.boolean().optional(),
 }).min(1);
 

@@ -12,16 +12,8 @@ class TransactionItemDetailService extends BaseCRUDService {
       id,
       tenantId,
       data.TransactionDetailLogId,
-      data.ItemDetailId,
-      data.BatchDetailId || null,
-      data.Quantity,
-      data.UOMId || null,
-      data.Rate || null,
-      data.Amount || null,
-      data.TaxGroupId || null,
-      data.TaxAmount || null,
-      data.DiscountAmount || null,
-      data.NetAmount || null,
+      data.ItemId,
+      data.Comment || null,
       data.Active !== undefined ? data.Active : true,
       userEmail,
       userEmail,
@@ -30,25 +22,9 @@ class TransactionItemDetailService extends BaseCRUDService {
 
   prepareUpdateParams(data, existing, userEmail, id, tenantId) {
     return [
-      data.TransactionDetailLogId !== undefined
-        ? data.TransactionDetailLogId
-        : existing.TransactionDetailLogId,
-      data.ItemDetailId !== undefined
-        ? data.ItemDetailId
-        : existing.ItemDetailId,
-      data.BatchDetailId !== undefined
-        ? data.BatchDetailId
-        : existing.BatchDetailId,
-      data.Quantity !== undefined ? data.Quantity : existing.Quantity,
-      data.UOMId !== undefined ? data.UOMId : existing.UOMId,
-      data.Rate !== undefined ? data.Rate : existing.Rate,
-      data.Amount !== undefined ? data.Amount : existing.Amount,
-      data.TaxGroupId !== undefined ? data.TaxGroupId : existing.TaxGroupId,
-      data.TaxAmount !== undefined ? data.TaxAmount : existing.TaxAmount,
-      data.DiscountAmount !== undefined
-        ? data.DiscountAmount
-        : existing.DiscountAmount,
-      data.NetAmount !== undefined ? data.NetAmount : existing.NetAmount,
+      data.TransactionDetailLogId !== undefined ? data.TransactionDetailLogId : existing.TransactionDetailLogId,
+      data.ItemId !== undefined ? data.ItemId : existing.ItemId,
+      data.Comment !== undefined ? data.Comment : existing.Comment,
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,
       id,

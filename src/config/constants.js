@@ -536,29 +536,30 @@ module.exports = {
     TRANSACTION_ITEM_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM transactionitemdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
-      SELECT_ALL_WITH_DETAILS: `SELECT t.*, log.TransactionDateTime, item.SKU, item.Type AS ItemType FROM transactionitemdetail t LEFT JOIN transactiondetaillog log ON t.TransactionDetailLogId = log.Id LEFT JOIN itemdetail item ON t.ItemId = item.Id WHERE t.TenantId = ?`,
+      SELECT_ALL_WITH_DETAILS: `
+        SELECT tid.*,
+          tdl.TransactionNo, tdl.TransactionDate,
+          i.Name AS ItemName, i.Code AS ItemCode, i.SKU AS ItemSKU
+        FROM transactionitemdetail tid
+        LEFT JOIN transactiondetaillog tdl ON tid.TransactionDetailLogId = tdl.Id AND tdl.TenantId = tid.TenantId
+        LEFT JOIN itemdetail i ON tid.ItemId = i.Id AND i.TenantId = tid.TenantId
+        WHERE tid.TenantId = ? ORDER BY tid.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM transactionitemdetail WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM transactionitemdetail WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `
-        SELECT tid.*, 
-          tdl.TransactionNo,
-          i.Name AS ItemName, i.Code AS ItemCode,
-          bd.BatchNumber,
-          u.UnitName AS UOMName,
-          tg.Name AS TaxGroupName
+        SELECT tid.*,
+          tdl.TransactionNo, tdl.TransactionDate,
+          i.Name AS ItemName, i.Code AS ItemCode, i.SKU AS ItemSKU
         FROM transactionitemdetail tid
         LEFT JOIN transactiondetaillog tdl ON tid.TransactionDetailLogId = tdl.Id AND tdl.TenantId = tid.TenantId
-        LEFT JOIN itemdetail i ON tid.ItemDetailId = i.Id AND i.TenantId = tid.TenantId
-        LEFT JOIN batchdetail bd ON tid.BatchDetailId = bd.Id AND bd.TenantId = tid.TenantId
-        LEFT JOIN UOM u ON tid.UOMId = u.Id AND u.TenantId = tid.TenantId
-        LEFT JOIN taxgroup tg ON tid.TaxGroupId = tg.Id AND tg.TenantId = tid.TenantId
+        LEFT JOIN itemdetail i ON tid.ItemId = i.Id AND i.TenantId = tid.TenantId
         WHERE tid.Id = ? AND tid.TenantId = ?`,
       INSERT:
-        'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, ItemDetailId, BatchDetailId, Quantity, UOMId, Rate, Amount, TaxGroupId, TaxAmount, DiscountAmount, NetAmount, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, ItemId, Comment, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE transactionitemdetail SET TransactionDetailLogId = ?, ItemDetailId = ?, BatchDetailId = ?, Quantity = ?, UOMId = ?, Rate = ?, Amount = ?, TaxGroupId = ?, TaxAmount = ?, DiscountAmount = ?, NetAmount = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE transactionitemdetail SET TransactionDetailLogId = ?, ItemId = ?, Comment = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactionitemdetail WHERE Id = ? AND TenantId = ?',
     },
 
