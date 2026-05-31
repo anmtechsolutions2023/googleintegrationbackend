@@ -27,7 +27,8 @@
     "google-auth-library": "^9.11.0",
     "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.2",
-    "mysql2": "^3.9.7"
+    "mysql2": "^3.9.7",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "eslint": "^9.39.2",

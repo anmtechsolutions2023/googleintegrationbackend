@@ -5,6 +5,8 @@
 require('dotenv').config(); // Load environment variables once here
 const express = require('express');
 const cors = require('cors');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./src/config/swagger');
 const { errorHandler } = require('./src/middleware/errorHandler');
 const { logger } = require('./src/utils/logger');
 const MESSAGES = require('./src/config/messages');
@@ -16,6 +18,14 @@ const app = express();
 // Middleware setup
 app.use(cors());
 app.use(express.json());
+
+// Swagger UI — browse at http://localhost:3001/api-docs
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  swaggerOptions: {
+    persistAuthorization: true,
+  },
+  customSiteTitle: 'Google Integration Backend API',
+}));
 
 // Register all routes
 registerRoutes(app);
