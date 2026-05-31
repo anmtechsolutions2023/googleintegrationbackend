@@ -1113,9 +1113,10 @@ create table if not exists paymentdetail
     FOREIGN KEY (TransactionDetailLogId) REFERENCES transactiondetaillog(Id)
 );
 
--- Migration: make UserId nullable in paymentdetail for existing databases
+-- Migration: make UserId nullable in paymentdetail and paymentbreakup for existing databases
 -- Run once on existing databases:
 -- ALTER TABLE paymentdetail MODIFY UserId varchar(50) NULL;
+-- ALTER TABLE paymentbreakup MODIFY UserId varchar(50) NULL;
 
 -- Payment Breakup table
 create table if not exists paymentbreakup
@@ -1125,15 +1126,15 @@ create table if not exists paymentbreakup
     PaymentDetailId varchar(50) not null,
     PaymentModeTransactionDetailId varchar(100) not null,
 	PaymentReceivedTypeId varchar(50) not null,
-    UserId varchar(50) not null,    
-    Timestamp datetime not null,    
+    UserId varchar(50) null,
+    Timestamp datetime not null,
     TenantId varchar(50) not null,
     Active tinyint(1) not null,
     CreatedOn datetime,
     CreatedBy varchar(50),
     UpdatedOn datetime,
     UpdatedBy varchar(50),
-    PRIMARY KEY (Id),    
+    PRIMARY KEY (Id),
     FOREIGN KEY (AccountTypeBaseId) REFERENCES accounttypebase(Id),
     FOREIGN KEY (PaymentDetailId) REFERENCES paymentdetail(Id),
     FOREIGN KEY (PaymentModeTransactionDetailId) REFERENCES paymentmodetransactiondetail(Id),

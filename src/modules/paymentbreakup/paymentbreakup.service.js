@@ -8,14 +8,32 @@ class PaymentBreakupService extends BaseCRUDService {
   }
 
   prepareInsertParams(id, data, tenantId, userEmail) {
+    const normalizeDate = (val) => {
+      if (!val && val !== 0) return null
+      if (val instanceof Date && !isNaN(val))
+        return val.toISOString().split('.')[0].replace('T', ' ')
+      if (typeof val === 'string') {
+        const m = val.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
+        if (m) {
+          const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+          return iso + ' 00:00:00'
+        }
+        const d = new Date(val.includes('T') ? val : val + 'T00:00:00Z')
+        if (!isNaN(d)) return d.toISOString().split('.')[0].replace('T', ' ')
+        return null
+      }
+      return null
+    }
+
     return [
       id,
       tenantId,
+      data.AccountTypeBaseId,
       data.PaymentDetailId,
-      data.PaymentModeId,
-      data.Amount,
-      data.ReferenceNo || null,
-      data.Remarks || null,
+      data.PaymentModeTransactionDetailId,
+      data.PaymentReceivedTypeId,
+      data.UserId || null,
+      normalizeDate(data.Timestamp),
       data.Active !== undefined ? data.Active : true,
       userEmail,
       userEmail,
@@ -23,16 +41,30 @@ class PaymentBreakupService extends BaseCRUDService {
   }
 
   prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+    const normalizeDate = (val) => {
+      if (!val && val !== 0) return null
+      if (val instanceof Date && !isNaN(val))
+        return val.toISOString().split('.')[0].replace('T', ' ')
+      if (typeof val === 'string') {
+        const m = val.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
+        if (m) {
+          const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+          return iso + ' 00:00:00'
+        }
+        const d = new Date(val.includes('T') ? val : val + 'T00:00:00Z')
+        if (!isNaN(d)) return d.toISOString().split('.')[0].replace('T', ' ')
+        return null
+      }
+      return null
+    }
+
     return [
-      data.PaymentDetailId !== undefined
-        ? data.PaymentDetailId
-        : existing.PaymentDetailId,
-      data.PaymentModeId !== undefined
-        ? data.PaymentModeId
-        : existing.PaymentModeId,
-      data.Amount !== undefined ? data.Amount : existing.Amount,
-      data.ReferenceNo !== undefined ? data.ReferenceNo : existing.ReferenceNo,
-      data.Remarks !== undefined ? data.Remarks : existing.Remarks,
+      data.AccountTypeBaseId !== undefined ? data.AccountTypeBaseId : existing.AccountTypeBaseId,
+      data.PaymentDetailId !== undefined ? data.PaymentDetailId : existing.PaymentDetailId,
+      data.PaymentModeTransactionDetailId !== undefined ? data.PaymentModeTransactionDetailId : existing.PaymentModeTransactionDetailId,
+      data.PaymentReceivedTypeId !== undefined ? data.PaymentReceivedTypeId : existing.PaymentReceivedTypeId,
+      data.UserId !== undefined ? (data.UserId || null) : existing.UserId,
+      normalizeDate(data.Timestamp !== undefined ? data.Timestamp : existing.Timestamp),
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,
       id,

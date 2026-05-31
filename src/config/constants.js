@@ -689,28 +689,36 @@ module.exports = {
       SELECT_ALL:
         'SELECT * FROM paymentbreakup WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `
-        SELECT t.*, acc.Name AS AccountName, pay.TotalAmount, pmt.RefNo, prt.Type AS ReceivedTypeName 
-        FROM paymentbreakup t 
-        LEFT JOIN accounttypebase acc ON t.AccountTypeBaseId = acc.Id 
-        LEFT JOIN paymentdetail pay ON t.PaymentDetailId = pay.Id 
-        LEFT JOIN paymentmodetransactiondetail pmt ON t.PaymentModeTransactionDetailId = pmt.Id 
-        LEFT JOIN paymentreceivedtype prt ON t.PaymentReceivedTypeId = prt.Id 
-        WHERE t.TenantId = ?`,
+        SELECT pb.*,
+          atb.Name AS AccountTypeName,
+          pd.TotalAmount, pd.GrossAmount,
+          pmt.RefNo AS PaymentModeRefNo,
+          prt.Type AS PaymentReceivedTypeName
+        FROM paymentbreakup pb
+        LEFT JOIN accounttypebase atb ON pb.AccountTypeBaseId = atb.Id AND atb.TenantId = pb.TenantId
+        LEFT JOIN paymentdetail pd ON pb.PaymentDetailId = pd.Id AND pd.TenantId = pb.TenantId
+        LEFT JOIN paymentmodetransactiondetail pmt ON pb.PaymentModeTransactionDetailId = pmt.Id AND pmt.TenantId = pb.TenantId
+        LEFT JOIN paymentreceivedtype prt ON pb.PaymentReceivedTypeId = prt.Id AND prt.TenantId = pb.TenantId
+        WHERE pb.TenantId = ? ORDER BY pb.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM paymentbreakup WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM paymentbreakup WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `
-        SELECT pb.*, 
-          pm.Name AS PaymentModeName,
-          pd.Amount AS PaymentDetailAmount, pd.PaymentDate, pd.ReferenceNo AS PaymentDetailReferenceNo
+        SELECT pb.*,
+          atb.Name AS AccountTypeName,
+          pd.TotalAmount, pd.GrossAmount,
+          pmt.RefNo AS PaymentModeRefNo,
+          prt.Type AS PaymentReceivedTypeName
         FROM paymentbreakup pb
-        LEFT JOIN paymentmode pm ON pb.PaymentModeId = pm.Id AND pm.TenantId = pb.TenantId
+        LEFT JOIN accounttypebase atb ON pb.AccountTypeBaseId = atb.Id AND atb.TenantId = pb.TenantId
         LEFT JOIN paymentdetail pd ON pb.PaymentDetailId = pd.Id AND pd.TenantId = pb.TenantId
+        LEFT JOIN paymentmodetransactiondetail pmt ON pb.PaymentModeTransactionDetailId = pmt.Id AND pmt.TenantId = pb.TenantId
+        LEFT JOIN paymentreceivedtype prt ON pb.PaymentReceivedTypeId = prt.Id AND prt.TenantId = pb.TenantId
         WHERE pb.Id = ? AND pb.TenantId = ?`,
       INSERT:
-        'INSERT INTO paymentbreakup (Id, TenantId, PaymentDetailId, PaymentModeId, Amount, ReferenceNo, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO paymentbreakup (Id, TenantId, AccountTypeBaseId, PaymentDetailId, PaymentModeTransactionDetailId, PaymentReceivedTypeId, UserId, Timestamp, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE paymentbreakup SET PaymentDetailId = ?, PaymentModeId = ?, Amount = ?, ReferenceNo = ?, Remarks = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE paymentbreakup SET AccountTypeBaseId = ?, PaymentDetailId = ?, PaymentModeTransactionDetailId = ?, PaymentReceivedTypeId = ?, UserId = ?, Timestamp = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentbreakup WHERE Id = ? AND TenantId = ?',
     },
 

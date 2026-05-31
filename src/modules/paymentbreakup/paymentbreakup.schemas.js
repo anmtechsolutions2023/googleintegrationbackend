@@ -2,20 +2,26 @@
 const Joi = require('joi');
 
 const createSchema = Joi.object({
+  AccountTypeBaseId: Joi.string().uuid().required(),
   PaymentDetailId: Joi.string().uuid().required(),
-  PaymentModeId: Joi.string().uuid().required(),
-  Amount: Joi.number().precision(4).required(),
-  ReferenceNo: Joi.string().optional().max(100).trim().allow(null, ''),
-  Remarks: Joi.string().optional().max(500).trim().allow(null, ''),
+  PaymentModeTransactionDetailId: Joi.string().uuid().required(),
+  PaymentReceivedTypeId: Joi.string().uuid().required(),
+  UserId: Joi.string().uuid().optional().allow(null, ''),
+  Timestamp: Joi.alternatives()
+    .try(Joi.date().iso(), Joi.string().regex(/^\d{1,2}-\d{1,2}-\d{4}$/))
+    .required(),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
+  AccountTypeBaseId: Joi.string().uuid().optional(),
   PaymentDetailId: Joi.string().uuid().optional(),
-  PaymentModeId: Joi.string().uuid().optional(),
-  Amount: Joi.number().precision(4).optional(),
-  ReferenceNo: Joi.string().optional().max(100).trim().allow(null, ''),
-  Remarks: Joi.string().optional().max(500).trim().allow(null, ''),
+  PaymentModeTransactionDetailId: Joi.string().uuid().optional(),
+  PaymentReceivedTypeId: Joi.string().uuid().optional(),
+  UserId: Joi.string().uuid().optional().allow(null, ''),
+  Timestamp: Joi.alternatives()
+    .try(Joi.date().iso(), Joi.string().regex(/^\d{1,2}-\d{1,2}-\d{4}$/))
+    .optional(),
   Active: Joi.boolean().optional(),
 }).min(1);
 
