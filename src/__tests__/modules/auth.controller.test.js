@@ -1,11 +1,11 @@
 // src/__tests__/auth.controller.test.js
 // Mock the service
-jest.mock('../modules/auth/auth.service', () => ({
+jest.mock('../../modules/auth/auth.service', () => ({
   validateGoogleToken: jest.fn(),
   findAndGetPermissions: jest.fn(),
   generateAppToken: jest.fn(),
 }));
-jest.mock('../utils/logger', () => ({
+jest.mock('../../utils/logger', () => ({
   logger: {
     info: jest.fn(),
     warn: jest.fn(),
@@ -13,7 +13,7 @@ jest.mock('../utils/logger', () => ({
   },
   captureAudit: jest.fn(),
 }));
-jest.mock('../config/messages', () => ({
+jest.mock('../../config/messages', () => ({
   SUCCESS: {
     AUTH: 'Authentication successful',
   },
@@ -25,8 +25,8 @@ jest.mock('../config/messages', () => ({
   },
 }));
 
-const authController = require('../modules/auth/auth.controller');
-const authService = require('../modules/auth/auth.service');
+const authController = require('../../modules/auth/auth.controller');
+const authService = require('../../modules/auth/auth.service');
 
 describe('Auth Controller', () => {
   let req, res, next;
