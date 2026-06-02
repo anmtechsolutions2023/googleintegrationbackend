@@ -122,3 +122,57 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('paymentmode — field validation', () => {
+  const { createSchema: createPaymentModeSchema, updateSchema: updatePaymentModeSchema } =
+    require('../../modules/paymentmode/paymentmode.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with a valid Type', () => {
+      expect(createPaymentModeSchema.validate({ Type: 'Cash' }).error).toBeUndefined();
+    });
+    it('passes with Type and Active false', () => {
+      expect(createPaymentModeSchema.validate({ Type: 'Card', Active: false }).error).toBeUndefined();
+    });
+    it('accepts Type at exactly 50 characters', () => {
+      expect(createPaymentModeSchema.validate({ Type: 'x'.repeat(50) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createPaymentModeSchema.validate({ Type: 'UPI' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Type is missing', () => {
+      expect(createPaymentModeSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Type exceeds 50 characters', () => {
+      expect(createPaymentModeSchema.validate({ Type: 'x'.repeat(51) }).error).toBeDefined();
+    });
+    it('fails when Type is a number', () => {
+      expect(createPaymentModeSchema.validate({ Type: 123 }).error).toBeDefined();
+    });
+    it('fails when Active is a string', () => {
+      expect(createPaymentModeSchema.validate({ Type: 'Cash', Active: 'yes' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with a valid Type patch', () => {
+      expect(updatePaymentModeSchema.validate({ Type: 'Online Transfer' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updatePaymentModeSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updatePaymentModeSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Type exceeds 50 characters', () => {
+      expect(updatePaymentModeSchema.validate({ Type: 'x'.repeat(51) }).error).toBeDefined();
+    });
+  });
+});

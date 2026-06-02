@@ -122,3 +122,57 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('paymentreceivedtype — field validation', () => {
+  const { createSchema: createPRTSchema, updateSchema: updatePRTSchema } =
+    require('../../modules/paymentreceivedtype/paymentreceivedtype.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with a valid Type', () => {
+      expect(createPRTSchema.validate({ Type: 'Full Payment' }).error).toBeUndefined();
+    });
+    it('passes with Type and Active false', () => {
+      expect(createPRTSchema.validate({ Type: 'Advance', Active: false }).error).toBeUndefined();
+    });
+    it('accepts Type at exactly 50 characters', () => {
+      expect(createPRTSchema.validate({ Type: 'x'.repeat(50) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createPRTSchema.validate({ Type: 'Partial' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Type is missing', () => {
+      expect(createPRTSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Type exceeds 50 characters', () => {
+      expect(createPRTSchema.validate({ Type: 'x'.repeat(51) }).error).toBeDefined();
+    });
+    it('fails when Type is a number', () => {
+      expect(createPRTSchema.validate({ Type: 100 }).error).toBeDefined();
+    });
+    it('fails when Active is a number instead of boolean', () => {
+      expect(createPRTSchema.validate({ Type: 'Full', Active: 0 }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with a valid Type patch', () => {
+      expect(updatePRTSchema.validate({ Type: 'Partial Payment' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updatePRTSchema.validate({ Active: true }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updatePRTSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Type exceeds 50 characters', () => {
+      expect(updatePRTSchema.validate({ Type: 'x'.repeat(51) }).error).toBeDefined();
+    });
+  });
+});

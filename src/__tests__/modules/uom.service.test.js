@@ -122,3 +122,73 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('uom — field validation', () => {
+  const { createUomSchema, updateUomSchema } =
+    require('../../modules/uom/uom.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with a valid UnitName', () => {
+      expect(createUomSchema.validate({ UnitName: 'KG' }).error).toBeUndefined();
+    });
+    it('passes with UnitName and IsPrimary true', () => {
+      expect(createUomSchema.validate({ UnitName: 'KG', IsPrimary: true }).error).toBeUndefined();
+    });
+    it('passes with all fields provided', () => {
+      expect(createUomSchema.validate({ UnitName: 'LB', IsPrimary: false, Active: true }).error).toBeUndefined();
+    });
+    it('accepts UnitName at exactly 100 characters', () => {
+      expect(createUomSchema.validate({ UnitName: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('defaults IsPrimary to false when omitted', () => {
+      const { value } = createUomSchema.validate({ UnitName: 'KG' });
+      expect(value.IsPrimary).toBe(false);
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createUomSchema.validate({ UnitName: 'KG' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when UnitName is missing', () => {
+      expect(createUomSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when UnitName exceeds 100 characters', () => {
+      expect(createUomSchema.validate({ UnitName: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when UnitName is a number', () => {
+      expect(createUomSchema.validate({ UnitName: 100 }).error).toBeDefined();
+    });
+    it('fails when IsPrimary is a string', () => {
+      expect(createUomSchema.validate({ UnitName: 'KG', IsPrimary: 'yes' }).error).toBeDefined();
+    });
+    it('fails when Active is not a boolean', () => {
+      expect(createUomSchema.validate({ UnitName: 'KG', Active: 1 }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with UnitName patch', () => {
+      expect(updateUomSchema.validate({ UnitName: 'LB' }).error).toBeUndefined();
+    });
+    it('passes with IsPrimary toggle', () => {
+      expect(updateUomSchema.validate({ IsPrimary: true }).error).toBeUndefined();
+    });
+    it('passes with Active flag', () => {
+      expect(updateUomSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateUomSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when UnitName exceeds 100 characters', () => {
+      expect(updateUomSchema.validate({ UnitName: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when IsPrimary is a non-coercible string', () => {
+      expect(updateUomSchema.validate({ IsPrimary: 'yes' }).error).toBeDefined();
+    });
+  });
+});

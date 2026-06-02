@@ -122,3 +122,62 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('accounttype — field validation', () => {
+  const { createAccountTypeSchema, updateAccountTypeSchema } = require('../../modules/accounttype/accounttype.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with a valid Name', () => {
+      expect(createAccountTypeSchema.validate({ Name: 'Expense' }).error).toBeUndefined();
+    });
+    it('passes with Name and explicit Active false', () => {
+      expect(createAccountTypeSchema.validate({ Name: 'Expense', Active: false }).error).toBeUndefined();
+    });
+    it('accepts Name at exactly 100 characters', () => {
+      expect(createAccountTypeSchema.validate({ Name: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('applies default Active true when omitted', () => {
+      const { value } = createAccountTypeSchema.validate({ Name: 'Test' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Name is missing', () => {
+      expect(createAccountTypeSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(createAccountTypeSchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when Name is a number', () => {
+      expect(createAccountTypeSchema.validate({ Name: 42 }).error).toBeDefined();
+    });
+    it('fails when Active is not a boolean', () => {
+      expect(createAccountTypeSchema.validate({ Name: 'Test', Active: 'yes' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with a valid Name patch', () => {
+      expect(updateAccountTypeSchema.validate({ Name: 'Revenue' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateAccountTypeSchema.validate({ Active: true }).error).toBeUndefined();
+    });
+    it('passes with both Name and Active', () => {
+      expect(updateAccountTypeSchema.validate({ Name: 'Revenue', Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateAccountTypeSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds max length', () => {
+      expect(updateAccountTypeSchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when Active is a non-boolean value', () => {
+      expect(updateAccountTypeSchema.validate({ Active: 'yes' }).error).toBeDefined();
+    });
+  });
+});

@@ -122,3 +122,88 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+const VALID_UUID_AD = 'a1b2c3d4-1111-1111-1111-111111111111';
+
+describe('addressdetail — field validation', () => {
+  const { createSchema: createAddressSchema, updateSchema: updateAddressSchema } =
+    require('../../modules/addressdetail/addressdetail.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with all required fields', () => {
+      expect(createAddressSchema.validate({ AddressLine1: '123 Main St', TagName: 'HOME' }).error).toBeUndefined();
+    });
+    it('passes with all fields provided', () => {
+      const data = {
+        AddressLine1: '123 Main St', AddressLine2: 'Apt 4', City: 'Bengaluru',
+        State: 'Karnataka', Pincode: '560001', MapProviderLocationMapperId: VALID_UUID_AD,
+        Landmark: 'Near park', ContactAddressTypeId: VALID_UUID_AD, TagName: 'MAIN', Active: true,
+      };
+      expect(createAddressSchema.validate(data).error).toBeUndefined();
+    });
+    it('accepts optional fields as null', () => {
+      expect(createAddressSchema.validate({ AddressLine1: '123 St', City: null, State: null, TagName: 'T' }).error).toBeUndefined();
+    });
+    it('accepts optional fields as empty string', () => {
+      expect(createAddressSchema.validate({ AddressLine1: '123 St', City: '', State: '', TagName: 'T' }).error).toBeUndefined();
+    });
+    it('accepts TagName at exactly 100 characters', () => {
+      expect(createAddressSchema.validate({ AddressLine1: '1 St', TagName: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createAddressSchema.validate({ AddressLine1: '1 St', TagName: 'T' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when AddressLine1 is missing', () => {
+      expect(createAddressSchema.validate({ TagName: 'HOME' }).error).toBeDefined();
+    });
+    it('fails when TagName is missing', () => {
+      expect(createAddressSchema.validate({ AddressLine1: '123 Main St' }).error).toBeDefined();
+    });
+    it('fails when AddressLine1 exceeds 255 characters', () => {
+      expect(createAddressSchema.validate({ AddressLine1: 'x'.repeat(256), TagName: 'T' }).error).toBeDefined();
+    });
+    it('fails when TagName exceeds 100 characters', () => {
+      expect(createAddressSchema.validate({ AddressLine1: '123 St', TagName: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when MapProviderLocationMapperId is not a valid UUID', () => {
+      expect(createAddressSchema.validate({ AddressLine1: '1 St', TagName: 'T', MapProviderLocationMapperId: 'bad' }).error).toBeDefined();
+    });
+    it('fails when ContactAddressTypeId is not a valid UUID', () => {
+      expect(createAddressSchema.validate({ AddressLine1: '1 St', TagName: 'T', ContactAddressTypeId: 'bad' }).error).toBeDefined();
+    });
+    it('fails when Pincode exceeds 20 characters', () => {
+      expect(createAddressSchema.validate({ AddressLine1: '1 St', TagName: 'T', Pincode: '1'.repeat(21) }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with City patch', () => {
+      expect(updateAddressSchema.validate({ City: 'Mumbai' }).error).toBeUndefined();
+    });
+    it('passes with TagName patch', () => {
+      expect(updateAddressSchema.validate({ TagName: 'NEW_TAG' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateAddressSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+    it('passes with City as null', () => {
+      expect(updateAddressSchema.validate({ City: null }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateAddressSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when AddressLine1 exceeds 255 characters', () => {
+      expect(updateAddressSchema.validate({ AddressLine1: 'x'.repeat(256) }).error).toBeDefined();
+    });
+    it('fails when MapProviderLocationMapperId is not a valid UUID', () => {
+      expect(updateAddressSchema.validate({ MapProviderLocationMapperId: 'not-uuid' }).error).toBeDefined();
+    });
+  });
+});

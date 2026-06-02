@@ -122,3 +122,57 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('transactiontypestatus — field validation', () => {
+  const { createSchema: createTxStatusSchema, updateSchema: updateTxStatusSchema } =
+    require('../../modules/transactiontypestatus/transactiontypestatus.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with a valid Name', () => {
+      expect(createTxStatusSchema.validate({ Name: 'Pending' }).error).toBeUndefined();
+    });
+    it('passes with Name and Active false', () => {
+      expect(createTxStatusSchema.validate({ Name: 'Approved', Active: false }).error).toBeUndefined();
+    });
+    it('accepts Name at exactly 100 characters', () => {
+      expect(createTxStatusSchema.validate({ Name: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createTxStatusSchema.validate({ Name: 'Draft' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Name is missing', () => {
+      expect(createTxStatusSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(createTxStatusSchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when Name is an object', () => {
+      expect(createTxStatusSchema.validate({ Name: {} }).error).toBeDefined();
+    });
+    it('fails when Active is a number', () => {
+      expect(createTxStatusSchema.validate({ Name: 'Pending', Active: 1 }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with a valid Name patch', () => {
+      expect(updateTxStatusSchema.validate({ Name: 'Cancelled' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateTxStatusSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateTxStatusSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(updateTxStatusSchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+  });
+});

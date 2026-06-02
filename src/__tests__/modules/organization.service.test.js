@@ -122,3 +122,57 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('organization — field validation', () => {
+  const { createOrganizationSchema, updateOrganizationSchema } =
+    require('../../modules/organization/organization.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with a valid Name', () => {
+      expect(createOrganizationSchema.validate({ Name: 'Acme Corp' }).error).toBeUndefined();
+    });
+    it('passes with Name and Active false', () => {
+      expect(createOrganizationSchema.validate({ Name: 'Beta Ltd', Active: false }).error).toBeUndefined();
+    });
+    it('accepts Name at exactly 200 characters', () => {
+      expect(createOrganizationSchema.validate({ Name: 'x'.repeat(200) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createOrganizationSchema.validate({ Name: 'Gamma Inc' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Name is missing', () => {
+      expect(createOrganizationSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 200 characters', () => {
+      expect(createOrganizationSchema.validate({ Name: 'x'.repeat(201) }).error).toBeDefined();
+    });
+    it('fails when Name is a number', () => {
+      expect(createOrganizationSchema.validate({ Name: 99 }).error).toBeDefined();
+    });
+    it('fails when Active is a string', () => {
+      expect(createOrganizationSchema.validate({ Name: 'Acme', Active: 'yes' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with a valid Name patch', () => {
+      expect(updateOrganizationSchema.validate({ Name: 'Delta Corp' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateOrganizationSchema.validate({ Active: true }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateOrganizationSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 200 characters', () => {
+      expect(updateOrganizationSchema.validate({ Name: 'x'.repeat(201) }).error).toBeDefined();
+    });
+  });
+});

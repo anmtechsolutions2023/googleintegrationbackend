@@ -122,3 +122,69 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('locationdetail — field validation', () => {
+  const { createSchema: createLocationSchema, updateSchema: updateLocationSchema } =
+    require('../../modules/locationdetail/locationdetail.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with valid Lat and Lng', () => {
+      expect(createLocationSchema.validate({ Lat: 12.9716, Lng: 77.5946 }).error).toBeUndefined();
+    });
+    it('passes with all optional CF fields', () => {
+      expect(createLocationSchema.validate({ Lat: 12.0, Lng: 77.0, CF1: 'Area1', CF2: 'Block2', CF3: null, CF4: '' }).error).toBeUndefined();
+    });
+    it('passes with negative coordinates', () => {
+      expect(createLocationSchema.validate({ Lat: -33.8688, Lng: 151.2093 }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createLocationSchema.validate({ Lat: 0, Lng: 0 });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Lat is missing', () => {
+      expect(createLocationSchema.validate({ Lng: 77.5946 }).error).toBeDefined();
+    });
+    it('fails when Lng is missing', () => {
+      expect(createLocationSchema.validate({ Lat: 12.9716 }).error).toBeDefined();
+    });
+    it('fails when both Lat and Lng are missing', () => {
+      expect(createLocationSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Lat is a non-numeric string', () => {
+      expect(createLocationSchema.validate({ Lat: 'north', Lng: 77.0 }).error).toBeDefined();
+    });
+    it('fails when Lng is a non-numeric string', () => {
+      expect(createLocationSchema.validate({ Lat: 12.0, Lng: 'east' }).error).toBeDefined();
+    });
+    it('fails when Active is not a boolean', () => {
+      expect(createLocationSchema.validate({ Lat: 12.0, Lng: 77.0, Active: 1 }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with only Lat patch', () => {
+      expect(updateLocationSchema.validate({ Lat: 13.0 }).error).toBeUndefined();
+    });
+    it('passes with only Lng patch', () => {
+      expect(updateLocationSchema.validate({ Lng: 78.0 }).error).toBeUndefined();
+    });
+    it('passes with CF fields as null', () => {
+      expect(updateLocationSchema.validate({ CF1: null, CF2: null }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateLocationSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateLocationSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Lat is a string', () => {
+      expect(updateLocationSchema.validate({ Lat: 'far north' }).error).toBeDefined();
+    });
+  });
+});

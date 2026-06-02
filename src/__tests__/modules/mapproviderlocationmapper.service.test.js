@@ -122,3 +122,71 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+const VALID_UUID_MPLM = 'a1b2c3d4-1111-1111-1111-111111111111';
+
+describe('mapproviderlocationmapper — field validation', () => {
+  const { createSchema: createMPLMSchema, updateSchema: updateMPLMSchema } =
+    require('../../modules/mapproviderlocationmapper/mapproviderlocationmapper.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with all required fields', () => {
+      expect(createMPLMSchema.validate({ MapProviderId: VALID_UUID_MPLM, LocationDetailId: VALID_UUID_MPLM, TagName: 'WAREHOUSE' }).error).toBeUndefined();
+    });
+    it('accepts TagName at exactly 100 characters', () => {
+      expect(createMPLMSchema.validate({ MapProviderId: VALID_UUID_MPLM, LocationDetailId: VALID_UUID_MPLM, TagName: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('passes with Active false', () => {
+      expect(createMPLMSchema.validate({ MapProviderId: VALID_UUID_MPLM, LocationDetailId: VALID_UUID_MPLM, TagName: 'TAG', Active: false }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createMPLMSchema.validate({ MapProviderId: VALID_UUID_MPLM, LocationDetailId: VALID_UUID_MPLM, TagName: 'T' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when MapProviderId is missing', () => {
+      expect(createMPLMSchema.validate({ LocationDetailId: VALID_UUID_MPLM, TagName: 'T' }).error).toBeDefined();
+    });
+    it('fails when LocationDetailId is missing', () => {
+      expect(createMPLMSchema.validate({ MapProviderId: VALID_UUID_MPLM, TagName: 'T' }).error).toBeDefined();
+    });
+    it('fails when TagName is missing', () => {
+      expect(createMPLMSchema.validate({ MapProviderId: VALID_UUID_MPLM, LocationDetailId: VALID_UUID_MPLM }).error).toBeDefined();
+    });
+    it('fails when MapProviderId is not a valid UUID', () => {
+      expect(createMPLMSchema.validate({ MapProviderId: 'not-uuid', LocationDetailId: VALID_UUID_MPLM, TagName: 'T' }).error).toBeDefined();
+    });
+    it('fails when LocationDetailId is not a valid UUID', () => {
+      expect(createMPLMSchema.validate({ MapProviderId: VALID_UUID_MPLM, LocationDetailId: 'bad', TagName: 'T' }).error).toBeDefined();
+    });
+    it('fails when TagName exceeds 100 characters', () => {
+      expect(createMPLMSchema.validate({ MapProviderId: VALID_UUID_MPLM, LocationDetailId: VALID_UUID_MPLM, TagName: 'x'.repeat(101) }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with only TagName patch', () => {
+      expect(updateMPLMSchema.validate({ TagName: 'BRANCH' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateMPLMSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+    it('passes with MapProviderId patch', () => {
+      expect(updateMPLMSchema.validate({ MapProviderId: VALID_UUID_MPLM }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateMPLMSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when MapProviderId is invalid UUID', () => {
+      expect(updateMPLMSchema.validate({ MapProviderId: 'not-a-uuid' }).error).toBeDefined();
+    });
+    it('fails when TagName exceeds 100 characters', () => {
+      expect(updateMPLMSchema.validate({ TagName: 'x'.repeat(101) }).error).toBeDefined();
+    });
+  });
+});

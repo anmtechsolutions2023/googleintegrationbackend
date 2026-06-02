@@ -122,3 +122,57 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('contactaddresstype — field validation', () => {
+  const { createSchema: createCATSchema, updateSchema: updateCATSchema } =
+    require('../../modules/contactaddresstype/contactaddresstype.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with a valid Name', () => {
+      expect(createCATSchema.validate({ Name: 'Home' }).error).toBeUndefined();
+    });
+    it('passes with Name and Active false', () => {
+      expect(createCATSchema.validate({ Name: 'Home', Active: false }).error).toBeUndefined();
+    });
+    it('accepts Name at exactly 100 characters', () => {
+      expect(createCATSchema.validate({ Name: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createCATSchema.validate({ Name: 'Office' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Name is missing', () => {
+      expect(createCATSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(createCATSchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when Name is an array', () => {
+      expect(createCATSchema.validate({ Name: ['Home'] }).error).toBeDefined();
+    });
+    it('fails when Active is a number', () => {
+      expect(createCATSchema.validate({ Name: 'Home', Active: 1 }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with a valid Name patch', () => {
+      expect(updateCATSchema.validate({ Name: 'Office' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateCATSchema.validate({ Active: true }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateCATSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(updateCATSchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+  });
+});

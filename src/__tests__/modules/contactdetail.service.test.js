@@ -122,3 +122,91 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+const VALID_UUID_CD = 'a1b2c3d4-1111-1111-1111-111111111111';
+
+describe('contactdetail — field validation', () => {
+  const { createSchema: createContactDetailSchema, updateSchema: updateContactDetailSchema } =
+    require('../../modules/contactdetail/contactdetail.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with only required FirstName', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 'John' }).error).toBeUndefined();
+    });
+    it('passes with FirstName and LastName', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 'John', LastName: 'Doe' }).error).toBeUndefined();
+    });
+    it('passes with all optional fields provided', () => {
+      const data = {
+        FirstName: 'John', LastName: 'Doe', MobileNo: '9876543210',
+        AltMobileNo: '9123456789', Landline1: '080-1234', LandLine2: null,
+        Ext1: '101', Ext2: null, ContactAddressTypeId: VALID_UUID_CD, Active: true,
+      };
+      expect(createContactDetailSchema.validate(data).error).toBeUndefined();
+    });
+    it('accepts FirstName at exactly 100 characters', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('accepts null for optional string fields', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 'Jane', MobileNo: null, LastName: null }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createContactDetailSchema.validate({ FirstName: 'Jane' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when FirstName is missing', () => {
+      expect(createContactDetailSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when FirstName exceeds 100 characters', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when FirstName is a number', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 123 }).error).toBeDefined();
+    });
+    it('fails when MobileNo exceeds 20 characters', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 'John', MobileNo: '1'.repeat(21) }).error).toBeDefined();
+    });
+    it('fails when Ext1 exceeds 10 characters', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 'John', Ext1: 'x'.repeat(11) }).error).toBeDefined();
+    });
+    it('fails when ContactAddressTypeId is not a valid UUID', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 'John', ContactAddressTypeId: 'not-uuid' }).error).toBeDefined();
+    });
+    it('fails when Active is not a boolean', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 'John', Active: 'yes' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with FirstName patch', () => {
+      expect(updateContactDetailSchema.validate({ FirstName: 'Jane' }).error).toBeUndefined();
+    });
+    it('passes with MobileNo as null', () => {
+      expect(updateContactDetailSchema.validate({ MobileNo: null }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateContactDetailSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+    it('passes with ContactAddressTypeId as valid UUID', () => {
+      expect(updateContactDetailSchema.validate({ ContactAddressTypeId: VALID_UUID_CD }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateContactDetailSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when FirstName exceeds 100 characters', () => {
+      expect(updateContactDetailSchema.validate({ FirstName: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when ContactAddressTypeId is not a valid UUID', () => {
+      expect(updateContactDetailSchema.validate({ ContactAddressTypeId: 'bad-uuid' }).error).toBeDefined();
+    });
+    it('fails when MobileNo exceeds 20 characters', () => {
+      expect(updateContactDetailSchema.validate({ MobileNo: '9'.repeat(21) }).error).toBeDefined();
+    });
+  });
+});

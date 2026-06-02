@@ -122,3 +122,65 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+const VALID_UUID_TGTM = 'a1b2c3d4-1111-1111-1111-111111111111';
+
+describe('taxgrouptaxtypemapper — field validation', () => {
+  const { createSchema: createTGTTMSchema, updateSchema: updateTGTTMSchema } =
+    require('../../modules/taxgrouptaxtypemapper/taxgrouptaxtypemapper.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with valid TaxGroupId and TaxTypeId', () => {
+      expect(createTGTTMSchema.validate({ TaxGroupId: VALID_UUID_TGTM, TaxTypeId: VALID_UUID_TGTM }).error).toBeUndefined();
+    });
+    it('passes with all fields including Active false', () => {
+      expect(createTGTTMSchema.validate({ TaxGroupId: VALID_UUID_TGTM, TaxTypeId: VALID_UUID_TGTM, Active: false }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createTGTTMSchema.validate({ TaxGroupId: VALID_UUID_TGTM, TaxTypeId: VALID_UUID_TGTM });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when TaxGroupId is missing', () => {
+      expect(createTGTTMSchema.validate({ TaxTypeId: VALID_UUID_TGTM }).error).toBeDefined();
+    });
+    it('fails when TaxTypeId is missing', () => {
+      expect(createTGTTMSchema.validate({ TaxGroupId: VALID_UUID_TGTM }).error).toBeDefined();
+    });
+    it('fails when both are missing', () => {
+      expect(createTGTTMSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when TaxGroupId is not a valid UUID', () => {
+      expect(createTGTTMSchema.validate({ TaxGroupId: 'not-a-uuid', TaxTypeId: VALID_UUID_TGTM }).error).toBeDefined();
+    });
+    it('fails when TaxTypeId is not a valid UUID', () => {
+      expect(createTGTTMSchema.validate({ TaxGroupId: VALID_UUID_TGTM, TaxTypeId: 'bad-uuid' }).error).toBeDefined();
+    });
+    it('fails when Active is not a boolean', () => {
+      expect(createTGTTMSchema.validate({ TaxGroupId: VALID_UUID_TGTM, TaxTypeId: VALID_UUID_TGTM, Active: 1 }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with only Active flag', () => {
+      expect(updateTGTTMSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+    it('passes with TaxGroupId patch', () => {
+      expect(updateTGTTMSchema.validate({ TaxGroupId: VALID_UUID_TGTM }).error).toBeUndefined();
+    });
+    it('passes with TaxTypeId patch', () => {
+      expect(updateTGTTMSchema.validate({ TaxTypeId: VALID_UUID_TGTM }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateTGTTMSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when TaxGroupId is invalid UUID', () => {
+      expect(updateTGTTMSchema.validate({ TaxGroupId: 'not-uuid' }).error).toBeDefined();
+    });
+  });
+});

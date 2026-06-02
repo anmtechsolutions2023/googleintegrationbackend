@@ -122,3 +122,84 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('transactiontypeconfig — field validation', () => {
+  const { createTransactionTypeConfigSchema, updateTransactionTypeConfigSchema } =
+    require('../../modules/transactiontypeconfig/transactiontypeconfig.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with all required fields', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 1001, Format: 'INV-{SEQ}', TagName: 'SALES' }).error).toBeUndefined();
+    });
+    it('passes with StartCounterNo at 0', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 0, Format: 'PO-{SEQ}', TagName: 'PO' }).error).toBeUndefined();
+    });
+    it('passes with optional Prefix provided', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 1, Prefix: 'INV', Format: 'INV-{SEQ}', TagName: 'SALES_INV' }).error).toBeUndefined();
+    });
+    it('passes with empty Prefix string', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 1, Prefix: '', Format: '{SEQ}', TagName: 'TAG1' }).error).toBeUndefined();
+    });
+    it('accepts Format at exactly 100 characters', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 1, Format: 'x'.repeat(100), TagName: 'T' }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createTransactionTypeConfigSchema.validate({ StartCounterNo: 1, Format: 'F', TagName: 'T' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when StartCounterNo is missing', () => {
+      expect(createTransactionTypeConfigSchema.validate({ Format: 'INV-{SEQ}', TagName: 'SALES' }).error).toBeDefined();
+    });
+    it('fails when Format is missing', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 1, TagName: 'SALES' }).error).toBeDefined();
+    });
+    it('fails when TagName is missing', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 1, Format: 'INV-{SEQ}' }).error).toBeDefined();
+    });
+    it('fails when StartCounterNo is negative', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: -1, Format: 'F', TagName: 'T' }).error).toBeDefined();
+    });
+    it('fails when StartCounterNo is not an integer', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 1.5, Format: 'F', TagName: 'T' }).error).toBeDefined();
+    });
+    it('fails when Format exceeds 100 characters', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 1, Format: 'x'.repeat(101), TagName: 'T' }).error).toBeDefined();
+    });
+    it('fails when TagName exceeds 100 characters', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 1, Format: 'F', TagName: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when StartCounterNo is a string', () => {
+      expect(createTransactionTypeConfigSchema.validate({ StartCounterNo: 'ABC', Format: 'F', TagName: 'T' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with only StartCounterNo patch', () => {
+      expect(updateTransactionTypeConfigSchema.validate({ StartCounterNo: 2000 }).error).toBeUndefined();
+    });
+    it('passes with only Format patch', () => {
+      expect(updateTransactionTypeConfigSchema.validate({ Format: 'NEW-{SEQ}' }).error).toBeUndefined();
+    });
+    it('passes with only TagName patch', () => {
+      expect(updateTransactionTypeConfigSchema.validate({ TagName: 'NEW_TAG' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateTransactionTypeConfigSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateTransactionTypeConfigSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Format exceeds 100 characters', () => {
+      expect(updateTransactionTypeConfigSchema.validate({ Format: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when StartCounterNo is negative', () => {
+      expect(updateTransactionTypeConfigSchema.validate({ StartCounterNo: -5 }).error).toBeDefined();
+    });
+  });
+});

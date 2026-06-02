@@ -122,3 +122,57 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('mapprovider — field validation', () => {
+  const { createSchema: createMapProviderSchema, updateSchema: updateMapProviderSchema } =
+    require('../../modules/mapprovider/mapprovider.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with a valid ProviderName', () => {
+      expect(createMapProviderSchema.validate({ ProviderName: 'Google Maps' }).error).toBeUndefined();
+    });
+    it('passes with ProviderName and Active false', () => {
+      expect(createMapProviderSchema.validate({ ProviderName: 'Bing Maps', Active: false }).error).toBeUndefined();
+    });
+    it('accepts ProviderName at exactly 100 characters', () => {
+      expect(createMapProviderSchema.validate({ ProviderName: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createMapProviderSchema.validate({ ProviderName: 'OSM' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when ProviderName is missing', () => {
+      expect(createMapProviderSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when ProviderName exceeds 100 characters', () => {
+      expect(createMapProviderSchema.validate({ ProviderName: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when ProviderName is a number', () => {
+      expect(createMapProviderSchema.validate({ ProviderName: 1 }).error).toBeDefined();
+    });
+    it('fails when Active is a non-coercible string', () => {
+      expect(createMapProviderSchema.validate({ ProviderName: 'Google', Active: 'yes' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with a valid ProviderName patch', () => {
+      expect(updateMapProviderSchema.validate({ ProviderName: 'OSM' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateMapProviderSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateMapProviderSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when ProviderName exceeds 100 characters', () => {
+      expect(updateMapProviderSchema.validate({ ProviderName: 'x'.repeat(101) }).error).toBeDefined();
+    });
+  });
+});

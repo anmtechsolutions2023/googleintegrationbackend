@@ -123,6 +123,94 @@ describe(`${name} — service`, () => {
   });
 });
 
+const VALID_UUID_TDL = 'a1b2c3d4-1111-1111-1111-111111111111';
+
+describe('transactiondetaillog — field validation', () => {
+  const { createSchema: createTDLSchema, updateSchema: updateTDLSchema } =
+    require('../../modules/transactiondetaillog/transactiondetaillog.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with all required fields using ISO date', () => {
+      const data = { TransactionNo: 'INV-001', TransactionTypeConfigId: VALID_UUID_TDL, TransactionDate: '2026-05-31' };
+      expect(createTDLSchema.validate(data).error).toBeUndefined();
+    });
+    it('passes with DD-MM-YYYY format for TransactionDate', () => {
+      const data = { TransactionNo: 'INV-001', TransactionTypeConfigId: VALID_UUID_TDL, TransactionDate: '31-05-2026' };
+      expect(createTDLSchema.validate(data).error).toBeUndefined();
+    });
+    it('passes with optional fields provided', () => {
+      const data = {
+        TransactionNo: 'INV-001', TransactionTypeConfigId: VALID_UUID_TDL,
+        TransactionTypeStatusId: VALID_UUID_TDL, BranchId: VALID_UUID_TDL,
+        TransactionDate: '2026-05-31', Remarks: 'Test remarks',
+      };
+      expect(createTDLSchema.validate(data).error).toBeUndefined();
+    });
+    it('passes with optional fields as null', () => {
+      const data = { TransactionNo: 'INV-001', TransactionTypeConfigId: VALID_UUID_TDL, TransactionDate: '2026-05-31', TransactionTypeStatusId: null, BranchId: null, Remarks: null };
+      expect(createTDLSchema.validate(data).error).toBeUndefined();
+    });
+    it('accepts TransactionNo at exactly 100 characters', () => {
+      expect(createTDLSchema.validate({ TransactionNo: 'x'.repeat(100), TransactionTypeConfigId: VALID_UUID_TDL, TransactionDate: '2026-01-01' }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createTDLSchema.validate({ TransactionNo: 'INV-001', TransactionTypeConfigId: VALID_UUID_TDL, TransactionDate: '2026-01-01' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when TransactionNo is missing', () => {
+      expect(createTDLSchema.validate({ TransactionTypeConfigId: VALID_UUID_TDL, TransactionDate: '2026-05-31' }).error).toBeDefined();
+    });
+    it('fails when TransactionTypeConfigId is missing', () => {
+      expect(createTDLSchema.validate({ TransactionNo: 'INV-001', TransactionDate: '2026-05-31' }).error).toBeDefined();
+    });
+    it('fails when TransactionDate is missing', () => {
+      expect(createTDLSchema.validate({ TransactionNo: 'INV-001', TransactionTypeConfigId: VALID_UUID_TDL }).error).toBeDefined();
+    });
+    it('fails when TransactionDate is an invalid string', () => {
+      expect(createTDLSchema.validate({ TransactionNo: 'INV-001', TransactionTypeConfigId: VALID_UUID_TDL, TransactionDate: 'not-a-date' }).error).toBeDefined();
+    });
+    it('fails when TransactionTypeConfigId is not a valid UUID', () => {
+      expect(createTDLSchema.validate({ TransactionNo: 'INV-001', TransactionTypeConfigId: 'bad', TransactionDate: '2026-05-31' }).error).toBeDefined();
+    });
+    it('fails when TransactionNo exceeds 100 characters', () => {
+      expect(createTDLSchema.validate({ TransactionNo: 'x'.repeat(101), TransactionTypeConfigId: VALID_UUID_TDL, TransactionDate: '2026-01-01' }).error).toBeDefined();
+    });
+    it('fails when Remarks exceeds 1000 characters', () => {
+      expect(createTDLSchema.validate({ TransactionNo: 'INV-001', TransactionTypeConfigId: VALID_UUID_TDL, TransactionDate: '2026-01-01', Remarks: 'x'.repeat(1001) }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with only TransactionNo patch', () => {
+      expect(updateTDLSchema.validate({ TransactionNo: 'INV-002' }).error).toBeUndefined();
+    });
+    it('passes with TransactionDate update', () => {
+      expect(updateTDLSchema.validate({ TransactionDate: '2026-06-01' }).error).toBeUndefined();
+    });
+    it('passes with Remarks as null', () => {
+      expect(updateTDLSchema.validate({ Remarks: null }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateTDLSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateTDLSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when TransactionDate is invalid', () => {
+      expect(updateTDLSchema.validate({ TransactionDate: 'bad-date' }).error).toBeDefined();
+    });
+    it('fails when TransactionTypeConfigId is not a valid UUID', () => {
+      expect(updateTDLSchema.validate({ TransactionTypeConfigId: 'not-uuid' }).error).toBeDefined();
+    });
+  });
+});
+
 const UUID = 'a1b2c3d4-1111-1111-1111-111111111111';
 
 describe('normalizeDate — branch coverage', () => {

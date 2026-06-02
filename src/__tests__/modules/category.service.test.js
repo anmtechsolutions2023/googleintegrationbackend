@@ -122,3 +122,57 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('category — field validation', () => {
+  const { createCategorySchema, updateCategorySchema } =
+    require('../../modules/category/category.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with a valid Name', () => {
+      expect(createCategorySchema.validate({ Name: 'Electronics' }).error).toBeUndefined();
+    });
+    it('passes with Name and Active false', () => {
+      expect(createCategorySchema.validate({ Name: 'Electronics', Active: false }).error).toBeUndefined();
+    });
+    it('accepts Name at exactly 100 characters', () => {
+      expect(createCategorySchema.validate({ Name: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createCategorySchema.validate({ Name: 'Electronics' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Name is missing', () => {
+      expect(createCategorySchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(createCategorySchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when Name is a number', () => {
+      expect(createCategorySchema.validate({ Name: 123 }).error).toBeDefined();
+    });
+    it('fails when Active is a non-coercible string', () => {
+      expect(createCategorySchema.validate({ Name: 'Tech', Active: 'yes' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with a valid Name patch', () => {
+      expect(updateCategorySchema.validate({ Name: 'Appliances' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateCategorySchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateCategorySchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(updateCategorySchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+  });
+});

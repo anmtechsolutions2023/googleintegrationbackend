@@ -122,3 +122,86 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+const VALID_UUID_TTCM = 'a1b2c3d4-1111-1111-1111-111111111111';
+
+describe('transactiontypeconversionmapper — field validation', () => {
+  const { createSchema: createTTCMSchema, updateSchema: updateTTCMSchema } =
+    require('../../modules/transactiontypeconversionmapper/transactiontypeconversionmapper.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with all three required UUID fields', () => {
+      const data = {
+        TransactionTypeBaseCoversionId: VALID_UUID_TTCM,
+        TransactionDetailLogId: VALID_UUID_TTCM,
+        TransactionTypeStatusId: VALID_UUID_TTCM,
+      };
+      expect(createTTCMSchema.validate(data).error).toBeUndefined();
+    });
+    it('passes with Active false', () => {
+      const data = {
+        TransactionTypeBaseCoversionId: VALID_UUID_TTCM,
+        TransactionDetailLogId: VALID_UUID_TTCM,
+        TransactionTypeStatusId: VALID_UUID_TTCM,
+        Active: false,
+      };
+      expect(createTTCMSchema.validate(data).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createTTCMSchema.validate({
+        TransactionTypeBaseCoversionId: VALID_UUID_TTCM,
+        TransactionDetailLogId: VALID_UUID_TTCM,
+        TransactionTypeStatusId: VALID_UUID_TTCM,
+      });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when TransactionTypeBaseCoversionId is missing', () => {
+      expect(createTTCMSchema.validate({ TransactionDetailLogId: VALID_UUID_TTCM, TransactionTypeStatusId: VALID_UUID_TTCM }).error).toBeDefined();
+    });
+    it('fails when TransactionDetailLogId is missing', () => {
+      expect(createTTCMSchema.validate({ TransactionTypeBaseCoversionId: VALID_UUID_TTCM, TransactionTypeStatusId: VALID_UUID_TTCM }).error).toBeDefined();
+    });
+    it('fails when TransactionTypeStatusId is missing', () => {
+      expect(createTTCMSchema.validate({ TransactionTypeBaseCoversionId: VALID_UUID_TTCM, TransactionDetailLogId: VALID_UUID_TTCM }).error).toBeDefined();
+    });
+    it('fails when all fields are missing', () => {
+      expect(createTTCMSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when TransactionTypeBaseCoversionId is not a valid UUID', () => {
+      expect(createTTCMSchema.validate({ TransactionTypeBaseCoversionId: 'bad', TransactionDetailLogId: VALID_UUID_TTCM, TransactionTypeStatusId: VALID_UUID_TTCM }).error).toBeDefined();
+    });
+    it('fails when TransactionDetailLogId is not a valid UUID', () => {
+      expect(createTTCMSchema.validate({ TransactionTypeBaseCoversionId: VALID_UUID_TTCM, TransactionDetailLogId: 'not-uuid', TransactionTypeStatusId: VALID_UUID_TTCM }).error).toBeDefined();
+    });
+    it('fails when Active is not a boolean', () => {
+      expect(createTTCMSchema.validate({ TransactionTypeBaseCoversionId: VALID_UUID_TTCM, TransactionDetailLogId: VALID_UUID_TTCM, TransactionTypeStatusId: VALID_UUID_TTCM, Active: 1 }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with only Active flag', () => {
+      expect(updateTTCMSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+    it('passes with TransactionTypeStatusId patch', () => {
+      expect(updateTTCMSchema.validate({ TransactionTypeStatusId: VALID_UUID_TTCM }).error).toBeUndefined();
+    });
+    it('passes with TransactionDetailLogId patch', () => {
+      expect(updateTTCMSchema.validate({ TransactionDetailLogId: VALID_UUID_TTCM }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateTTCMSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when TransactionTypeBaseCoversionId is invalid UUID', () => {
+      expect(updateTTCMSchema.validate({ TransactionTypeBaseCoversionId: 'not-uuid' }).error).toBeDefined();
+    });
+    it('fails when TransactionTypeStatusId is invalid UUID', () => {
+      expect(updateTTCMSchema.validate({ TransactionTypeStatusId: 'bad-id' }).error).toBeDefined();
+    });
+  });
+});

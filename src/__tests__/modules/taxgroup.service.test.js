@@ -122,3 +122,60 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('taxgroup — field validation', () => {
+  const { createSchema: createTaxGroupSchema, updateSchema: updateTaxGroupSchema } =
+    require('../../modules/taxgroup/taxgroup.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with a valid Name', () => {
+      expect(createTaxGroupSchema.validate({ Name: 'GST 18%' }).error).toBeUndefined();
+    });
+    it('passes with Name and Active false', () => {
+      expect(createTaxGroupSchema.validate({ Name: 'GST 18%', Active: false }).error).toBeUndefined();
+    });
+    it('accepts Name at exactly 100 characters', () => {
+      expect(createTaxGroupSchema.validate({ Name: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createTaxGroupSchema.validate({ Name: 'IGST' });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Name is missing', () => {
+      expect(createTaxGroupSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(createTaxGroupSchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when Name is null', () => {
+      expect(createTaxGroupSchema.validate({ Name: null }).error).toBeDefined();
+    });
+    it('fails when Active is a non-coercible string', () => {
+      expect(createTaxGroupSchema.validate({ Name: 'GST', Active: 'yes' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with a valid Name patch', () => {
+      expect(updateTaxGroupSchema.validate({ Name: 'GST 5%' }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateTaxGroupSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+    it('passes with both Name and Active', () => {
+      expect(updateTaxGroupSchema.validate({ Name: 'GST 5%', Active: true }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateTaxGroupSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(updateTaxGroupSchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+  });
+});

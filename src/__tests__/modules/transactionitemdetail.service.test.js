@@ -122,3 +122,77 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+const VALID_UUID_TID = 'a1b2c3d4-1111-1111-1111-111111111111';
+
+describe('transactionitemdetail — field validation', () => {
+  const { createSchema: createTIDSchema, updateSchema: updateTIDSchema } =
+    require('../../modules/transactionitemdetail/transactionitemdetail.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with required TransactionDetailLogId and ItemId', () => {
+      expect(createTIDSchema.validate({ TransactionDetailLogId: VALID_UUID_TID, ItemId: VALID_UUID_TID }).error).toBeUndefined();
+    });
+    it('passes with optional Comment', () => {
+      expect(createTIDSchema.validate({ TransactionDetailLogId: VALID_UUID_TID, ItemId: VALID_UUID_TID, Comment: 'Item note' }).error).toBeUndefined();
+    });
+    it('passes with Comment as null', () => {
+      expect(createTIDSchema.validate({ TransactionDetailLogId: VALID_UUID_TID, ItemId: VALID_UUID_TID, Comment: null }).error).toBeUndefined();
+    });
+    it('accepts Comment at exactly 100 characters', () => {
+      expect(createTIDSchema.validate({ TransactionDetailLogId: VALID_UUID_TID, ItemId: VALID_UUID_TID, Comment: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createTIDSchema.validate({ TransactionDetailLogId: VALID_UUID_TID, ItemId: VALID_UUID_TID });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when TransactionDetailLogId is missing', () => {
+      expect(createTIDSchema.validate({ ItemId: VALID_UUID_TID }).error).toBeDefined();
+    });
+    it('fails when ItemId is missing', () => {
+      expect(createTIDSchema.validate({ TransactionDetailLogId: VALID_UUID_TID }).error).toBeDefined();
+    });
+    it('fails when both fields are missing', () => {
+      expect(createTIDSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when TransactionDetailLogId is not a valid UUID', () => {
+      expect(createTIDSchema.validate({ TransactionDetailLogId: 'not-uuid', ItemId: VALID_UUID_TID }).error).toBeDefined();
+    });
+    it('fails when ItemId is not a valid UUID', () => {
+      expect(createTIDSchema.validate({ TransactionDetailLogId: VALID_UUID_TID, ItemId: 'bad' }).error).toBeDefined();
+    });
+    it('fails when Comment exceeds 100 characters', () => {
+      expect(createTIDSchema.validate({ TransactionDetailLogId: VALID_UUID_TID, ItemId: VALID_UUID_TID, Comment: 'x'.repeat(101) }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with only Comment patch', () => {
+      expect(updateTIDSchema.validate({ Comment: 'Updated note' }).error).toBeUndefined();
+    });
+    it('passes with Comment as null', () => {
+      expect(updateTIDSchema.validate({ Comment: null }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateTIDSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+    it('passes with ItemId patch', () => {
+      expect(updateTIDSchema.validate({ ItemId: VALID_UUID_TID }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateTIDSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when ItemId is not a valid UUID', () => {
+      expect(updateTIDSchema.validate({ ItemId: 'bad-uuid' }).error).toBeDefined();
+    });
+    it('fails when Comment exceeds 100 characters', () => {
+      expect(updateTIDSchema.validate({ Comment: 'x'.repeat(101) }).error).toBeDefined();
+    });
+  });
+});

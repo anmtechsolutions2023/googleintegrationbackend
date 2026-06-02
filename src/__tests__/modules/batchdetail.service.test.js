@@ -123,6 +123,90 @@ describe(`${name} — service`, () => {
   });
 });
 
+const VALID_UUID_BATCH = 'a1b2c3d4-1111-1111-1111-111111111111';
+
+describe('batchdetail — field validation', () => {
+  const { createSchema: createBatchSchema, updateSchema: updateBatchSchema } =
+    require('../../modules/batchdetail/batchdetail.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with only required BatchNo', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'BATCH-001' }).error).toBeUndefined();
+    });
+    it('passes with all optional date fields as ISO strings', () => {
+      const data = { BatchNo: 'B1', MfgDate: '2025-01-01', Expdate: '2026-01-01', PurchaseDate: '2025-06-01' };
+      expect(createBatchSchema.validate(data).error).toBeUndefined();
+    });
+    it('passes with DD-MM-YYYY date format', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'B1', MfgDate: '01-01-2025' }).error).toBeUndefined();
+    });
+    it('passes with date fields as null', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'B1', MfgDate: null, Expdate: null }).error).toBeUndefined();
+    });
+    it('passes with optional UUID fields', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'B1', CostInfoId: VALID_UUID_BATCH, UOMId: VALID_UUID_BATCH }).error).toBeUndefined();
+    });
+    it('passes with Quantity as decimal', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'B1', Quantity: 10.5 }).error).toBeUndefined();
+    });
+    it('accepts BatchNo at exactly 100 characters', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('defaults IsNonReturnable to false when omitted', () => {
+      const { value } = createBatchSchema.validate({ BatchNo: 'B1' });
+      expect(value.IsNonReturnable).toBe(false);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when BatchNo is missing', () => {
+      expect(createBatchSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when BatchNo exceeds 100 characters', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when MfgDate is an invalid date string', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'B1', MfgDate: 'not-a-date' }).error).toBeDefined();
+    });
+    it('fails when CostInfoId is not a valid UUID', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'B1', CostInfoId: 'not-uuid' }).error).toBeDefined();
+    });
+    it('fails when IsNonReturnable is not a boolean', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'B1', IsNonReturnable: 1 }).error).toBeDefined();
+    });
+    it('fails when Quantity is a non-numeric string', () => {
+      expect(createBatchSchema.validate({ BatchNo: 'B1', Quantity: 'many' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with BatchNo patch', () => {
+      expect(updateBatchSchema.validate({ BatchNo: 'BATCH-002' }).error).toBeUndefined();
+    });
+    it('passes with Expdate update', () => {
+      expect(updateBatchSchema.validate({ Expdate: '2027-12-31' }).error).toBeUndefined();
+    });
+    it('passes with Expdate as null', () => {
+      expect(updateBatchSchema.validate({ Expdate: null }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateBatchSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateBatchSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when BatchNo exceeds 100 characters', () => {
+      expect(updateBatchSchema.validate({ BatchNo: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when MfgDate is an invalid string', () => {
+      expect(updateBatchSchema.validate({ MfgDate: 'yesterday' }).error).toBeDefined();
+    });
+  });
+});
+
 describe('normalizeDate — branch coverage', () => {
   const svc = require('../../modules/batchdetail/batchdetail.service');
 

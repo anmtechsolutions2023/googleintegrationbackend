@@ -146,3 +146,108 @@ describe('normalizeDate — Timestamp branch coverage', () => {
     expect(result).toHaveProperty('id');
   });
 });
+
+describe('paymentbreakup — field validation', () => {
+  const { createSchema: createPBSchema, updateSchema: updatePBSchema } =
+    require('../../modules/paymentbreakup/paymentbreakup.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with all five required fields (ISO Timestamp)', () => {
+      const data = {
+        AccountTypeBaseId: UUID, PaymentDetailId: UUID,
+        PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID,
+        Timestamp: '2026-05-31T10:00:00.000Z',
+      };
+      expect(createPBSchema.validate(data).error).toBeUndefined();
+    });
+    it('passes with DD-MM-YYYY Timestamp format', () => {
+      const data = {
+        AccountTypeBaseId: UUID, PaymentDetailId: UUID,
+        PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID,
+        Timestamp: '31-05-2026',
+      };
+      expect(createPBSchema.validate(data).error).toBeUndefined();
+    });
+    it('passes with optional UserId as valid UUID', () => {
+      const data = {
+        AccountTypeBaseId: UUID, PaymentDetailId: UUID,
+        PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID,
+        Timestamp: '2026-05-31T10:00:00.000Z', UserId: UUID,
+      };
+      expect(createPBSchema.validate(data).error).toBeUndefined();
+    });
+    it('passes with UserId as null', () => {
+      const data = {
+        AccountTypeBaseId: UUID, PaymentDetailId: UUID,
+        PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID,
+        Timestamp: '2026-05-31T10:00:00.000Z', UserId: null,
+      };
+      expect(createPBSchema.validate(data).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createPBSchema.validate({
+        AccountTypeBaseId: UUID, PaymentDetailId: UUID,
+        PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID,
+        Timestamp: '2026-05-31T10:00:00.000Z',
+      });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when AccountTypeBaseId is missing', () => {
+      expect(createPBSchema.validate({ PaymentDetailId: UUID, PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID, Timestamp: '2026-05-31T10:00:00Z' }).error).toBeDefined();
+    });
+    it('fails when PaymentDetailId is missing', () => {
+      expect(createPBSchema.validate({ AccountTypeBaseId: UUID, PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID, Timestamp: '2026-05-31T10:00:00Z' }).error).toBeDefined();
+    });
+    it('fails when PaymentModeTransactionDetailId is missing', () => {
+      expect(createPBSchema.validate({ AccountTypeBaseId: UUID, PaymentDetailId: UUID, PaymentReceivedTypeId: UUID, Timestamp: '2026-05-31T10:00:00Z' }).error).toBeDefined();
+    });
+    it('fails when PaymentReceivedTypeId is missing', () => {
+      expect(createPBSchema.validate({ AccountTypeBaseId: UUID, PaymentDetailId: UUID, PaymentModeTransactionDetailId: UUID, Timestamp: '2026-05-31T10:00:00Z' }).error).toBeDefined();
+    });
+    it('fails when Timestamp is missing', () => {
+      expect(createPBSchema.validate({ AccountTypeBaseId: UUID, PaymentDetailId: UUID, PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID }).error).toBeDefined();
+    });
+    it('fails when Timestamp is an invalid string', () => {
+      expect(createPBSchema.validate({ AccountTypeBaseId: UUID, PaymentDetailId: UUID, PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID, Timestamp: 'not-a-date' }).error).toBeDefined();
+    });
+    it('fails when AccountTypeBaseId is not a valid UUID', () => {
+      expect(createPBSchema.validate({ AccountTypeBaseId: 'bad-uuid', PaymentDetailId: UUID, PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID, Timestamp: '2026-05-31T10:00:00Z' }).error).toBeDefined();
+    });
+    it('fails when UserId is not a valid UUID', () => {
+      expect(createPBSchema.validate({ AccountTypeBaseId: UUID, PaymentDetailId: UUID, PaymentModeTransactionDetailId: UUID, PaymentReceivedTypeId: UUID, Timestamp: '2026-05-31T10:00:00Z', UserId: 'bad' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with only Active flag', () => {
+      expect(updatePBSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+    it('passes with Timestamp update', () => {
+      expect(updatePBSchema.validate({ Timestamp: '2026-06-01T10:00:00.000Z' }).error).toBeUndefined();
+    });
+    it('passes with PaymentReceivedTypeId patch', () => {
+      expect(updatePBSchema.validate({ PaymentReceivedTypeId: UUID }).error).toBeUndefined();
+    });
+    it('passes with UserId as null', () => {
+      expect(updatePBSchema.validate({ UserId: null }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updatePBSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when AccountTypeBaseId is not a valid UUID', () => {
+      expect(updatePBSchema.validate({ AccountTypeBaseId: 'not-uuid' }).error).toBeDefined();
+    });
+    it('fails when Timestamp is an invalid string', () => {
+      expect(updatePBSchema.validate({ Timestamp: 'bad-date' }).error).toBeDefined();
+    });
+    it('fails when PaymentDetailId is not a valid UUID', () => {
+      expect(updatePBSchema.validate({ PaymentDetailId: 'not-uuid' }).error).toBeDefined();
+    });
+  });
+});

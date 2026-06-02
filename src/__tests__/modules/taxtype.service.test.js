@@ -122,3 +122,78 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+describe('taxtype — field validation', () => {
+  const { createTaxTypeSchema, updateTaxTypeSchema } =
+    require('../../modules/taxtype/taxtype.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with valid Name and Value', () => {
+      expect(createTaxTypeSchema.validate({ Name: 'GST', Value: 18 }).error).toBeUndefined();
+    });
+    it('passes with Value at boundary 0', () => {
+      expect(createTaxTypeSchema.validate({ Name: 'Zero Tax', Value: 0 }).error).toBeUndefined();
+    });
+    it('passes with Value at boundary 100', () => {
+      expect(createTaxTypeSchema.validate({ Name: 'Full Tax', Value: 100 }).error).toBeUndefined();
+    });
+    it('passes with decimal Value', () => {
+      expect(createTaxTypeSchema.validate({ Name: 'GST', Value: 5.5 }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createTaxTypeSchema.validate({ Name: 'GST', Value: 18 });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Name is missing', () => {
+      expect(createTaxTypeSchema.validate({ Value: 18 }).error).toBeDefined();
+    });
+    it('fails when Value is missing', () => {
+      expect(createTaxTypeSchema.validate({ Name: 'GST' }).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(createTaxTypeSchema.validate({ Name: 'x'.repeat(101), Value: 18 }).error).toBeDefined();
+    });
+    it('fails when Value is negative', () => {
+      expect(createTaxTypeSchema.validate({ Name: 'GST', Value: -1 }).error).toBeDefined();
+    });
+    it('fails when Value exceeds 100', () => {
+      expect(createTaxTypeSchema.validate({ Name: 'GST', Value: 101 }).error).toBeDefined();
+    });
+    it('fails when Value is a non-numeric string', () => {
+      expect(createTaxTypeSchema.validate({ Name: 'GST', Value: 'eighteen' }).error).toBeDefined();
+    });
+    it('fails when Name is a number', () => {
+      expect(createTaxTypeSchema.validate({ Name: 18, Value: 18 }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with only Name patch', () => {
+      expect(updateTaxTypeSchema.validate({ Name: 'IGST' }).error).toBeUndefined();
+    });
+    it('passes with only Value patch', () => {
+      expect(updateTaxTypeSchema.validate({ Value: 12 }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateTaxTypeSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateTaxTypeSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Value is negative', () => {
+      expect(updateTaxTypeSchema.validate({ Value: -5 }).error).toBeDefined();
+    });
+    it('fails when Value exceeds 100', () => {
+      expect(updateTaxTypeSchema.validate({ Value: 200 }).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(updateTaxTypeSchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+  });
+});

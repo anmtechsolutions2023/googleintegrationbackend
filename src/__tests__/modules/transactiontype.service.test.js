@@ -122,3 +122,68 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+const VALID_UUID_TT = 'a1b2c3d4-1111-1111-1111-111111111111';
+
+describe('transactiontype — field validation', () => {
+  const { createTransactionTypeSchema, updateTransactionTypeSchema } =
+    require('../../modules/transactiontype/transactiontype.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with valid Name and TransactionTypeConfigId', () => {
+      expect(createTransactionTypeSchema.validate({ Name: 'Sales Invoice', TransactionTypeConfigId: VALID_UUID_TT }).error).toBeUndefined();
+    });
+    it('passes with Active false', () => {
+      expect(createTransactionTypeSchema.validate({ Name: 'Purchase', TransactionTypeConfigId: VALID_UUID_TT, Active: false }).error).toBeUndefined();
+    });
+    it('accepts Name at exactly 100 characters', () => {
+      expect(createTransactionTypeSchema.validate({ Name: 'x'.repeat(100), TransactionTypeConfigId: VALID_UUID_TT }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createTransactionTypeSchema.validate({ Name: 'Invoice', TransactionTypeConfigId: VALID_UUID_TT });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when Name is missing', () => {
+      expect(createTransactionTypeSchema.validate({ TransactionTypeConfigId: VALID_UUID_TT }).error).toBeDefined();
+    });
+    it('fails when TransactionTypeConfigId is missing', () => {
+      expect(createTransactionTypeSchema.validate({ Name: 'Invoice' }).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(createTransactionTypeSchema.validate({ Name: 'x'.repeat(101), TransactionTypeConfigId: VALID_UUID_TT }).error).toBeDefined();
+    });
+    it('fails when TransactionTypeConfigId is not a valid UUID', () => {
+      expect(createTransactionTypeSchema.validate({ Name: 'Invoice', TransactionTypeConfigId: 'not-uuid' }).error).toBeDefined();
+    });
+    it('fails when Name is a number', () => {
+      expect(createTransactionTypeSchema.validate({ Name: 1, TransactionTypeConfigId: VALID_UUID_TT }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with Name patch', () => {
+      expect(updateTransactionTypeSchema.validate({ Name: 'Purchase Order' }).error).toBeUndefined();
+    });
+    it('passes with TransactionTypeConfigId patch', () => {
+      expect(updateTransactionTypeSchema.validate({ TransactionTypeConfigId: VALID_UUID_TT }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updateTransactionTypeSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updateTransactionTypeSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when Name exceeds 100 characters', () => {
+      expect(updateTransactionTypeSchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when TransactionTypeConfigId is invalid UUID', () => {
+      expect(updateTransactionTypeSchema.validate({ TransactionTypeConfigId: 'not-uuid' }).error).toBeDefined();
+    });
+  });
+});

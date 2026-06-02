@@ -122,3 +122,84 @@ describe(`${name} — service`, () => {
     });
   });
 });
+
+const VALID_UUID_PMTD = 'a1b2c3d4-1111-1111-1111-111111111111';
+
+describe('paymentmodetransactiondetail — field validation', () => {
+  const { createSchema: createPMTDSchema, updateSchema: updatePMTDSchema } =
+    require('../../modules/paymentmodetransactiondetail/paymentmodetransactiondetail.schemas');
+
+  describe('create schema — positive cases', () => {
+    it('passes with only required PaymentModeId', () => {
+      expect(createPMTDSchema.validate({ PaymentModeId: VALID_UUID_PMTD }).error).toBeUndefined();
+    });
+    it('passes with all optional fields', () => {
+      const data = {
+        PaymentModeId: VALID_UUID_PMTD, RefNo: 'TXN-001', Comment: 'Test payment',
+        CF1: 'Field1', CF2: 'Field2', CF3: 'Field3', CF4: 'Field4', Active: true,
+      };
+      expect(createPMTDSchema.validate(data).error).toBeUndefined();
+    });
+    it('passes with optional fields as null', () => {
+      expect(createPMTDSchema.validate({ PaymentModeId: VALID_UUID_PMTD, RefNo: null, Comment: null }).error).toBeUndefined();
+    });
+    it('accepts RefNo at exactly 50 characters', () => {
+      expect(createPMTDSchema.validate({ PaymentModeId: VALID_UUID_PMTD, RefNo: 'x'.repeat(50) }).error).toBeUndefined();
+    });
+    it('accepts Comment at exactly 100 characters', () => {
+      expect(createPMTDSchema.validate({ PaymentModeId: VALID_UUID_PMTD, Comment: 'x'.repeat(100) }).error).toBeUndefined();
+    });
+    it('defaults Active to true when omitted', () => {
+      const { value } = createPMTDSchema.validate({ PaymentModeId: VALID_UUID_PMTD });
+      expect(value.Active).toBe(true);
+    });
+  });
+
+  describe('create schema — negative cases', () => {
+    it('fails when PaymentModeId is missing', () => {
+      expect(createPMTDSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when PaymentModeId is not a valid UUID', () => {
+      expect(createPMTDSchema.validate({ PaymentModeId: 'not-uuid' }).error).toBeDefined();
+    });
+    it('fails when RefNo exceeds 50 characters', () => {
+      expect(createPMTDSchema.validate({ PaymentModeId: VALID_UUID_PMTD, RefNo: 'x'.repeat(51) }).error).toBeDefined();
+    });
+    it('fails when Comment exceeds 100 characters', () => {
+      expect(createPMTDSchema.validate({ PaymentModeId: VALID_UUID_PMTD, Comment: 'x'.repeat(101) }).error).toBeDefined();
+    });
+    it('fails when CF1 exceeds 50 characters', () => {
+      expect(createPMTDSchema.validate({ PaymentModeId: VALID_UUID_PMTD, CF1: 'x'.repeat(51) }).error).toBeDefined();
+    });
+    it('fails when Active is not a boolean', () => {
+      expect(createPMTDSchema.validate({ PaymentModeId: VALID_UUID_PMTD, Active: 'yes' }).error).toBeDefined();
+    });
+  });
+
+  describe('update schema — positive cases', () => {
+    it('passes with only RefNo patch', () => {
+      expect(updatePMTDSchema.validate({ RefNo: 'TXN-002' }).error).toBeUndefined();
+    });
+    it('passes with Comment as null', () => {
+      expect(updatePMTDSchema.validate({ Comment: null }).error).toBeUndefined();
+    });
+    it('passes with only Active flag', () => {
+      expect(updatePMTDSchema.validate({ Active: false }).error).toBeUndefined();
+    });
+    it('passes with CF fields patch', () => {
+      expect(updatePMTDSchema.validate({ CF1: 'NewField1' }).error).toBeUndefined();
+    });
+  });
+
+  describe('update schema — negative cases', () => {
+    it('fails for an empty body', () => {
+      expect(updatePMTDSchema.validate({}).error).toBeDefined();
+    });
+    it('fails when PaymentModeId is invalid UUID', () => {
+      expect(updatePMTDSchema.validate({ PaymentModeId: 'bad' }).error).toBeDefined();
+    });
+    it('fails when RefNo exceeds 50 characters', () => {
+      expect(updatePMTDSchema.validate({ RefNo: 'x'.repeat(51) }).error).toBeDefined();
+    });
+  });
+});
