@@ -20,8 +20,8 @@ module.exports = {
   // ============================================
   RATE_LIMIT: {
     // Authentication endpoint rate limiting
-    AUTH_WINDOW_MS: 15 * 60 * 1000, // Time window: 15 minutes (in milliseconds)
-    AUTH_MAX_REQUESTS: 5, // Maximum requests per IP per window
+    AUTH_WINDOW_MS: 15 * 60 * 1000,                               // 15 minutes
+    AUTH_MAX_REQUESTS: parseInt(process.env.AUTH_RATE_LIMIT, 10) || 30, // override via AUTH_RATE_LIMIT env var
     // AUTH_MESSAGE is in messages.js - see messages.ERROR.RATE_LIMIT_EXCEEDED
 
     // Standard headers: Include rate limit info in response headers
@@ -36,6 +36,7 @@ module.exports = {
   JWT: {
     // Token expiration time
     EXPIRATION: '1h', // JWT token validity: 1 hour
+    GUEST_EXPIRATION: '15m', // Guest (pending/rejected) tokens expire faster
     // NOTE: JWT_SECRET should come from environment variable (process.env.JWT_SECRET)
   },
 

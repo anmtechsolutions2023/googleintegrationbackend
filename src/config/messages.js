@@ -11,6 +11,19 @@ module.exports = {
     REPORTS_ACCESS: 'Read Access: Report generation started.',
     BILLING_ACCESS: 'Read Access: Displaying billing data.',
     ADMIN_ACCESS: 'ADMIN ACCESS: Configuration settings.',
+    ONBOARDING_REQUEST_SUBMITTED: 'Your access request has been submitted.',
+    ONBOARDING_APPROVED: 'User approved and provisioned successfully.',
+    ONBOARDING_REJECTED: 'Access request rejected.',
+    ROLE_CREATED: 'Role created successfully.',
+    ROLE_UPDATED: 'Role updated successfully.',
+    ROLE_DELETED: 'Role deleted successfully.',
+    USER_ROLES_UPDATED: 'User roles updated successfully.',
+    USER_STATUS_UPDATED: 'User status updated successfully.',
+    USER_REMOVED: 'User removed from tenant successfully.',
+    FEATURE_CREATED: 'Feature created successfully.',
+    FEATURE_UPDATED: 'Feature updated successfully.',
+    FEATURE_DELETED: 'Feature deleted successfully.',
+    AUDIT_CATEGORIES_RETRIEVED: 'Audit categories retrieved successfully.',
   },
   ERROR: {
     // Authentication & Authorization
@@ -37,6 +50,12 @@ module.exports = {
       'Too many authentication attempts, please try again later.',
     // Duplicate Entry
     DUPLICATE_ENTRY: 'A record with this value already exists.',
+    // IAM errors
+    ONBOARDING_REQUEST_NOT_FOUND: 'No onboarding request found for this account.',
+    ROLE_IN_USE: 'Cannot delete role: it is currently assigned to one or more users.',
+    FEATURE_IN_USE: 'Cannot delete feature: it is assigned to one or more roles.',
+    SYSTEM_ROLE_PROTECTED: 'System roles cannot be modified or deleted.',
+    USER_ALREADY_EXISTS: 'User is already provisioned in this tenant.',
   },
   INFO: {
     SERVER_RUNNING: 'Server is running on port ',

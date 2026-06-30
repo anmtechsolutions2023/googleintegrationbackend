@@ -7,7 +7,7 @@ const {
   authenticateToken,
   checkScope,
 } = require('../../middleware/authMiddleware');
-const { auditLog } = require('../../middleware/auditLogger');
+const { auditLogCrud } = require('../../middleware/auditLogger');
 const { SCOPES } = require('../../config/constants');
 const categoryController = require('./category.controller');
 
@@ -18,7 +18,7 @@ const categoryController = require('./category.controller');
 router.get(
   '/',
   authenticateToken,
-  auditLog(),
+  auditLogCrud('Category'),
   ...categoryController.getAllCategories
 );
 
@@ -29,7 +29,7 @@ router.get(
 router.get(
   '/:id',
   authenticateToken,
-  auditLog(),
+  auditLogCrud('Category'),
   ...categoryController.getCategoryById
 );
 
@@ -40,8 +40,8 @@ router.get(
 router.post(
   '/',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Category'),
   ...categoryController.createCategory
 );
 
@@ -52,8 +52,8 @@ router.post(
 router.put(
   '/:id',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Category'),
   ...categoryController.updateCategory
 );
 
@@ -64,8 +64,8 @@ router.put(
 router.delete(
   '/:id',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Category'),
   ...categoryController.deleteCategory
 );
 

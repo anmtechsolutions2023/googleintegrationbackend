@@ -3,6 +3,8 @@
 // All module routes are imported and registered here.
 
 const authRoutes = require('../modules/auth/auth.routes');
+const onboardingRoutes = require('../modules/onboarding/onboarding.routes');
+const adminRoutes = require('../modules/admin/admin.routes');
 const tenantRoutes = require('../modules/tenant/tenant.routes');
 const reportsRoutes = require('../modules/reports/reports.routes');
 const dataRoutes = require('../modules/data/data.routes');
@@ -48,6 +50,12 @@ const accounttypebaseRoutes = require('../modules/accounttypebase/accounttypebas
 const registerRoutes = (app) => {
   // Authentication module - Google OAuth
   app.use('/api/auth', authRoutes);
+
+  // Onboarding module - Guest/pending user status + note
+  app.use('/api/onboarding', onboardingRoutes);
+
+  // Admin module - IAM panel (onboarding approval, user/role/feature management)
+  app.use('/api/admin', adminRoutes);
 
   // Tenant management module - Tenant switching
   app.use('/api/tenants', tenantRoutes);
@@ -177,6 +185,8 @@ const registerRoutes = (app) => {
       status: 'running',
       modules: [
         { name: 'auth', path: '/api/auth' },
+        { name: 'onboarding', path: '/api/onboarding' },
+        { name: 'admin', path: '/api/admin' },
         { name: 'tenants', path: '/api/tenants' },
         { name: 'reports', path: '/api/reports' },
         { name: 'data', path: '/api/data' },

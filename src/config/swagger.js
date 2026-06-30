@@ -865,6 +865,176 @@ const swaggerSpec = {
         type: 'object',
         properties: { ...auditFields, AccountTypeBaseId: { type: 'string' }, PaymentDetailId: { type: 'string' }, PaymentModeTransactionDetailId: { type: 'string' }, PaymentReceivedTypeId: { type: 'string' }, UserId: { type: 'string', nullable: true }, Timestamp: { type: 'string' } },
       },
+
+      // ─── IAM — Onboarding ──────────────────────────────────────────────────
+      OnboardingStatus: {
+        type: 'object',
+        properties: {
+          id:              { type: 'string', format: 'uuid' },
+          status:          { type: 'string', enum: ['PENDING', 'APPROVED', 'REJECTED'] },
+          requestNote:     { type: 'string', nullable: true },
+          rejectionReason: { type: 'string', nullable: true },
+          requestedAt:     { type: 'string', format: 'date-time' },
+        },
+      },
+      OnboardingNoteUpdate: {
+        type: 'object',
+        properties: { requestNote: { type: 'string', maxLength: 500 } },
+      },
+      OnboardingRequest: {
+        type: 'object',
+        properties: {
+          id:             { type: 'string', format: 'uuid' },
+          email:          { type: 'string', format: 'email' },
+          name:           { type: 'string', nullable: true },
+          status:         { type: 'string', enum: ['PENDING', 'APPROVED', 'REJECTED'] },
+          requestNote:    { type: 'string', nullable: true },
+          rejectionReason:{ type: 'string', nullable: true },
+          reviewedBy:     { type: 'string', nullable: true },
+          reviewedAt:     { type: 'string', format: 'date-time', nullable: true },
+          requestedAt:    { type: 'string', format: 'date-time' },
+        },
+      },
+      OnboardingApprove: {
+        type: 'object', required: ['tenantId', 'roleIds'],
+        properties: {
+          tenantId: { type: 'string', example: 'tenant-uuid' },
+          roleIds:  { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
+        },
+      },
+      OnboardingReject: {
+        type: 'object', required: ['reason'],
+        properties: { reason: { type: 'string', maxLength: 500 } },
+      },
+      // Part 2I — frontend-friendly schemas (PUT, simplified body)
+      OnboardingApproveSimple: {
+        type: 'object', required: ['tenantId'],
+        properties: {
+          tenantId: { type: 'string', example: 'tenant-uuid' },
+          roleIds:  { type: 'array', items: { type: 'string', format: 'uuid' }, description: 'Optional — omit to approve without assigning roles' },
+        },
+      },
+      OnboardingRejectFrontend: {
+        type: 'object', required: ['rejectionReason'],
+        properties: { rejectionReason: { type: 'string', maxLength: 500 } },
+      },
+
+      // ─── IAM — Users ──────────────────────────────────────────────────────
+      AdminUser: {
+        type: 'object',
+        properties: {
+          user_email:     { type: 'string', format: 'email' },
+          tenant_id:      { type: 'string' },
+          is_admin:       { type: 'integer', enum: [0, 1] },
+          is_super_admin: { type: 'integer', enum: [0, 1] },
+          is_active:      { type: 'integer', enum: [0, 1] },
+          status:         { type: 'string', enum: ['ACTIVE', 'SUSPENDED'] },
+          roles:          { type: 'string', nullable: true, description: 'Comma-separated role names' },
+        },
+      },
+      UserRole: {
+        type: 'object',
+        properties: {
+          id:             { type: 'string', format: 'uuid' },
+          user_email:     { type: 'string', format: 'email' },
+          tenant_id:      { type: 'string' },
+          role_id:        { type: 'string', format: 'uuid' },
+          role_name:      { type: 'string', example: 'EDITOR' },
+          description:    { type: 'string', nullable: true },
+          is_system_role: { type: 'integer', enum: [0, 1] },
+          assigned_by:    { type: 'string', nullable: true },
+          assigned_at:    { type: 'string', format: 'date-time' },
+        },
+      },
+      UserRolesUpdate: {
+        type: 'object', required: ['roleIds'],
+        properties: { roleIds: { type: 'array', items: { type: 'string', format: 'uuid' } } },
+      },
+      UserStatusUpdate: {
+        type: 'object', required: ['status'],
+        properties: { status: { type: 'string', enum: ['ACTIVE', 'SUSPENDED'] } },
+      },
+
+      // ─── IAM — Roles ──────────────────────────────────────────────────────
+      Role: {
+        type: 'object',
+        properties: {
+          id:               { type: 'string', format: 'uuid' },
+          tenant_id:        { type: 'string' },
+          name:             { type: 'string' },
+          description:      { type: 'string', nullable: true },
+          is_system_role:   { type: 'integer', enum: [0, 1] },
+          is_active:        { type: 'integer', enum: [0, 1] },
+          permission_count: { type: 'integer' },
+          user_count:       { type: 'integer' },
+        },
+      },
+      RoleCreate: {
+        type: 'object', required: ['name'],
+        properties: {
+          name:        { type: 'string', maxLength: 100 },
+          description: { type: 'string', maxLength: 500 },
+        },
+      },
+      RoleUpdate: {
+        type: 'object', minProperties: 1,
+        properties: {
+          name:        { type: 'string', maxLength: 100 },
+          description: { type: 'string', maxLength: 500 },
+          isActive:    { type: 'boolean' },
+        },
+      },
+      RolePermission: {
+        type: 'object',
+        properties: {
+          id:                 { type: 'string', format: 'uuid' },
+          role_id:            { type: 'string', format: 'uuid' },
+          feature_id:         { type: 'string', format: 'uuid' },
+          feature_short_name: { type: 'string' },
+          scope:              { type: 'string' },
+          display_name:       { type: 'string' },
+          category:           { type: 'string', nullable: true },
+        },
+      },
+      RolePermissionsUpdate: {
+        type: 'object', required: ['featureIds'],
+        properties: { featureIds: { type: 'array', items: { type: 'string', format: 'uuid' } } },
+      },
+
+      // ─── IAM — Features ───────────────────────────────────────────────────
+      Feature: {
+        type: 'object',
+        properties: {
+          feature_id:         { type: 'string', format: 'uuid' },
+          name:               { type: 'string' },
+          feature_short_name: { type: 'string' },
+          scope:              { type: 'string' },
+          display_name:       { type: 'string' },
+          category:           { type: 'string', nullable: true },
+          description:        { type: 'string', nullable: true },
+          is_active:          { type: 'integer', enum: [0, 1] },
+        },
+      },
+      FeatureCreate: {
+        type: 'object', required: ['featureShortName', 'scope', 'displayName'],
+        properties: {
+          featureShortName: { type: 'string', maxLength: 50, description: 'Auto-uppercased, e.g. REPORTS' },
+          scope:            { type: 'string', maxLength: 50, description: 'Auto-uppercased, e.g. READ' },
+          displayName:      { type: 'string', maxLength: 100 },
+          category:         { type: 'string', maxLength: 50 },
+          description:      { type: 'string', maxLength: 500 },
+        },
+      },
+      FeatureUpdate: {
+        type: 'object', minProperties: 1,
+        properties: {
+          displayName: { type: 'string', maxLength: 100 },
+          scope:       { type: 'string', maxLength: 50 },
+          category:    { type: 'string', maxLength: 50 },
+          description: { type: 'string', maxLength: 500 },
+          isActive:    { type: 'boolean' },
+        },
+      },
     },
   },
 
@@ -900,6 +1070,197 @@ const swaggerSpec = {
     ...crudPaths('PaymentModeTransactionDetails',  '/api/paymentmodetransactiondetails',   'PaymentModeTransactionDetailCreate',  'PaymentModeTransactionDetailUpdate',  'PaymentModeTransactionDetail',  true),
     ...crudPaths('PaymentDetails',                 '/api/paymentdetails',                  'PaymentDetailCreate',                 'PaymentDetailUpdate',                 'PaymentDetail',                 true),
     ...crudPaths('PaymentBreakups',                '/api/paymentbreakups',                 'PaymentBreakupCreate',                'PaymentBreakupUpdate',                'PaymentBreakup',                true),
+
+    // ── Onboarding (guest scope) ───────────────────────────────────────────
+    '/api/onboarding/status': {
+      get: {
+        tags: ['Onboarding'], summary: 'Get my onboarding request status', security,
+        responses: { ...singleResponse('OnboardingStatus'), ...responses.unauthorized, ...responses.forbidden, ...responses.notFound },
+      },
+    },
+    '/api/onboarding/note': {
+      put: {
+        tags: ['Onboarding'], summary: 'Update my onboarding request note', security,
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/OnboardingNoteUpdate' } } } },
+        responses: { ...singleResponse('OnboardingStatus'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── Admin — Onboarding (Part 2I — shorter paths, PUT method) ─────────
+    '/api/admin/onboarding': {
+      get: {
+        tags: ['Admin — Onboarding'], summary: 'List onboarding requests (short URL)', security,
+        parameters: [
+          ...paginationParams,
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'APPROVED', 'REJECTED', 'ALL'], default: 'PENDING' } },
+        ],
+        responses: { ...paginatedResponse('OnboardingRequest'), ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/onboarding/{id}/approve': {
+      put: {
+        tags: ['Admin — Onboarding'], summary: 'Approve an onboarding request', security,
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/OnboardingApproveSimple' } } } },
+        responses: { 200: { description: 'Approved and user provisioned' }, ...responses.validation, ...responses.notFound, 409: { description: 'User already exists in tenant' }, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/onboarding/{id}/reject': {
+      put: {
+        tags: ['Admin — Onboarding'], summary: 'Reject an onboarding request', security,
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/OnboardingRejectFrontend' } } } },
+        responses: { 200: { description: 'Request rejected' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── Admin — Onboarding requests ───────────────────────────────────────
+    '/api/admin/onboarding-requests': {
+      get: {
+        tags: ['Admin — Onboarding'], summary: 'List onboarding requests', security,
+        parameters: [
+          ...paginationParams,
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'APPROVED', 'REJECTED', 'ALL'], default: 'PENDING' } },
+        ],
+        responses: { ...paginatedResponse('OnboardingRequest'), ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/onboarding-requests/{requestId}/approve': {
+      post: {
+        tags: ['Admin — Onboarding'], summary: 'Approve an onboarding request', security,
+        parameters: [{ name: 'requestId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/OnboardingApprove' } } } },
+        responses: { 200: { description: 'Approved' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/onboarding-requests/{requestId}/reject': {
+      post: {
+        tags: ['Admin — Onboarding'], summary: 'Reject an onboarding request', security,
+        parameters: [{ name: 'requestId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/OnboardingReject' } } } },
+        responses: { 200: { description: 'Rejected' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── Admin — Users ─────────────────────────────────────────────────────
+    '/api/admin/users': {
+      get: {
+        tags: ['Admin — Users'], summary: 'List users in caller\'s tenant', security,
+        parameters: paginationParams,
+        responses: { ...paginatedResponse('AdminUser'), ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/users/{email}': {
+      get: {
+        tags: ['Admin — Users'], summary: 'Get user detail (including roles)', security,
+        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        responses: { ...singleResponse('AdminUser'), ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+      delete: {
+        tags: ['Admin — Users'], summary: 'Remove user from tenant', security,
+        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        responses: { 200: { description: 'Removed' }, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/users/{email}/roles': {
+      get: {
+        tags: ['Admin — Users'], summary: 'Get current roles for a user', security,
+        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        responses: {
+          200: {
+            description: 'User roles',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: {
+                success: { type: 'boolean', example: true },
+                message: { type: 'string' },
+                data: { type: 'array', items: { $ref: '#/components/schemas/UserRole' } },
+              },
+            }}},
+          },
+          ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+      put: {
+        tags: ['Admin — Users'], summary: 'Replace user\'s roles', security,
+        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/UserRolesUpdate' } } } },
+        responses: { 200: { description: 'Roles updated' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/users/{email}/status': {
+      put: {
+        tags: ['Admin — Users'], summary: 'Activate or suspend a user', security,
+        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/UserStatusUpdate' } } } },
+        responses: { 200: { description: 'Status updated' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── Admin — Roles ─────────────────────────────────────────────────────
+    '/api/admin/roles': {
+      get: {
+        tags: ['Admin — Roles'], summary: 'List roles in tenant', security,
+        responses: { 200: { description: 'Roles list', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Role' } } } } }, ...responses.unauthorized, ...responses.forbidden },
+      },
+      post: {
+        tags: ['Admin — Roles'], summary: 'Create a new role', security,
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RoleCreate' } } } },
+        responses: { ...singleResponse('Role', 201), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/roles/{roleId}': {
+      put: {
+        tags: ['Admin — Roles'], summary: 'Update a role', security,
+        parameters: [{ name: 'roleId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RoleUpdate' } } } },
+        responses: { ...singleResponse('Role'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+      delete: {
+        tags: ['Admin — Roles'], summary: 'Delete a role (non-system only)', security,
+        parameters: [{ name: 'roleId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { ...responses.noContent, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/roles/{roleId}/permissions': {
+      get: {
+        tags: ['Admin — Roles'], summary: 'Get permissions assigned to a role', security,
+        parameters: [{ name: 'roleId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { 200: { description: 'Permissions list', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/RolePermission' } } } } }, ...responses.unauthorized, ...responses.forbidden },
+      },
+      put: {
+        tags: ['Admin — Roles'], summary: 'Replace all permissions for a role', security,
+        parameters: [{ name: 'roleId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RolePermissionsUpdate' } } } },
+        responses: { 200: { description: 'Permissions updated' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── Admin — Features ──────────────────────────────────────────────────
+    '/api/admin/features': {
+      get: {
+        tags: ['Admin — Features'], summary: 'List all features/scopes', security,
+        responses: { 200: { description: 'Features list', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Feature' } } } } }, ...responses.unauthorized, ...responses.forbidden },
+      },
+      post: {
+        tags: ['Admin — Features'], summary: 'Create a new feature/scope', security,
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/FeatureCreate' } } } },
+        responses: { ...singleResponse('Feature', 201), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/features/{featureId}': {
+      put: {
+        tags: ['Admin — Features'], summary: 'Update a feature/scope', security,
+        parameters: [{ name: 'featureId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/FeatureUpdate' } } } },
+        responses: { ...singleResponse('Feature'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+      delete: {
+        tags: ['Admin — Features'], summary: 'Delete a feature/scope (if not in use)', security,
+        parameters: [{ name: 'featureId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { ...responses.noContent, ...responses.notFound, 409: { description: 'Feature is in use by one or more roles' }, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
   },
 };
 

@@ -1,16 +1,14 @@
 // src/modules/audit/audit.routes.js
-// Audit logs routes - handles audit log retrieval and filtering.
 
 const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../../middleware/authMiddleware');
 const auditController = require('./audit.controller');
 
-/**
- * GET /api/audit/logs
- * Retrieves audit logs for the user's tenants.
- * Admins can filter by userEmail, regular users only see their own logs.
- */
+// GET /api/audit/logs  — tier-aware log retrieval
 router.get('/logs', authenticateToken, auditController.getAuditLogs);
+
+// GET /api/audit/categories  — valid category list for filter dropdowns
+router.get('/categories', authenticateToken, auditController.getCategories);
 
 module.exports = router;

@@ -7,7 +7,7 @@ const {
   authenticateToken,
   checkScope,
 } = require('../../middleware/authMiddleware');
-const { auditLog } = require('../../middleware/auditLogger');
+const { auditLogCrud } = require('../../middleware/auditLogger');
 const { validateUuidParam } = require('../../middleware/validation');
 const { SCOPES } = require('../../config/constants');
 const taxtypeController = require('./taxtype.controller');
@@ -19,7 +19,7 @@ const taxtypeController = require('./taxtype.controller');
 router.get(
   '/',
   authenticateToken,
-  auditLog(),
+  auditLogCrud('Tax Type'),
   ...taxtypeController.getAllTaxTypes
 );
 
@@ -30,7 +30,7 @@ router.get(
 router.get(
   '/:id',
   authenticateToken,
-  auditLog(),
+  auditLogCrud('Tax Type'),
   ...taxtypeController.getTaxTypeById
 );
 
@@ -41,8 +41,8 @@ router.get(
 router.post(
   '/',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Tax Type'),
   ...taxtypeController.createTaxType
 );
 
@@ -53,8 +53,8 @@ router.post(
 router.put(
   '/:id',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Tax Type'),
   ...taxtypeController.updateTaxType
 );
 
@@ -65,8 +65,8 @@ router.put(
 router.delete(
   '/:id',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Tax Type'),
   ...taxtypeController.deleteTaxType
 );
 

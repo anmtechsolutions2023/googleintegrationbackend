@@ -30,11 +30,13 @@ module.exports = {
     // Audit Logs Queries
     AUDIT_LOGS: {
       SELECT:
-        'SELECT log_id, tenant_id, user_email, action, status, timestamp FROM audit_logs WHERE 1=1',
+        'SELECT log_id, tenant_id, user_email, action, status, ip_address, log_level, category, resource_id, timestamp FROM audit_logs WHERE 1=1',
+      COUNT:
+        'SELECT COUNT(*) AS total FROM audit_logs WHERE 1=1',
       INSERT:
-        'INSERT INTO audit_logs (tenant_id, user_email, action, status, ip_address, timestamp) VALUES (?, ?, ?, ?, ?, NOW())',
+        'INSERT INTO audit_logs (tenant_id, user_email, action, status, ip_address, log_level, category, resource_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       INSERT_MIDDLEWARE:
-        'INSERT INTO audit_logs (tenant_id, user_email, action, status) VALUES (?, ?, ?, ?)',
+        'INSERT INTO audit_logs (tenant_id, user_email, action, status, ip_address, log_level, category, resource_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     },
 
     // Tax Type Queries
@@ -746,6 +748,118 @@ module.exports = {
       DELETE: 'DELETE FROM transactiontype WHERE Id = ? AND TenantId = ?',
     },
 
+    // Role-based scope resolution (Path A) — UNIONed with PERMISSIONS.SELECT in auth.service
+    ROLE_SCOPES: {
+      SELECT_BY_USER_TENANT: `
+        SELECT DISTINCT f.scope, f.feature_short_name
+        FROM user_roles ur
+        JOIN role_permissions rp ON ur.role_id = rp.role_id
+        JOIN features f ON rp.feature_id = f.feature_id
+        WHERE ur.user_email = ? AND ur.tenant_id = ? AND f.is_active = TRUE
+      `,
+    },
+
+    // Onboarding Request Queries
+    ONBOARDING_REQUESTS: {
+      SELECT_BY_EMAIL:
+        'SELECT * FROM onboarding_requests WHERE email = ? ORDER BY requested_at DESC LIMIT 1',
+      SELECT_ALL:
+        'SELECT * FROM onboarding_requests WHERE 1=1',
+      INSERT:
+        'INSERT INTO onboarding_requests (id, email, name, google_sub, status) VALUES (?, ?, ?, ?, "PENDING")',
+      UPDATE_NOTE:
+        'UPDATE onboarding_requests SET request_note = ?, updated_at = NOW() WHERE email = ? AND status = "PENDING"',
+      UPDATE_STATUS:
+        'UPDATE onboarding_requests SET status = ?, rejection_reason = ?, reviewed_by = ?, reviewed_at = NOW(), tenant_id = ?, updated_at = NOW() WHERE id = ?',
+    },
+
+    // Role Queries
+    ROLES: {
+      SELECT_ALL:
+        'SELECT * FROM roles WHERE tenant_id = ? ORDER BY is_system_role DESC, name ASC',
+      SELECT_BY_ID:
+        'SELECT * FROM roles WHERE id = ? AND tenant_id = ?',
+      SELECT_WITH_COUNTS: `
+        SELECT r.*,
+          (SELECT COUNT(*) FROM role_permissions rp WHERE rp.role_id = r.id) AS permission_count,
+          (SELECT COUNT(*) FROM user_roles ur WHERE ur.role_id = r.id) AS user_count
+        FROM roles r WHERE r.tenant_id = ? ORDER BY r.is_system_role DESC, r.name ASC`,
+      INSERT:
+        'INSERT INTO roles (id, tenant_id, name, description, is_system_role) VALUES (?, ?, ?, ?, 0)',
+      UPDATE:
+        'UPDATE roles SET name = ?, description = ?, is_active = ?, updated_at = NOW() WHERE id = ? AND tenant_id = ? AND is_system_role = 0',
+      DELETE:
+        'DELETE FROM roles WHERE id = ? AND tenant_id = ? AND is_system_role = 0',
+    },
+
+    // Role Permission Queries
+    ROLE_PERMISSIONS: {
+      SELECT_BY_ROLE: `
+        SELECT rp.id, rp.role_id, rp.feature_id,
+               f.feature_short_name, f.scope, f.display_name, f.category
+        FROM role_permissions rp
+        JOIN features f ON rp.feature_id = f.feature_id
+        WHERE rp.role_id = ?`,
+      DELETE_ALL_FOR_ROLE:
+        'DELETE FROM role_permissions WHERE role_id = ?',
+      INSERT:
+        'INSERT INTO role_permissions (id, role_id, feature_id) VALUES (?, ?, ?)',
+    },
+
+    // User Role Queries
+    USER_ROLES: {
+      SELECT_BY_USER_TENANT: `
+        SELECT ur.*, r.name AS role_name, r.description, r.is_system_role
+        FROM user_roles ur
+        JOIN roles r ON ur.role_id = r.id
+        WHERE ur.user_email = ? AND ur.tenant_id = ?`,
+      DELETE_ALL_FOR_USER:
+        'DELETE FROM user_roles WHERE user_email = ? AND tenant_id = ?',
+      INSERT:
+        'INSERT INTO user_roles (id, user_email, tenant_id, role_id, assigned_by) VALUES (?, ?, ?, ?, ?)',
+    },
+
+    // Admin User Management Queries
+    ADMIN_USERS: {
+      SELECT_ALL: `
+        SELECT ut.user_email, ut.tenant_id, ut.is_admin, ut.is_super_admin,
+               ut.is_active, ut.status,
+               GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
+        FROM user_tenants ut
+        LEFT JOIN user_roles ur ON ut.user_email = ur.user_email AND ut.tenant_id = ur.tenant_id
+        LEFT JOIN roles r ON ur.role_id = r.id
+        WHERE ut.tenant_id = ?
+        GROUP BY ut.user_email, ut.tenant_id
+        ORDER BY ut.user_email ASC`,
+      SELECT_BY_EMAIL: `
+        SELECT ut.*, GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
+        FROM user_tenants ut
+        LEFT JOIN user_roles ur ON ut.user_email = ur.user_email AND ut.tenant_id = ur.tenant_id
+        LEFT JOIN roles r ON ur.role_id = r.id
+        WHERE ut.user_email = ? AND ut.tenant_id = ?
+        GROUP BY ut.user_email, ut.tenant_id`,
+      INSERT_USER_TENANT:
+        'INSERT INTO user_tenants (id, user_email, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, 0, 0, 1, "ACTIVE")',
+      UPDATE_STATUS:
+        'UPDATE user_tenants SET is_active = ?, status = ?, updated_at = NOW() WHERE user_email = ? AND tenant_id = ?',
+      DELETE:
+        'DELETE FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
+    },
+
+    // Feature / Scope Management Queries
+    FEATURES: {
+      SELECT_ALL:
+        'SELECT * FROM features WHERE is_active = TRUE ORDER BY category ASC, feature_short_name ASC',
+      SELECT_BY_ID:
+        'SELECT * FROM features WHERE feature_id = ?',
+      INSERT:
+        'INSERT INTO features (feature_id, name, feature_short_name, scope, display_name, category, description, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)',
+      UPDATE:
+        'UPDATE features SET display_name = ?, scope = ?, category = ?, description = ?, is_active = ? WHERE feature_id = ?',
+      CHECK_IN_USE:
+        'SELECT COUNT(*) as cnt FROM role_permissions WHERE feature_id = ?',
+    },
+
     // Account Type Base Queries
     ACCOUNT_TYPE_BASE: {
       SELECT_ALL:
@@ -762,6 +876,7 @@ module.exports = {
   },
   STATUSES: {
     SUCCESS: 'SUCCESS',
+    FAILED: 'FAILED',
     DENIED: 'DENIED',
     LOGIN_SUCCESS: 'LOGIN_SUCCESS',
     LOGIN_ATTEMPT: 'LOGIN_ATTEMPT',
@@ -770,10 +885,79 @@ module.exports = {
     NOT_FOUND: '403_NOT_FOUND',
     FORBIDDEN: '403_FORBIDDEN',
     UNAUTHORIZED: '401_UNAUTHORIZED',
+    ONBOARDING_ATTEMPT: 'ONBOARDING_ATTEMPT',
+    ONBOARDING_APPROVED: 'ONBOARDING_APPROVED',
+    ONBOARDING_REJECTED: 'ONBOARDING_REJECTED',
+    CREATED: 'CREATED',
+    UPDATED: 'UPDATED',
+    DELETED: 'DELETED',
+    SUSPENDED: 'SUSPENDED',
+    ACTIVATED: 'ACTIVATED',
+  },
+  AUDIT_CATEGORIES: {
+    AUTH:         'AUTH',
+    ONBOARDING:   'ONBOARDING',
+    USER_MGMT:    'USER_MGMT',
+    ROLE_MGMT:    'ROLE_MGMT',
+    FEATURE_MGMT: 'FEATURE_MGMT',
+    TENANT_MGMT:  'TENANT_MGMT',
+    TRANSACTION:  'TRANSACTION',
+    MASTER_DATA:  'MASTER_DATA',
+    PAYMENTS:     'PAYMENTS',
+    REPORTS:      'REPORTS',
+    GENERAL:      'GENERAL',
+  },
+  AUDIT_ACTIONS: {
+    // Auth
+    LOGIN_SUCCESS:            'User signed in',
+    LOGIN_ATTEMPT:            'Sign-in attempted',
+    LOGIN_CRASH:              'Sign-in failed (system error)',
+    LOGOUT:                   'User signed out',
+    SWITCH_TENANT:            'Switched tenant',
+    SWITCH_TENANT_DENIED:     'Tenant switch denied (no access)',
+    // Onboarding
+    ONBOARDING_ATTEMPT:       'Onboarding request submitted',
+    ONBOARDING_APPROVED:      'Onboarding request approved',
+    ONBOARDING_REJECTED:      'Onboarding request rejected',
+    CHECK_ONBOARDING_STATUS:  'Checked onboarding status',
+    UPDATE_ONBOARDING_NOTE:   'Updated onboarding note',
+    VIEW_ONBOARDING:          'Viewed pending onboarding requests',
+    APPROVE_ONBOARDING:       'Approved onboarding request',
+    REJECT_ONBOARDING:        'Rejected onboarding request',
+    // User management
+    VIEW_USERS:               'Viewed user list',
+    VIEW_USER_DETAIL:         'Viewed user details',
+    VIEW_USER_ROLES:          'Viewed user roles',
+    UPDATE_USER_ROLES:        'Updated user roles',
+    UPDATE_USER_STATUS:       'Updated user status',
+    ACTIVATE_USER:            'Activated user account',
+    SUSPEND_USER:             'Suspended user account',
+    REMOVE_USER:              'Removed user from tenant',
+    // Role management
+    VIEW_ROLES:               'Viewed roles list',
+    CREATE_ROLE:              'Created new role',
+    UPDATE_ROLE:              'Updated role details',
+    DELETE_ROLE:              'Deleted role',
+    VIEW_ROLE_PERMISSIONS:    'Viewed role permissions',
+    UPDATE_ROLE_PERMISSIONS:  'Updated role permissions',
+    // Feature management
+    VIEW_FEATURES:            'Viewed features list',
+    CREATE_FEATURE:           'Created new feature',
+    UPDATE_FEATURE:           'Updated feature',
+    DELETE_FEATURE:           'Deleted feature',
+    // Data / reports
+    VIEW_ADMIN_SETTINGS:      'Viewed admin settings',
+    VIEW_GENERAL_DATA:        'Viewed general data',
+    VIEW_REPORTS:             'Viewed reports',
+    VIEW_BILLING:             'Viewed billing data',
+    VIEW_AUDIT_LOGS:          'Viewed audit logs',
+    // General
+    VIEW_APPLICATION:         'Viewed application',
   },
   DEFAULTS: {
-    AUDIT_LIMIT: 100,
+    AUDIT_LIMIT: 50,
     AUDIT_OFFSET: 0,
+    AUDIT_MAX_LIMIT: 500,
   },
   SCOPES: {
     TENANT_ADMIN: 'TENANT:ADMIN',
@@ -782,5 +966,20 @@ module.exports = {
     REPORTS_WRITE: 'REPORTS:WRITE',
     BILLING_READ: 'billing:READ',
     BILLING_WRITE: 'billing:WRITE',
+    GUEST_EXPLORE: 'guest:explore',
+    ADMIN_ACCESS: 'admin:access',
+    // Feature-category scopes (granted via IAM roles → role_permissions → features)
+    MASTER_DATA_READ: 'MASTER_DATA:READ',
+    MASTER_DATA_WRITE: 'MASTER_DATA:WRITE',
+    ORGANIZATION_READ: 'ORGANIZATION:READ',
+    ORGANIZATION_WRITE: 'ORGANIZATION:WRITE',
+    TRANSACTIONS_READ: 'TRANSACTIONS:READ',
+    TRANSACTIONS_WRITE: 'TRANSACTIONS:WRITE',
+    INVENTORY_READ: 'INVENTORY:READ',
+    INVENTORY_WRITE: 'INVENTORY:WRITE',
+    CONTACTS_READ: 'CONTACTS:READ',
+    CONTACTS_WRITE: 'CONTACTS:WRITE',
+    PAYMENTS_READ: 'PAYMENTS:READ',
+    PAYMENTS_WRITE: 'PAYMENTS:WRITE',
   },
 }

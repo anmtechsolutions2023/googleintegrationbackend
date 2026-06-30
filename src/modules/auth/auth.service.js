@@ -1,15 +1,16 @@
 // src/modules/auth/auth.service.js
 // Service for Google OAuth validation, user permissions, and JWT generation.
-// Handles multi-tenant authentication and tenant switching.
+// Handles multi-tenant authentication and the guest/onboarding flow.
 
 const { OAuth2Client } = require('google-auth-library');
+const { v4: uuidv4 } = require('uuid');
 const { captureAudit } = require('../../utils/logger');
 const jwt = require('jsonwebtoken');
 const db = require('../../config/db');
 const config = require('../../config/config');
 const { logger } = require('../../utils/logger');
 const MESSAGES = require('../../config/messages');
-const { QUERIES, STATUSES, SCOPES } = require('../../config/constants');
+const { QUERIES, STATUSES, SCOPES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('../../config/constants');
 const { GOOGLE_CLIENT_ID, JWT_SECRET } = require('../../config/envConfig');
 
 const GOOGLE_OAUTH2_CLIENT = new OAuth2Client(GOOGLE_CLIENT_ID);
@@ -48,71 +49,114 @@ const validateGoogleToken = async (idToken) => {
 };
 
 /**
- * Fetches scopes for a specific user-tenant membership.
+ * Resolves scopes for a user in a tenant from both direct grants (Path B)
+ * and role-based grants (Path A). Returns a deduplicated union.
  * @param {Object} connection - Database connection.
  * @param {string} tenantId - Tenant ID.
  * @param {string} userEmail - User email.
- * @returns {Promise<string[]>} Array of scopes.
+ * @returns {Promise<string[]>} Deduplicated array of scope strings.
  */
 const getScopesForTenant = async (connection, tenantId, userEmail) => {
-  const [featureRows] = await connection.execute(QUERIES.PERMISSIONS.SELECT, [
+  // Path B (existing): direct feature grants via tenant_features
+  const [directRows] = await connection.execute(QUERIES.PERMISSIONS.SELECT, [
     tenantId,
     userEmail,
   ]);
-  return featureRows.map((row) => `${row.feature_short_name}:${row.scope}`);
+  const directScopes = directRows.map((r) => `${r.feature_short_name}:${r.scope}`);
+
+  // Path A (new): role-based grants via user_roles → role_permissions → features
+  const [roleRows] = await connection.execute(
+    QUERIES.ROLE_SCOPES.SELECT_BY_USER_TENANT,
+    [userEmail, tenantId]
+  );
+  const roleScopes = roleRows.map((r) => `${r.feature_short_name}:${r.scope}`);
+
+  return [...new Set([...directScopes, ...roleScopes])];
 };
 
 /**
- * Finds and retrieves user permissions for login.
+ * Finds and retrieves user permissions. For provisioned users returns full
+ * scopes; for unprovisioned users creates/looks up an onboarding request and
+ * returns a guest token payload.
  * @param {Object} req - Express request object.
- * @param {Object} userData - Validated user data.
+ * @param {Object} userData - Validated user data from Google.
  * @returns {Promise<Object>} User permissions object.
  */
 const findAndGetPermissions = async (req, userData) => {
   const connection = await db.getConnection();
   try {
-    const userEmail = userData.email;
+    const { email, name, googleId } = userData;
 
     const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS.SELECT, [
-      userEmail,
+      email,
     ]);
 
-    if (tenantRows.length === 0) {
-      await captureAudit(
-        req,
-        null,
-        userEmail,
-        STATUSES.LOGIN_ATTEMPT,
-        STATUSES.NOT_FOUND
+    // ── Provisioned user path (existing behaviour, unchanged) ──────────────
+    if (tenantRows.length > 0) {
+      const selectedTenant = tenantRows[0];
+      const tenantId = selectedTenant.tenant_id;
+
+      const permissions = await getScopesForTenant(connection, tenantId, email);
+
+      if (selectedTenant.is_admin) permissions.push(SCOPES.TENANT_ADMIN);
+      if (selectedTenant.is_super_admin) permissions.push(SCOPES.TENANT_SUPER_ADMIN);
+
+      const [roleRows] = await connection.execute(
+        QUERIES.USER_ROLES.SELECT_BY_USER_TENANT,
+        [email, tenantId]
       );
-      throw new Error(MESSAGES.ERROR.USER_NOT_ASSOCIATED);
+
+      return {
+        email,
+        name,
+        tenantId,
+        onboardingStatus: 'APPROVED',
+        permissions,
+        roles: roleRows.map((r) => r.role_name),
+        associatedTenants: tenantRows,
+      };
     }
 
-    const selectedTenant = tenantRows[0];
-    const tenantId = selectedTenant.tenant_id;
-
-    const permissions = await getScopesForTenant(
-      connection,
-      tenantId,
-      userEmail
+    // ── Guest / onboarding path (new) ──────────────────────────────────────
+    const [existingRequests] = await connection.execute(
+      QUERIES.ONBOARDING_REQUESTS.SELECT_BY_EMAIL,
+      [email]
     );
 
-    // When user is admin for the tenant, add admin scope
-    if (selectedTenant.is_admin) {
-      permissions.push(SCOPES.TENANT_ADMIN);
+    let requestId, onboardingStatus, rejectionReason = null;
+
+    if (existingRequests.length > 0) {
+      const existing = existingRequests[0];
+      requestId = existing.id;
+      onboardingStatus = existing.status;
+      rejectionReason = existing.rejection_reason;
+    } else {
+      requestId = uuidv4();
+      await connection.execute(QUERIES.ONBOARDING_REQUESTS.INSERT, [
+        requestId,
+        email,
+        name,
+        googleId || null,
+      ]);
+      onboardingStatus = 'PENDING';
     }
 
-    // When user is super admin for the tenant, add super admin scope
-    if (selectedTenant.is_super_admin) {
-      permissions.push(SCOPES.TENANT_SUPER_ADMIN);
-    }
+    await captureAudit(
+      req, null, email,
+      AUDIT_ACTIONS.ONBOARDING_ATTEMPT, STATUSES.SUCCESS,
+      AUDIT_CATEGORIES.AUTH, 'INFO', requestId
+    );
 
     return {
-      email: userEmail,
-      name: userData.name,
-      tenantId,
-      permissions,
-      associatedTenants: tenantRows,
+      email,
+      name,
+      tenantId: null,
+      onboardingStatus,
+      onboardingRequestId: requestId,
+      rejectionReason: onboardingStatus === 'REJECTED' ? rejectionReason : null,
+      permissions: [SCOPES.GUEST_EXPLORE],
+      roles: [],
+      associatedTenants: [],
     };
   } catch (error) {
     logger.error('Multi-Tenant Auth Error:', error);
@@ -146,11 +190,9 @@ const switchTenantPermissions = async (
 
     if (!targetTenant) {
       await captureAudit(
-        req,
-        null,
-        userEmail,
-        STATUSES.SWITCH_TENANT_DENIED,
-        STATUSES.FORBIDDEN
+        req, null, userEmail,
+        AUDIT_ACTIONS.SWITCH_TENANT_DENIED, STATUSES.DENIED,
+        AUDIT_CATEGORIES.TENANT_MGMT, 'WARN', targetTenantId
       );
       throw new Error(MESSAGES.ERROR.TENANT_ACCESS_DENIED);
     }
@@ -169,7 +211,9 @@ const switchTenantPermissions = async (
       email: userEmail,
       name: userName,
       tenantId: targetTenantId,
+      onboardingStatus: 'APPROVED',
       permissions,
+      roles: [],
       associatedTenants: tenantRows,
     };
   } catch (error) {
@@ -181,24 +225,33 @@ const switchTenantPermissions = async (
 };
 
 /**
- * Generates a JWT with user permissions.
+ * Generates a signed JWT. Guest tokens use a shorter expiry.
  * @param {Object} userPermissions - User permissions object.
- * @returns {string} JWT token.
+ * @returns {string} Signed JWT.
  */
 const generateAppToken = (userPermissions) => {
+  const isGuest = userPermissions.onboardingStatus !== 'APPROVED';
+
   const appPayload = {
     email: userPermissions.email,
     name: userPermissions.name,
     tid: userPermissions.tenantId,
     scopes: userPermissions.permissions,
-    associatedTenants: userPermissions.associatedTenants.map((t) => ({
+    onboardingStatus: userPermissions.onboardingStatus || 'APPROVED',
+    roles: userPermissions.roles || [],
+    associatedTenants: (userPermissions.associatedTenants || []).map((t) => ({
       tenantId: t.tenant_id,
       isAdmin: t.is_admin === 1 || t.is_admin === true,
     })),
     iss: MESSAGES.JWT.ISSUER,
   };
 
-  return jwt.sign(appPayload, JWT_SECRET, { expiresIn: config.JWT.EXPIRATION });
+  if (userPermissions.onboardingRequestId) {
+    appPayload.onboardingRequestId = userPermissions.onboardingRequestId;
+  }
+
+  const expiry = isGuest ? config.JWT.GUEST_EXPIRATION : config.JWT.EXPIRATION;
+  return jwt.sign(appPayload, JWT_SECRET, { expiresIn: expiry });
 };
 
 module.exports = {

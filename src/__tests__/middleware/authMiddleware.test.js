@@ -9,18 +9,19 @@ jest.mock('../../config/messages', () => ({
     INVALID_TOKEN_PAYLOAD: 'Invalid token payload.',
     FORBIDDEN_NO_SCOPES: 'No scopes for tenant ',
     FORBIDDEN_MISSING_SCOPE: 'Missing required scope: ',
+    FORBIDDEN_GUEST_SCOPE: 'Guest access required.',
   },
   HTTP_STATUS: { UNAUTHORIZED: 401, FORBIDDEN: 403 },
 }));
 jest.mock('../../config/constants', () => ({
-  SCOPES: { TENANT_SUPER_ADMIN: 'TENANT:SUPER_ADMIN' },
+  SCOPES: { TENANT_SUPER_ADMIN: 'TENANT:SUPER_ADMIN', GUEST_EXPLORE: 'guest:explore' },
 }));
 jest.mock('../../utils/logger', () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
 const jwt = require('jsonwebtoken');
-const { authenticateToken, checkScope } = require('../../middleware/authMiddleware');
+const { authenticateToken, checkScope, checkGuestScope } = require('../../middleware/authMiddleware');
 const { HttpError } = require('../../middleware/errorHandler');
 
 describe('authenticateToken', () => {
@@ -56,10 +57,19 @@ describe('authenticateToken', () => {
 
   it('calls next(HttpError 403) when token payload is missing tid', () => {
     req.headers.authorization = 'Bearer goodtoken';
-    jwt.verify.mockReturnValue({ scopes: ['TENANT:ADMIN'] }); // no tid
+    jwt.verify.mockReturnValue({ scopes: ['TENANT:ADMIN'] }); // tid is undefined
     authenticateToken(req, res, next);
     expect(next).toHaveBeenCalledWith(expect.any(HttpError));
     expect(next.mock.calls[0][0].statusCode).toBe(403);
+  });
+
+  it('allows null tid (guest token) to pass authenticateToken', () => {
+    req.headers.authorization = 'Bearer guesttoken';
+    const mockGuest = { tid: null, email: 'guest@test.com', scopes: ['guest:explore'] };
+    jwt.verify.mockReturnValue(mockGuest);
+    authenticateToken(req, res, next);
+    expect(req.user).toEqual(mockGuest);
+    expect(next).toHaveBeenCalledWith();
   });
 
   it('calls next(HttpError 403) when token payload scopes is not an array', () => {
@@ -123,5 +133,40 @@ describe('checkScope', () => {
     req = { user: { tid: 'tid', scopes: ['TENANT:MANAGER'] } };
     checkScope('TENANT:ADMIN', 'TENANT:MANAGER')(req, res, next);
     expect(next).toHaveBeenCalledWith();
+  });
+});
+
+describe('checkGuestScope', () => {
+  let req, res, next;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    res = {};
+    next = jest.fn();
+  });
+
+  it('calls next(HttpError 403) when user has no scopes', () => {
+    req = { user: { tid: null, scopes: [] } };
+    checkGuestScope(req, res, next);
+    expect(next).toHaveBeenCalledWith(expect.any(HttpError));
+    expect(next.mock.calls[0][0].statusCode).toBe(403);
+  });
+
+  it('calls next(HttpError 403) when user scopes does not include guest:explore', () => {
+    req = { user: { tid: 'tid', scopes: ['TENANT:ADMIN'] } };
+    checkGuestScope(req, res, next);
+    expect(next).toHaveBeenCalledWith(expect.any(HttpError));
+  });
+
+  it('calls next() when user has guest:explore scope', () => {
+    req = { user: { tid: null, scopes: ['guest:explore'] } };
+    checkGuestScope(req, res, next);
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('calls next(HttpError 403) when req.user is undefined', () => {
+    req = {};
+    checkGuestScope(req, res, next);
+    expect(next).toHaveBeenCalledWith(expect.any(HttpError));
   });
 });

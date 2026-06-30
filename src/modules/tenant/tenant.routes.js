@@ -5,6 +5,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../../middleware/authMiddleware');
 const { auditLog } = require('../../middleware/auditLogger');
+const { AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('../../config/constants');
 const tenantController = require('./tenant.controller');
 
 /**
@@ -14,7 +15,7 @@ const tenantController = require('./tenant.controller');
 router.post(
   '/switch',
   authenticateToken,
-  auditLog(),
+  auditLog(AUDIT_CATEGORIES.TENANT_MGMT, 'INFO', AUDIT_ACTIONS.SWITCH_TENANT),
   tenantController.switchTenant
 );
 

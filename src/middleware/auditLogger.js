@@ -1,89 +1,107 @@
 // src/middleware/auditLogger.js
-// Middleware for logging user actions to audit logs.
-// Provides functions to log actions and retrieve audit logs with filters.
+// Middleware for logging user actions to audit_logs after the response is sent.
+// Uses res.on('finish') so the actual HTTP status code is known before writing.
 
 const db = require('../config/db');
 const config = require('../config/config');
 const { logger } = require('../utils/logger');
-const { QUERIES, STATUSES } = require('../config/constants');
+const { QUERIES, STATUSES, AUDIT_CATEGORIES } = require('../config/constants');
+
+const getIp = (req) =>
+  req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+  req.headers['x-real-ip'] ||
+  req.headers['cf-connecting-ip'] ||
+  req.socket?.remoteAddress ||
+  config.AUDIT.DEFAULT_IP;
+
+const writeAuditLog = async (tid, email, action, status, ip, level, category) => {
+  await db.execute(QUERIES.AUDIT_LOGS.INSERT_MIDDLEWARE, [
+    tid || null, email, action, status, ip, level, category, null,
+  ]);
+};
 
 /**
- * Middleware to log user actions after authentication.
- * @returns {Function} Express middleware function.
+ * Middleware to log user actions after the response is sent.
+ * @param {string} category    - Audit category (from AUDIT_CATEGORIES).
+ * @param {string} defaultLevel - Default log level when the response is 2xx.
+ * @param {string} [actionLabel] - Human-readable action label. Falls back to
+ *                                 "METHOD /path" when omitted.
+ * @returns {Function} Express middleware.
  */
-const auditLog = () => {
-  return async (req, res, next) => {
-    const { email, tid } = req.user;
-    const action = `${req.method} ${req.path}`;
+const auditLog = (category = AUDIT_CATEGORIES.GENERAL, defaultLevel = 'INFO', actionLabel = null) => {
+  return (req, res, next) => {
+    const ip = getIp(req);
 
-    try {
-      await db.execute(QUERIES.AUDIT_LOGS.INSERT_MIDDLEWARE, [
-        tid,
-        email,
-        action,
-        STATUSES.SUCCESS,
-      ]);
-    } catch (err) {
-      logger.error('Audit Logging Failed', err);
-    }
+    res.on('finish', async () => {
+      if (!req.user) return;
+
+      const { email, tid } = req.user;
+      const action = actionLabel || `${req.method} ${req.path}`;
+      const httpStatus = res.statusCode;
+
+      const level =
+        httpStatus >= 500 ? 'ERROR' :
+        httpStatus >= 400 ? 'WARN'  :
+        defaultLevel;
+
+      const status = httpStatus >= 400 ? STATUSES.FAILED : STATUSES.SUCCESS;
+
+      try {
+        await writeAuditLog(tid, email, action, status, ip, level, category);
+      } catch (err) {
+        logger.error('Audit logging failed', { err: err.message });
+      }
+    });
+
     next();
   };
 };
 
 /**
- * Retrieves audit logs from the database with optional filters.
- * @param {Object} filters - Optional filters for the query.
- * @param {string[]} filters.tenantIds - Array of tenant IDs to filter by.
- * @param {string} filters.userEmail - Filter by user email.
- * @param {number} filters.limit - Limit the number of results (default 100).
- * @param {number} filters.offset - Offset for pagination (default 0).
- * @returns {Promise<Array>} Array of audit log records.
+ * Middleware factory for generic CRUD module routes.
+ * Derives a human-readable action label from the HTTP method and whether
+ * the route targets a single record (path !== '/') or the collection.
+ *
+ * @param {string} moduleName  - Display name of the module, e.g. "Category".
+ * @param {string} category    - Audit category (defaults to MASTER_DATA).
+ * @param {string} defaultLevel - Default log level for 2xx responses.
+ * @returns {Function} Express middleware.
  */
-const getAuditLogs = async (filters = {}) => {
-  const connection = await db.getConnection();
-  try {
-    const {
-      tenantIds,
-      userEmail,
-      limit = config.AUDIT.DEFAULT_LIMIT,
-      offset = config.AUDIT.DEFAULT_OFFSET,
-      isAdmin = isAdmin,
-    } = filters;
+const auditLogCrud = (moduleName, category = AUDIT_CATEGORIES.MASTER_DATA, defaultLevel = 'INFO') => {
+  return (req, res, next) => {
+    const ip = getIp(req);
 
-    let query = QUERIES.AUDIT_LOGS.SELECT;
+    res.on('finish', async () => {
+      if (!req.user) return;
 
-    const params = [];
+      const { email, tid } = req.user;
+      const isById = req.path !== '/';
+      const methodLabelMap = {
+        GET:    isById ? `Viewed ${moduleName} details` : `Viewed ${moduleName} list`,
+        POST:   `Created ${moduleName}`,
+        PUT:    `Updated ${moduleName}`,
+        PATCH:  `Updated ${moduleName}`,
+        DELETE: `Deleted ${moduleName}`,
+      };
+      const action = methodLabelMap[req.method] || `${req.method} ${req.path}`;
+      const httpStatus = res.statusCode;
 
-    if (tenantIds && tenantIds.length > 0) {
-      if (tenantIds.length === 1) {
-        query += ' AND tenant_id = ?';
-      } else {
-        query += ` AND tenant_id IN (${tenantIds.map(() => '?').join(', ')})`;
+      const level =
+        httpStatus >= 500 ? 'ERROR' :
+        httpStatus >= 400 ? 'WARN'  :
+        defaultLevel;
+
+      const status = httpStatus >= 400 ? STATUSES.FAILED : STATUSES.SUCCESS;
+
+      try {
+        await writeAuditLog(tid, email, action, status, ip, level, category);
+      } catch (err) {
+        logger.error('Audit logging failed', { err: err.message });
       }
-      params.push(...tenantIds);
-    }
+    });
 
-    if (!isAdmin && userEmail) {
-      query += ' AND user_email = ?';
-      params.push(userEmail);
-    }
-
-    query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
-    params.push(limit, offset);
-
-    // console.log('Final Audit Logs Query:', query)
-
-    const [rows] = await connection.query(query, params);
-    return rows;
-  } catch (err) {
-    logger.error('Failed to retrieve audit logs', err);
-    throw err;
-  } finally {
-    connection.release();
-  }
+    next();
+  };
 };
 
-module.exports = {
-  auditLog,
-  getAuditLogs,
-};
+module.exports = { auditLog, auditLogCrud };

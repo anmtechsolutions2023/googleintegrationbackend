@@ -5,7 +5,7 @@
 const Joi = require('joi');
 const { logger } = require('../../utils/logger');
 const MESSAGES = require('../../config/messages');
-const { STATUSES } = require('../../config/constants');
+const { STATUSES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
 const { captureAudit } = require('../../utils/logger');
 const authService = require('./auth.service');
@@ -17,6 +17,8 @@ const googleAuthSchema = Joi.object({
 
 /**
  * Handles Google OAuth authentication.
+ * Returns a JWT for both provisioned users (full scopes) and
+ * unprovisioned users (guest:explore scope + onboarding info).
  * @param {Object} req - Express request.
  * @param {Object} res - Express response.
  * @param {Function} next - Express next.
@@ -47,18 +49,24 @@ const googleAuth = async (req, res, next) => {
     );
     const appToken = authService.generateAppToken(userPermissions);
 
-    // Log success
+    const isApproved = userPermissions.onboardingStatus === 'APPROVED';
+
+    // Log the outcome — tenantId is null for guests, captureAudit handles it
     await captureAudit(
       req,
-      userPermissions.tenantId,
+      userPermissions.tenantId ?? null,
       userPermissions.email,
-      STATUSES.LOGIN_SUCCESS,
-      STATUSES.SUCCESS
+      isApproved ? AUDIT_ACTIONS.LOGIN_SUCCESS : AUDIT_ACTIONS.ONBOARDING_ATTEMPT,
+      STATUSES.SUCCESS,
+      AUDIT_CATEGORIES.AUTH,
+      'INFO',
+      userPermissions.tenantId ?? null
     );
 
     logger.info('Google auth successful', {
       email: userPermissions.email,
       tenantId: userPermissions.tenantId,
+      onboardingStatus: userPermissions.onboardingStatus,
     });
 
     res.json({
@@ -69,18 +77,17 @@ const googleAuth = async (req, res, next) => {
         email: userPermissions.email,
         tenant_id: userPermissions.tenantId,
         scopes: userPermissions.permissions,
+        onboarding_status: userPermissions.onboardingStatus || 'APPROVED',
       },
     });
   } catch (error) {
     logger.error('Google auth controller error', error);
 
-    // Log failure
+    // Log failure — tenantId unknown at this point
     await captureAudit(
-      req,
-      null,
-      'SYSTEM',
-      STATUSES.LOGIN_CRASH,
-      STATUSES.UNAUTHORIZED
+      req, null, 'SYSTEM',
+      AUDIT_ACTIONS.LOGIN_CRASH, STATUSES.FAILED,
+      AUDIT_CATEGORIES.AUTH, 'ERROR', null
     );
 
     error.statusCode = error.statusCode || MESSAGES.HTTP_STATUS.UNAUTHORIZED;

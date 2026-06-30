@@ -9,7 +9,7 @@ const {
 } = require('../../middleware/authMiddleware');
 const { auditLog } = require('../../middleware/auditLogger');
 const dataController = require('./data.controller');
-const { SCOPES } = require('../../config/constants');
+const { SCOPES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('../../config/constants');
 
 /**
  * GET /api/data/settings
@@ -19,7 +19,7 @@ router.get(
   '/settings',
   authenticateToken,
   checkScope(SCOPES.TENANT_ADMIN),
-  auditLog(),
+  auditLog(AUDIT_CATEGORIES.GENERAL, 'DEBUG', AUDIT_ACTIONS.VIEW_ADMIN_SETTINGS),
   dataController.getAdminSettings
 );
 
@@ -30,7 +30,7 @@ router.get(
 router.get(
   '/general',
   authenticateToken,
-  auditLog(),
+  auditLog(AUDIT_CATEGORIES.GENERAL, 'DEBUG', AUDIT_ACTIONS.VIEW_GENERAL_DATA),
   dataController.getGeneralData
 );
 

@@ -32,7 +32,7 @@ jest.mock('../../config/config', () => ({
     STANDARD_HEADERS: true,
     LEGACY_HEADERS: false,
   },
-  JWT: { EXPIRATION: '1h' },
+  JWT: { EXPIRATION: '1h', GUEST_EXPIRATION: '15m' },
   SERVER: { DEFAULT_PORT: 5000, JSON_LIMIT: '10mb', CORS_ORIGIN: '*' },
   LOGGING: { DEFAULT_LEVEL: 'error' },
   VALIDATION: { ABORT_EARLY: true, STRIP_UNKNOWN: false },
@@ -86,6 +86,20 @@ const viewerToken = () =>
   'Bearer ' +
   jwt.sign(
     { tid: TENANT_ID, email: 'viewer@test.com', scopes: ['TENANT:VIEWER'] },
+    TEST_SECRET
+  );
+
+const iamAdminToken = () =>
+  'Bearer ' +
+  jwt.sign(
+    { tid: TENANT_ID, email: 'iamadmin@test.com', scopes: ['admin:access'] },
+    TEST_SECRET
+  );
+
+const guestToken = () =>
+  'Bearer ' +
+  jwt.sign(
+    { tid: null, email: 'guest@test.com', scopes: ['guest:explore'] },
     TEST_SECRET
   );
 
@@ -145,6 +159,9 @@ const mockConnection = {
   execute: jest.fn(),
   query: jest.fn(),
   release: jest.fn(),
+  beginTransaction: jest.fn().mockResolvedValue(undefined),
+  commit: jest.fn().mockResolvedValue(undefined),
+  rollback: jest.fn().mockResolvedValue(undefined),
 };
 
 /** Default execute implementation — dispatches on SQL verb.
@@ -430,6 +447,9 @@ beforeEach(() => {
   mockConnection.execute.mockImplementation(defaultExecuteImpl);
   mockConnection.query.mockImplementation(defaultQueryImpl);
   mockConnection.release.mockReturnValue(undefined);
+  mockConnection.beginTransaction.mockResolvedValue(undefined);
+  mockConnection.commit.mockResolvedValue(undefined);
+  mockConnection.rollback.mockResolvedValue(undefined);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1243,6 +1263,184 @@ describe('Response shape assertions', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// IAM — ONBOARDING GUEST ENDPOINTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Onboarding guest endpoints', () => {
+  const ONBOARDING_ROW = {
+    id: RECORD_ID,
+    status: 'PENDING',
+    request_note: 'Let me in',
+    rejection_reason: null,
+    requested_at: '2026-01-01T00:00:00Z',
+  };
+
+  it('GET /api/onboarding/status — no token → 401', async () => {
+    const res = await request(app).get('/api/onboarding/status');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /api/onboarding/status — non-guest (no guest:explore scope) → 403', async () => {
+    const res = await request(app)
+      .get('/api/onboarding/status')
+      .set('Authorization', adminToken());
+    expect(res.status).toBe(403);
+  });
+
+  it('GET /api/onboarding/status — guest token, record found → 200', async () => {
+    mockConnection.execute.mockResolvedValueOnce([[ONBOARDING_ROW]]);
+    const res = await request(app)
+      .get('/api/onboarding/status')
+      .set('Authorization', guestToken());
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('GET /api/onboarding/status — guest token, no record → 404', async () => {
+    mockConnection.execute.mockResolvedValueOnce([[]]);
+    const res = await request(app)
+      .get('/api/onboarding/status')
+      .set('Authorization', guestToken());
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('PUT /api/onboarding/note — no token → 401', async () => {
+    const res = await request(app)
+      .put('/api/onboarding/note')
+      .send({ requestNote: 'Please add me' });
+    expect(res.status).toBe(401);
+  });
+
+  it('PUT /api/onboarding/note — guest token → 200', async () => {
+    mockConnection.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
+    const res = await request(app)
+      .put('/api/onboarding/note')
+      .set('Authorization', guestToken())
+      .send({ requestNote: 'Updated note' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IAM — ADMIN ENDPOINTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Admin IAM endpoints — auth guards', () => {
+  const ADMIN_PATHS = [
+    '/api/admin/onboarding-requests',
+    '/api/admin/users',
+    '/api/admin/roles',
+    '/api/admin/features',
+  ];
+
+  ADMIN_PATHS.forEach((p) => {
+    it(`GET ${p} — no token → 401`, async () => {
+      const res = await request(app).get(p);
+      expect(res.status).toBe(401);
+    });
+
+    it(`GET ${p} — no admin:access scope → 403`, async () => {
+      const res = await request(app)
+        .get(p)
+        .set('Authorization', adminToken()); // has TENANT:ADMIN, not admin:access
+      expect(res.status).toBe(403);
+    });
+
+    it(`GET ${p} — admin:access token → 200`, async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      mockConnection.query.mockImplementation(defaultQueryImpl);
+      const res = await request(app)
+        .get(p)
+        .set('Authorization', iamAdminToken());
+      expect([200, 404]).toContain(res.status);
+    });
+  });
+});
+
+describe('Admin IAM endpoints — role management', () => {
+  it('POST /api/admin/roles — missing name → 400', async () => {
+    const res = await request(app)
+      .post('/api/admin/roles')
+      .set('Authorization', iamAdminToken())
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('POST /api/admin/roles — valid body → 201', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([{ insertId: 1 }])
+      .mockResolvedValueOnce([[{ id: RECORD_ID, name: 'Editor' }]]);
+    const res = await request(app)
+      .post('/api/admin/roles')
+      .set('Authorization', iamAdminToken())
+      .send({ name: 'Editor', description: 'Can edit records' });
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+describe('Admin IAM endpoints — feature management', () => {
+  it('POST /api/admin/features — missing required fields → 400', async () => {
+    const res = await request(app)
+      .post('/api/admin/features')
+      .set('Authorization', iamAdminToken())
+      .send({ displayName: 'Reports' }); // featureShortName and scope missing
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/admin/features — valid → 201', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([{ insertId: 1 }])
+      .mockResolvedValueOnce([[{ feature_id: RECORD_ID, scope: 'READ' }]]);
+    const res = await request(app)
+      .post('/api/admin/features')
+      .set('Authorization', iamAdminToken())
+      .send({ featureShortName: 'REPORTS', scope: 'READ', displayName: 'Reports Read' });
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+describe('Admin IAM endpoints — user status update', () => {
+  it('PUT /api/admin/users/user@test.com/status — invalid status → 400', async () => {
+    const res = await request(app)
+      .put('/api/admin/users/user@test.com/status')
+      .set('Authorization', iamAdminToken())
+      .send({ status: 'BANNED' }); // not valid
+    expect(res.status).toBe(400);
+  });
+
+  it('PUT /api/admin/users/user@test.com/status — ACTIVE → 200', async () => {
+    mockConnection.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
+    const res = await request(app)
+      .put('/api/admin/users/user@test.com/status')
+      .set('Authorization', iamAdminToken())
+      .send({ status: 'ACTIVE' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NULL-TID GUEST TOKEN — authenticateToken edge case
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Auth middleware — null tid guest token', () => {
+  it('null-tid guest token fails checkScope on POST route (scope guard returns 403)', async () => {
+    const res = await request(app)
+      .post('/api/taxtypes')
+      .set('Authorization', guestToken())
+      .send({ Name: 'GST', Value: 18, Active: true });
+    // guest:explore scope cannot satisfy TENANT:ADMIN write scope → 403
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CROSS-MODULE SMOKE TESTS — spot-check a sample from each module group
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1285,5 +1483,241 @@ describe('Cross-module smoke tests', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN IAM — Part 2I endpoints (PUT approve/reject, shorter /onboarding path)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Admin IAM — GET /api/admin/onboarding', () => {
+  it('no token → 401', async () => {
+    const res = await request(app).get('/api/admin/onboarding');
+    expect(res.status).toBe(401);
+  });
+
+  it('no admin:access scope → 403', async () => {
+    const res = await request(app)
+      .get('/api/admin/onboarding')
+      .set('Authorization', adminToken());
+    expect(res.status).toBe(403);
+  });
+
+  it('admin:access token, default status PENDING → 200 with data + pagination', async () => {
+    const res = await request(app)
+      .get('/api/admin/onboarding')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body).toHaveProperty('data');
+    expect(res.body).toHaveProperty('pagination');
+  });
+
+  it('?status=ALL → 200', async () => {
+    const res = await request(app)
+      .get('/api/admin/onboarding?status=ALL')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('?status=APPROVED → 200', async () => {
+    const res = await request(app)
+      .get('/api/admin/onboarding?status=APPROVED')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(200);
+  });
+
+  it('invalid status value → 400', async () => {
+    const res = await request(app)
+      .get('/api/admin/onboarding?status=UNKNOWN')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+});
+
+describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
+  it('no token → 401', async () => {
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
+      .send({ tenantId: TENANT_ID });
+    expect(res.status).toBe(401);
+  });
+
+  it('no admin:access scope → 403', async () => {
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
+      .set('Authorization', adminToken())
+      .send({ tenantId: TENANT_ID });
+    expect(res.status).toBe(403);
+  });
+
+  it('invalid UUID in :id → 400', async () => {
+    const res = await request(app)
+      .put('/api/admin/onboarding/not-a-valid-uuid/approve')
+      .set('Authorization', iamAdminToken())
+      .send({ tenantId: TENANT_ID });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('missing tenantId in body → 400', async () => {
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
+      .set('Authorization', iamAdminToken())
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('request not found (not PENDING) → 404', async () => {
+    mockConnection.execute.mockResolvedValueOnce([[]]); // no matching PENDING row
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
+      .set('Authorization', iamAdminToken())
+      .send({ tenantId: TENANT_ID });
+    expect(res.status).toBe(404);
+  });
+
+  it('user already exists in tenant → 409', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', name: 'Guest' }]]) // request found
+      .mockResolvedValueOnce([[{ id: UUID_1 }]]); // user already provisioned
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
+      .set('Authorization', iamAdminToken())
+      .send({ tenantId: TENANT_ID });
+    expect(res.status).toBe(409);
+  });
+
+  it('valid approval without roleIds → 200', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', name: 'Guest' }]]) // request found
+      .mockResolvedValueOnce([[]])  // user not yet in tenant
+      .mockResolvedValue([[{ affectedRows: 1 }]]); // INSERT user_tenants, UPDATE onboarding_requests
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
+      .set('Authorization', iamAdminToken())
+      .send({ tenantId: TENANT_ID }); // roleIds omitted — Joi defaults to []
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toMatchObject({ email: 'guest@test.com', tenantId: TENANT_ID });
+  });
+
+  it('valid approval with roleIds → 200, data includes roleIds', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', name: 'Guest' }]])
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValue([[{ affectedRows: 1 }]]);
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
+      .set('Authorization', iamAdminToken())
+      .send({ tenantId: TENANT_ID, roleIds: [UUID_1] });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.roleIds).toEqual([UUID_1]);
+  });
+});
+
+describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
+  it('no token → 401', async () => {
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
+      .send({ rejectionReason: 'Not eligible' });
+    expect(res.status).toBe(401);
+  });
+
+  it('no admin:access scope → 403', async () => {
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
+      .set('Authorization', adminToken())
+      .send({ rejectionReason: 'Not eligible' });
+    expect(res.status).toBe(403);
+  });
+
+  it('invalid UUID in :id → 400', async () => {
+    const res = await request(app)
+      .put('/api/admin/onboarding/not-a-uuid/reject')
+      .set('Authorization', iamAdminToken())
+      .send({ rejectionReason: 'Not eligible' });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('missing rejectionReason → 400', async () => {
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
+      .set('Authorization', iamAdminToken())
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('request not found or already reviewed → 404', async () => {
+    mockConnection.execute.mockResolvedValueOnce([[]]); // no PENDING row
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
+      .set('Authorization', iamAdminToken())
+      .send({ rejectionReason: 'Not eligible' });
+    expect(res.status).toBe(404);
+  });
+
+  it('valid rejection → 200', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com' }]]) // request found
+      .mockResolvedValueOnce([[{ affectedRows: 1 }]]); // UPDATE status
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
+      .set('Authorization', iamAdminToken())
+      .send({ rejectionReason: 'Not eligible at this time' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
+  it('no token → 401', async () => {
+    const res = await request(app).get('/api/admin/users/user@test.com/roles');
+    expect(res.status).toBe(401);
+  });
+
+  it('no admin:access scope → 403', async () => {
+    const res = await request(app)
+      .get('/api/admin/users/user@test.com/roles')
+      .set('Authorization', adminToken());
+    expect(res.status).toBe(403);
+  });
+
+  it('user not found in tenant → 404', async () => {
+    mockConnection.execute.mockResolvedValueOnce([[]]); // not in user_tenants
+    const res = await request(app)
+      .get('/api/admin/users/user@test.com/roles')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(404);
+  });
+
+  it('user found, returns roles array → 200', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([[{ id: UUID_1 }]]) // user exists in tenant
+      .mockResolvedValueOnce([[{ ...MOCK_ROW, role_name: 'EDITOR', is_system_role: 0 }]]); // roles
+    const res = await request(app)
+      .get('/api/admin/users/user@test.com/roles')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.data)).toBe(true);
+  });
+
+  it('user found, no roles assigned → 200 with empty array', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([[{ id: UUID_1 }]]) // user exists in tenant
+      .mockResolvedValueOnce([[]]); // no roles
+    const res = await request(app)
+      .get('/api/admin/users/user@test.com/roles')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual([]);
   });
 });

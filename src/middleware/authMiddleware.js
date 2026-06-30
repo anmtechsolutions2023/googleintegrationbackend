@@ -31,8 +31,8 @@ const authenticateToken = (req, res, next) => {
 
   try {
     const user = jwt.verify(token, JWT_SECRET)
-    // Ensure token has expected payload for multi-tenancy
-    if (!user.tid || !Array.isArray(user.scopes)) {
+    // null tid is valid for guest tokens; only undefined means malformed
+    if (user.tid === undefined || !Array.isArray(user.scopes)) {
       throw new Error(MESSAGES.ERROR.INVALID_TOKEN_PAYLOAD)
     }
     req.user = user
@@ -87,9 +87,27 @@ const checkScope = (...requiredScopes) => {
   }
 }
 
+/**
+ * Middleware that only allows users with the guest:explore scope.
+ * Blocks approved users from hitting onboarding-only endpoints.
+ */
+const checkGuestScope = (req, res, next) => {
+  const userScopes = req.user && req.user.scopes
+  if (!userScopes || !userScopes.includes(SCOPES.GUEST_EXPLORE)) {
+    return next(
+      new HttpError(
+        `${MESSAGES.ERROR.FORBIDDEN_MISSING_SCOPE}[${SCOPES.GUEST_EXPLORE}].`,
+        MESSAGES.HTTP_STATUS.FORBIDDEN
+      )
+    )
+  }
+  next()
+}
+
 module.exports = {
   authenticateToken,
   checkScope,
+  checkGuestScope,
 }
 
 // /**

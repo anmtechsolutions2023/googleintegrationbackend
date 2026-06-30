@@ -26,7 +26,7 @@ const successResponse = (res, message, data, statusCode = 200) => {
  * @param {Array} data - Response data array
  * @param {Object} pagination - Pagination info {page, limit, total, totalPages}
  */
-const paginatedResponse = (res, message, data, pagination) => {
+const paginatedResponse = (res, data, pagination, message) => {
   res.status(200).json({
     success: true,
     message,

@@ -44,6 +44,7 @@ describe('Auth Controller', () => {
     const mockPermissions = {
       email: 'test@example.com',
       tenantId: '123',
+      onboardingStatus: 'APPROVED',
       permissions: [],
     };
     const mockToken = 'jwt_token';
@@ -69,5 +70,30 @@ describe('Auth Controller', () => {
     await authController.googleAuth(req, res, next);
 
     expect(next).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  test('googleAuth returns guest token when user is unprovisioned (onboarding pending)', async () => {
+    req.body = { id_token: 'valid_token' };
+    const mockUser = { email: 'new@example.com', name: 'New User', sub: 'google-sub-1' };
+    const mockPermissions = {
+      email: 'new@example.com',
+      tenantId: null,
+      onboardingStatus: 'PENDING',
+      permissions: ['guest:explore'],
+    };
+    const mockToken = 'guest_jwt_token';
+
+    authService.validateGoogleToken.mockResolvedValue(mockUser);
+    authService.findAndGetPermissions.mockResolvedValue(mockPermissions);
+    authService.generateAppToken.mockReturnValue(mockToken);
+
+    await authController.googleAuth(req, res, next);
+
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      message: expect.any(String),
+      token: mockToken,
+      user: expect.objectContaining({ email: 'new@example.com', tenant_id: null }),
+    });
   });
 });

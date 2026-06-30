@@ -9,13 +9,18 @@ const MESSAGES = require('../../config/messages');
 const router = express.Router();
 const authController = require('./auth.controller');
 
-// Rate limiter for auth routes - see src/config/config.js for settings
+// Rate limiter for auth routes - see src/config/config.js for settings.
+// Skipped entirely in development (NODE_ENV=development) because all
+// local requests share the same loopback IP, which exhausts the window
+// quickly when testing multi-user flows like suspend/activate.
+const isDev = process.env.NODE_ENV === 'development';
 const authLimiter = rateLimit({
   windowMs: config.RATE_LIMIT.AUTH_WINDOW_MS,
   max: config.RATE_LIMIT.AUTH_MAX_REQUESTS,
   message: MESSAGES.ERROR.RATE_LIMIT_EXCEEDED,
   standardHeaders: config.RATE_LIMIT.STANDARD_HEADERS,
   legacyHeaders: config.RATE_LIMIT.LEGACY_HEADERS,
+  skip: () => isDev,
 });
 
 /**

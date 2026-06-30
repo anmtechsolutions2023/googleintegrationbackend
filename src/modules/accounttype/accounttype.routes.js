@@ -5,31 +5,31 @@ const {
   authenticateToken,
   checkScope,
 } = require('../../middleware/authMiddleware');
-const { auditLog } = require('../../middleware/auditLogger');
+const { auditLogCrud } = require('../../middleware/auditLogger');
 const { SCOPES } = require('../../config/constants');
 const controller = require('./accounttype.controller');
 
-router.get('/', authenticateToken, auditLog(), ...controller.getAll);
-router.get('/:id', authenticateToken, auditLog(), ...controller.getById);
+router.get('/', authenticateToken, auditLogCrud('Account Type'), ...controller.getAll);
+router.get('/:id', authenticateToken, auditLogCrud('Account Type'), ...controller.getById);
 router.post(
   '/',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Account Type'),
   ...controller.create
 );
 router.put(
   '/:id',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Account Type'),
   ...controller.update
 );
 router.delete(
   '/:id',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Account Type'),
   ...controller.deleteById
 );
 

@@ -60,7 +60,7 @@ describe('responseHelper', () => {
     it('sends a 200 response with pagination metadata', () => {
       const res = mockRes();
       const pagination = { page: 1, limit: 10, total: 50, totalPages: 5 };
-      paginatedResponse(res, 'Items', [{ id: 1 }], pagination);
+      paginatedResponse(res, [{ id: 1 }], pagination, 'Items');
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.json).toHaveBeenCalledWith({
         success: true,
@@ -72,14 +72,14 @@ describe('responseHelper', () => {
 
     it('includes success: true in response body', () => {
       const res = mockRes();
-      paginatedResponse(res, 'msg', [], { page: 1, limit: 10, total: 0, totalPages: 0 });
+      paginatedResponse(res, [], { page: 1, limit: 10, total: 0, totalPages: 0 }, 'msg');
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
     });
 
     it('passes empty array data correctly', () => {
       const res = mockRes();
       const pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
-      paginatedResponse(res, 'Empty', [], pagination);
+      paginatedResponse(res, [], pagination, 'Empty');
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ data: [] }));
     });
   });

@@ -7,7 +7,7 @@ const {
   authenticateToken,
   checkScope,
 } = require('../../middleware/authMiddleware');
-const { auditLog } = require('../../middleware/auditLogger');
+const { auditLogCrud } = require('../../middleware/auditLogger');
 const { SCOPES } = require('../../config/constants');
 const uomController = require('./uom.controller');
 
@@ -15,13 +15,13 @@ const uomController = require('./uom.controller');
  * GET /api/uom
  * Get all UOMs for the authenticated user's tenant.
  */
-router.get('/', authenticateToken, auditLog(), ...uomController.getAllUom);
+router.get('/', authenticateToken, auditLogCrud('Unit of Measure'), ...uomController.getAllUom);
 
 /**
  * GET /api/uom/:id
  * Get a specific UOM by ID.
  */
-router.get('/:id', authenticateToken, auditLog(), ...uomController.getUomById);
+router.get('/:id', authenticateToken, auditLogCrud('Unit of Measure'), ...uomController.getUomById);
 
 /**
  * POST /api/uom
@@ -30,8 +30,8 @@ router.get('/:id', authenticateToken, auditLog(), ...uomController.getUomById);
 router.post(
   '/',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Unit of Measure'),
   ...uomController.createUom
 );
 
@@ -42,8 +42,8 @@ router.post(
 router.put(
   '/:id',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Unit of Measure'),
   ...uomController.updateUom
 );
 
@@ -54,8 +54,8 @@ router.put(
 router.delete(
   '/:id',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
-  auditLog(),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Unit of Measure'),
   ...uomController.deleteUom
 );
 

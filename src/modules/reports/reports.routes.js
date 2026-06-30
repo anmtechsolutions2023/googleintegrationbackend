@@ -9,7 +9,7 @@ const {
 } = require('../../middleware/authMiddleware');
 const { auditLog } = require('../../middleware/auditLogger');
 const reportsController = require('./reports.controller');
-const { SCOPES } = require('../../config/constants');
+const { SCOPES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('../../config/constants');
 
 /**
  * GET /api/reports
@@ -19,7 +19,7 @@ router.get(
   '/',
   authenticateToken,
   checkScope(SCOPES.REPORTS_READ),
-  auditLog(),
+  auditLog(AUDIT_CATEGORIES.REPORTS, 'DEBUG', AUDIT_ACTIONS.VIEW_REPORTS),
   reportsController.getReports
 );
 
@@ -31,7 +31,7 @@ router.get(
   '/billing',
   authenticateToken,
   checkScope(SCOPES.BILLING_READ, SCOPES.REPORTS_WRITE),
-  auditLog(),
+  auditLog(AUDIT_CATEGORIES.REPORTS, 'DEBUG', AUDIT_ACTIONS.VIEW_BILLING),
   reportsController.getBilling
 );
 
