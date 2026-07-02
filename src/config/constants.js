@@ -401,25 +401,25 @@ module.exports = {
       SELECT_ALL:
         'SELECT * FROM branchusergroupmapper WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `
-        SELECT bugm.*, 
+        SELECT bugm.*,
           bd.BranchName AS BranchName
         FROM branchusergroupmapper bugm
-        LEFT JOIN branchdetail bd ON bugm.BranchId = bd.Id AND bd.TenantId = bugm.TenantId
+        LEFT JOIN branchdetail bd ON bugm.BranchDetailId = bd.Id AND bd.TenantId = bugm.TenantId
         WHERE bugm.TenantId = ? ORDER BY bugm.CreatedOn DESC`,
       COUNT:
         'SELECT COUNT(*) as total FROM branchusergroupmapper WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM branchusergroupmapper WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `
-        SELECT bugm.*, 
+        SELECT bugm.*,
           bd.BranchName AS BranchName
         FROM branchusergroupmapper bugm
-        LEFT JOIN branchdetail bd ON bugm.BranchId = bd.Id AND bd.TenantId = bugm.TenantId
+        LEFT JOIN branchdetail bd ON bugm.BranchDetailId = bd.Id AND bd.TenantId = bugm.TenantId
         WHERE bugm.Id = ? AND bugm.TenantId = ?`,
       INSERT:
-        'INSERT INTO branchusergroupmapper (Id, TenantId, BranchId, UserGroupId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO branchusergroupmapper (Id, TenantId, BranchDetailId, UserGroupId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE branchusergroupmapper SET BranchId = ?, UserGroupId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE branchusergroupmapper SET BranchDetailId = ?, UserGroupId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM branchusergroupmapper WHERE Id = ? AND TenantId = ?',
     },
 

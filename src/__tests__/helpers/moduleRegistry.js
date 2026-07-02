@@ -214,9 +214,9 @@ const registry = [
     servicePath: '../../modules/branchusergroupmapper/branchusergroupmapper.service',
     httpPath: '/api/branchusergroupmappers',
     exports: STD,
-    createData:  { BranchId: UUID, UserGroupId: UUID, Active: true },
+    createData:  { BranchDetailId: UUID, UserGroupId: UUID, Active: true },
     updateData:  { Active: false },
-    existingRow: { BranchId: UUID, UserGroupId: UUID },
+    existingRow: { BranchDetailId: UUID, UserGroupId: UUID },
   },
   {
     name: 'batchdetail',

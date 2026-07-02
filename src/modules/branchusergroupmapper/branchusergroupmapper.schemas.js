@@ -2,13 +2,13 @@
 const Joi = require('joi');
 
 const createSchema = Joi.object({
-  BranchId: Joi.string().uuid().required(),
+  BranchDetailId: Joi.string().uuid().required(),
   UserGroupId: Joi.string().uuid().required(),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
-  BranchId: Joi.string().uuid().optional(),
+  BranchDetailId: Joi.string().uuid().optional(),
   UserGroupId: Joi.string().uuid().optional(),
   Active: Joi.boolean().optional(),
 }).min(1);

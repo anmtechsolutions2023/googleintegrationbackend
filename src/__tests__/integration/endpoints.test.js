@@ -319,8 +319,8 @@ const MODULES = [
   // 21
   {
     path: '/api/branchusergroupmappers',
-    // BranchId, UserGroupId: uuid required (schema uses BranchId, NOT BranchDetailId)
-    body: { BranchId: UUID_1, UserGroupId: UUID_1, Active: true },
+    // BranchDetailId, UserGroupId: uuid required
+    body: { BranchDetailId: UUID_1, UserGroupId: UUID_1, Active: true },
   },
   // 22
   {

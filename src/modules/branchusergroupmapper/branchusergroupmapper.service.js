@@ -11,7 +11,7 @@ class BranchUserGroupMapperService extends BaseCRUDService {
     return [
       id,
       tenantId,
-      data.BranchId,
+      data.BranchDetailId,
       data.UserGroupId,
       data.Active !== undefined ? data.Active : true,
       userEmail,
@@ -21,7 +21,7 @@ class BranchUserGroupMapperService extends BaseCRUDService {
 
   prepareUpdateParams(data, existing, userEmail, id, tenantId) {
     return [
-      data.BranchId !== undefined ? data.BranchId : existing.BranchId,
+      data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
       data.UserGroupId !== undefined ? data.UserGroupId : existing.UserGroupId,
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,

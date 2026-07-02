@@ -130,36 +130,36 @@ describe('branchusergroupmapper — field validation', () => {
     require('../../modules/branchusergroupmapper/branchusergroupmapper.schemas');
 
   describe('create schema — positive cases', () => {
-    it('passes with valid BranchId and UserGroupId', () => {
-      expect(createBUGMSchema.validate({ BranchId: VALID_UUID_BUGM, UserGroupId: VALID_UUID_BUGM }).error).toBeUndefined();
+    it('passes with valid BranchDetailId and UserGroupId', () => {
+      expect(createBUGMSchema.validate({ BranchDetailId: VALID_UUID_BUGM, UserGroupId: VALID_UUID_BUGM }).error).toBeUndefined();
     });
     it('passes with Active false', () => {
-      expect(createBUGMSchema.validate({ BranchId: VALID_UUID_BUGM, UserGroupId: VALID_UUID_BUGM, Active: false }).error).toBeUndefined();
+      expect(createBUGMSchema.validate({ BranchDetailId: VALID_UUID_BUGM, UserGroupId: VALID_UUID_BUGM, Active: false }).error).toBeUndefined();
     });
     it('defaults Active to true when omitted', () => {
-      const { value } = createBUGMSchema.validate({ BranchId: VALID_UUID_BUGM, UserGroupId: VALID_UUID_BUGM });
+      const { value } = createBUGMSchema.validate({ BranchDetailId: VALID_UUID_BUGM, UserGroupId: VALID_UUID_BUGM });
       expect(value.Active).toBe(true);
     });
   });
 
   describe('create schema — negative cases', () => {
-    it('fails when BranchId is missing', () => {
+    it('fails when BranchDetailId is missing', () => {
       expect(createBUGMSchema.validate({ UserGroupId: VALID_UUID_BUGM }).error).toBeDefined();
     });
     it('fails when UserGroupId is missing', () => {
-      expect(createBUGMSchema.validate({ BranchId: VALID_UUID_BUGM }).error).toBeDefined();
+      expect(createBUGMSchema.validate({ BranchDetailId: VALID_UUID_BUGM }).error).toBeDefined();
     });
     it('fails when both fields are missing', () => {
       expect(createBUGMSchema.validate({}).error).toBeDefined();
     });
-    it('fails when BranchId is not a valid UUID', () => {
-      expect(createBUGMSchema.validate({ BranchId: 'not-uuid', UserGroupId: VALID_UUID_BUGM }).error).toBeDefined();
+    it('fails when BranchDetailId is not a valid UUID', () => {
+      expect(createBUGMSchema.validate({ BranchDetailId: 'not-uuid', UserGroupId: VALID_UUID_BUGM }).error).toBeDefined();
     });
     it('fails when UserGroupId is not a valid UUID', () => {
-      expect(createBUGMSchema.validate({ BranchId: VALID_UUID_BUGM, UserGroupId: '12345' }).error).toBeDefined();
+      expect(createBUGMSchema.validate({ BranchDetailId: VALID_UUID_BUGM, UserGroupId: '12345' }).error).toBeDefined();
     });
     it('fails when Active is not a boolean', () => {
-      expect(createBUGMSchema.validate({ BranchId: VALID_UUID_BUGM, UserGroupId: VALID_UUID_BUGM, Active: 'yes' }).error).toBeDefined();
+      expect(createBUGMSchema.validate({ BranchDetailId: VALID_UUID_BUGM, UserGroupId: VALID_UUID_BUGM, Active: 'yes' }).error).toBeDefined();
     });
   });
 
@@ -167,8 +167,8 @@ describe('branchusergroupmapper — field validation', () => {
     it('passes with only Active flag', () => {
       expect(updateBUGMSchema.validate({ Active: false }).error).toBeUndefined();
     });
-    it('passes with BranchId patch', () => {
-      expect(updateBUGMSchema.validate({ BranchId: VALID_UUID_BUGM }).error).toBeUndefined();
+    it('passes with BranchDetailId patch', () => {
+      expect(updateBUGMSchema.validate({ BranchDetailId: VALID_UUID_BUGM }).error).toBeUndefined();
     });
     it('passes with UserGroupId patch', () => {
       expect(updateBUGMSchema.validate({ UserGroupId: VALID_UUID_BUGM }).error).toBeUndefined();
@@ -179,8 +179,8 @@ describe('branchusergroupmapper — field validation', () => {
     it('fails for an empty body', () => {
       expect(updateBUGMSchema.validate({}).error).toBeDefined();
     });
-    it('fails when BranchId is invalid UUID', () => {
-      expect(updateBUGMSchema.validate({ BranchId: 'bad-id' }).error).toBeDefined();
+    it('fails when BranchDetailId is invalid UUID', () => {
+      expect(updateBUGMSchema.validate({ BranchDetailId: 'bad-id' }).error).toBeDefined();
     });
     it('fails when UserGroupId is invalid UUID', () => {
       expect(updateBUGMSchema.validate({ UserGroupId: 'not-valid' }).error).toBeDefined();
