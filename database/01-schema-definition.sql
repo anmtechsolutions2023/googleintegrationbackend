@@ -1,18 +1,20 @@
 -- =============================================================================
 -- 01-schema-definition.sql
 -- Complete, fresh-install DDL for the full application database.
+-- This is the SINGLE schema file — core auth, IAM, business domain, and POS
+-- ("Front Desk") tables. All historical migrations are collapsed in.
 --
 -- How to run:
 --   mysql -u <user> -p <database_name> < 01-schema-definition.sql
 --
 -- This script:
---   - Drops and recreates all 38 tables in dependency order
+--   - Drops and recreates every application table in dependency order
+--     (Section 1 core auth, 2 IAM, 3 business domain, 4 POS)
 --   - Collapses all historical ALTER TABLE migrations into final column definitions
 --   - Is idempotent for a fresh database (DROP TABLE IF EXISTS + CREATE TABLE)
 --
 -- WARNING: Drops all tables before recreating. Do NOT run against a database
---          that has live data. For existing databases, use the individual
---          migration files instead.
+--          that has live data.
 --
 -- Tested against: MySQL 5.7+ and MySQL 8.x
 -- Run before: 02-seed-data.sql
@@ -808,6 +810,347 @@ CREATE TABLE paymentbreakup (
     FOREIGN KEY (PaymentDetailId)                REFERENCES paymentdetail(Id),
     FOREIGN KEY (PaymentModeTransactionDetailId) REFERENCES paymentmodetransactiondetail(Id),
     FOREIGN KEY (PaymentReceivedTypeId)          REFERENCES paymentreceivedtype(Id)
+);
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- =============================================================================
+-- SECTION 4: POS ("Front Desk" / RestroOS) Tables
+-- Source: 03-pos-schema.sql (collapsed; migration 002 baked in).
+-- Conventions match Section 3: Id VARCHAR(50) PK, TenantId NOT NULL,
+-- BranchDetailId FK to branchdetail, standard audit columns.
+-- Depends on Section 3 tables: branchdetail, itemdetail, costinfo.
+-- =============================================================================
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS pos_bill;
+DROP TABLE IF EXISTS pos_kot;
+DROP TABLE IF EXISTS pos_order;
+DROP TABLE IF EXISTS pos_item_meta_channel;
+DROP TABLE IF EXISTS pos_item_meta_variant;
+DROP TABLE IF EXISTS pos_item_meta;
+DROP TABLE IF EXISTS pos_channel;
+DROP TABLE IF EXISTS pos_variant;
+DROP TABLE IF EXISTS pos_table;
+DROP TABLE IF EXISTS pos_floor;
+DROP TABLE IF EXISTS pos_customer;
+DROP TABLE IF EXISTS pos_online_order;
+DROP TABLE IF EXISTS pos_feedback;
+DROP TABLE IF EXISTS pos_token;
+DROP TABLE IF EXISTS pos_expense;
+DROP TABLE IF EXISTS pos_staff;
+
+-- 4.1 pos_floor — dining floors/sections within a branch
+CREATE TABLE pos_floor (
+    Id              VARCHAR(50)  NOT NULL,
+    Name            VARCHAR(100) NOT NULL,
+    BranchDetailId  VARCHAR(50)  NULL,
+    TenantId        VARCHAR(50)  NOT NULL,
+    Active          TINYINT(1)   NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Name, BranchDetailId, TenantId),
+    FOREIGN KEY (BranchDetailId) REFERENCES branchdetail(Id)
+);
+
+-- 4.2 pos_table — physical tables belonging to a floor
+CREATE TABLE pos_table (
+    Id              VARCHAR(50)  NOT NULL,
+    Name            VARCHAR(50)  NOT NULL,
+    FloorId         VARCHAR(50)  NULL,
+    Capacity        INT          NULL,
+    Status          VARCHAR(20)  NOT NULL DEFAULT 'free',
+    CurrentOrderId  VARCHAR(50)  NULL,
+    BranchDetailId  VARCHAR(50)  NULL,
+    TenantId        VARCHAR(50)  NOT NULL,
+    Active          TINYINT(1)   NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Name, FloorId, TenantId),
+    FOREIGN KEY (FloorId)        REFERENCES pos_floor(Id),
+    FOREIGN KEY (BranchDetailId) REFERENCES branchdetail(Id)
+);
+
+-- 4.3 pos_channel — sales channels (dinein / online / takeaway) master
+CREATE TABLE pos_channel (
+    Id              VARCHAR(50)   NOT NULL,
+    Name            VARCHAR(100)  NOT NULL,
+    Code            VARCHAR(50)   NOT NULL,
+    Description     VARCHAR(255)  NULL,
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    Price           DECIMAL(18,4) NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Code, TenantId)
+);
+
+-- 4.4 pos_variant — item variants (Small/Medium/Large, Half/Full, …) master
+CREATE TABLE pos_variant (
+    Id              VARCHAR(50)   NOT NULL,
+    Name            VARCHAR(100)  NOT NULL,
+    Code            VARCHAR(50)   NOT NULL,
+    Description     VARCHAR(255)  NULL,
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    Price           DECIMAL(18,4) NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Code, TenantId)
+);
+
+-- 4.5 pos_item_meta — POS-only extensions for a master itemdetail record.
+-- Channels/Variants live in normalized join tables; price references a costinfo
+-- master row via CostInfoId. Legacy JSON columns kept (NULLable) for backward
+-- compat with Billing's price fallback.
+CREATE TABLE pos_item_meta (
+    Id              VARCHAR(50)   NOT NULL,
+    ItemDetailId    VARCHAR(50)   NOT NULL,
+    FoodType        VARCHAR(20)   NOT NULL,
+    CostInfoId      VARCHAR(50)   NULL,
+    Channels        JSON          NULL,
+    Prices          JSON          NULL,
+    Variants        JSON          NULL,
+    Addons          JSON          NULL,
+    BranchDetailId  VARCHAR(50)   NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (ItemDetailId, BranchDetailId, TenantId),
+    FOREIGN KEY (ItemDetailId)   REFERENCES itemdetail(Id),
+    FOREIGN KEY (CostInfoId)     REFERENCES costinfo(Id)
+);
+
+-- 4.6 pos_item_meta_channel — join: which channels a menu item is available on
+CREATE TABLE pos_item_meta_channel (
+    Id              VARCHAR(50)   NOT NULL,
+    ItemMetaId      VARCHAR(50)   NOT NULL,
+    ChannelId       VARCHAR(50)   NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (ItemMetaId, ChannelId, TenantId),
+    FOREIGN KEY (ItemMetaId) REFERENCES pos_item_meta(Id) ON DELETE CASCADE,
+    FOREIGN KEY (ChannelId)  REFERENCES pos_channel(Id)
+);
+
+-- 4.7 pos_item_meta_variant — join: which variants a menu item offers
+CREATE TABLE pos_item_meta_variant (
+    Id              VARCHAR(50)   NOT NULL,
+    ItemMetaId      VARCHAR(50)   NOT NULL,
+    VariantId       VARCHAR(50)   NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (ItemMetaId, VariantId, TenantId),
+    FOREIGN KEY (ItemMetaId) REFERENCES pos_item_meta(Id) ON DELETE CASCADE,
+    FOREIGN KEY (VariantId)  REFERENCES pos_variant(Id)
+);
+
+-- 4.8 pos_customer — walk-in / loyalty customers
+CREATE TABLE pos_customer (
+    Id              VARCHAR(50)     NOT NULL,
+    Name            VARCHAR(100)    NOT NULL,
+    Phone           VARCHAR(20)     NULL,
+    Email           VARCHAR(100)    NULL,
+    Visits          INT             NOT NULL DEFAULT 0,
+    TotalSpent      DECIMAL(12,2)   NOT NULL DEFAULT 0,
+    LoyaltyPoints   INT             NOT NULL DEFAULT 0,
+    BranchDetailId  VARCHAR(50)     NULL,
+    TenantId        VARCHAR(50)     NOT NULL,
+    Active          TINYINT(1)      NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Phone, TenantId)
+);
+
+-- 4.9 pos_feedback — customer feedback / ratings
+CREATE TABLE pos_feedback (
+    Id              VARCHAR(50)    NOT NULL,
+    CustomerId      VARCHAR(50)    NULL,
+    CustomerName    VARCHAR(100)   NULL,
+    Rating          INT            NULL,
+    Comments        VARCHAR(1000)  NULL,
+    BranchDetailId  VARCHAR(50)    NULL,
+    TenantId        VARCHAR(50)    NOT NULL,
+    Active          TINYINT(1)     NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    FOREIGN KEY (CustomerId) REFERENCES pos_customer(Id)
+);
+
+-- 4.10 pos_order — a dine-in / takeaway / online order
+CREATE TABLE pos_order (
+    Id              VARCHAR(50)    NOT NULL,
+    OrderNo         VARCHAR(50)    NOT NULL,
+    TableId         VARCHAR(50)    NULL,
+    CustomerId      VARCHAR(50)    NULL,
+    OrderType       VARCHAR(20)    NOT NULL DEFAULT 'dinein',
+    Status          VARCHAR(20)    NOT NULL DEFAULT 'open',
+    Items           JSON           NULL,
+    SubTotal        DECIMAL(12,2)  NOT NULL DEFAULT 0,
+    TaxAmount       DECIMAL(12,2)  NOT NULL DEFAULT 0,
+    Total           DECIMAL(12,2)  NOT NULL DEFAULT 0,
+    BranchDetailId  VARCHAR(50)    NULL,
+    TenantId        VARCHAR(50)    NOT NULL,
+    Active          TINYINT(1)     NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (OrderNo, TenantId),
+    FOREIGN KEY (TableId)    REFERENCES pos_table(Id),
+    FOREIGN KEY (CustomerId) REFERENCES pos_customer(Id)
+);
+
+-- 4.11 pos_kot — Kitchen Order Ticket fired for an order
+CREATE TABLE pos_kot (
+    Id              VARCHAR(50)   NOT NULL,
+    KotNo           VARCHAR(50)   NOT NULL,
+    OrderId         VARCHAR(50)   NULL,
+    TableId         VARCHAR(50)   NULL,
+    Items           JSON          NULL,
+    Status          VARCHAR(20)   NOT NULL DEFAULT 'pending',
+    FiredAt         DATETIME      NULL,
+    BranchDetailId  VARCHAR(50)   NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (KotNo, TenantId),
+    FOREIGN KEY (OrderId) REFERENCES pos_order(Id)
+);
+
+-- 4.12 pos_bill — settled/settling bill for an order (payments embedded as JSON)
+CREATE TABLE pos_bill (
+    Id              VARCHAR(50)    NOT NULL,
+    BillNo          VARCHAR(50)    NOT NULL,
+    OrderId         VARCHAR(50)    NULL,
+    SubTotal        DECIMAL(12,2)  NOT NULL DEFAULT 0,
+    TaxAmount       DECIMAL(12,2)  NOT NULL DEFAULT 0,
+    Discount        DECIMAL(12,2)  NOT NULL DEFAULT 0,
+    Total           DECIMAL(12,2)  NOT NULL DEFAULT 0,
+    Payments        JSON           NULL,
+    Status          VARCHAR(20)    NOT NULL DEFAULT 'unpaid',
+    SettledAt       DATETIME       NULL,
+    BranchDetailId  VARCHAR(50)    NULL,
+    TenantId        VARCHAR(50)    NOT NULL,
+    Active          TINYINT(1)     NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (BillNo, TenantId),
+    FOREIGN KEY (OrderId) REFERENCES pos_order(Id)
+);
+
+-- 4.13 pos_online_order — aggregator/online channel order
+CREATE TABLE pos_online_order (
+    Id              VARCHAR(50)   NOT NULL,
+    Platform        VARCHAR(50)   NOT NULL,
+    ExternalRef     VARCHAR(100)  NULL,
+    Status          VARCHAR(20)   NOT NULL DEFAULT 'new',
+    Payload         JSON          NULL,
+    BranchDetailId  VARCHAR(50)   NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Platform, ExternalRef, TenantId)
+);
+
+-- 4.14 pos_token — token/queue number system
+CREATE TABLE pos_token (
+    Id              VARCHAR(50)  NOT NULL,
+    TokenNumber     INT          NOT NULL,
+    OrderId         VARCHAR(50)  NULL,
+    Status          VARCHAR(20)  NOT NULL DEFAULT 'waiting',
+    BranchDetailId  VARCHAR(50)  NULL,
+    TenantId        VARCHAR(50)  NOT NULL,
+    Active          TINYINT(1)   NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (TokenNumber, BranchDetailId, TenantId),
+    FOREIGN KEY (OrderId) REFERENCES pos_order(Id)
+);
+
+-- 4.15 pos_expense — petty-cash / operational expenses
+CREATE TABLE pos_expense (
+    Id              VARCHAR(50)    NOT NULL,
+    Category        VARCHAR(100)   NOT NULL,
+    Description     VARCHAR(500)   NULL,
+    Amount          DECIMAL(12,2)  NOT NULL DEFAULT 0,
+    ExpenseDate     DATETIME       NULL,
+    BranchDetailId  VARCHAR(50)    NULL,
+    TenantId        VARCHAR(50)    NOT NULL,
+    Active          TINYINT(1)     NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id)
+);
+
+-- 4.16 pos_staff — front-desk / kitchen staff roster
+CREATE TABLE pos_staff (
+    Id              VARCHAR(50)   NOT NULL,
+    Name            VARCHAR(100)  NOT NULL,
+    Role            VARCHAR(50)   NULL,
+    Phone           VARCHAR(20)   NULL,
+    Email           VARCHAR(100)  NULL,
+    BranchDetailId  VARCHAR(50)   NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Email, TenantId)
 );
 
 SET FOREIGN_KEY_CHECKS = 1;

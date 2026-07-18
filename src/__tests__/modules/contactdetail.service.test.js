@@ -130,10 +130,10 @@ describe('contactdetail — field validation', () => {
     require('../../modules/contactdetail/contactdetail.schemas');
 
   describe('create schema — positive cases', () => {
-    it('passes with only required FirstName', () => {
-      expect(createContactDetailSchema.validate({ FirstName: 'John' }).error).toBeUndefined();
+    it('fails when required LastName is missing', () => {
+      expect(createContactDetailSchema.validate({ FirstName: 'John' }).error).toBeDefined();
     });
-    it('passes with FirstName and LastName', () => {
+    it('passes with required FirstName and LastName', () => {
       expect(createContactDetailSchema.validate({ FirstName: 'John', LastName: 'Doe' }).error).toBeUndefined();
     });
     it('passes with all optional fields provided', () => {
@@ -145,13 +145,13 @@ describe('contactdetail — field validation', () => {
       expect(createContactDetailSchema.validate(data).error).toBeUndefined();
     });
     it('accepts FirstName at exactly 100 characters', () => {
-      expect(createContactDetailSchema.validate({ FirstName: 'x'.repeat(100) }).error).toBeUndefined();
+      expect(createContactDetailSchema.validate({ FirstName: 'x'.repeat(100), LastName: 'Doe' }).error).toBeUndefined();
     });
     it('accepts null for optional string fields', () => {
-      expect(createContactDetailSchema.validate({ FirstName: 'Jane', MobileNo: null, LastName: null }).error).toBeUndefined();
+      expect(createContactDetailSchema.validate({ FirstName: 'Jane', LastName: 'Doe', MobileNo: null }).error).toBeUndefined();
     });
     it('defaults Active to true when omitted', () => {
-      const { value } = createContactDetailSchema.validate({ FirstName: 'Jane' });
+      const { value } = createContactDetailSchema.validate({ FirstName: 'Jane', LastName: 'Doe' });
       expect(value.Active).toBe(true);
     });
   });

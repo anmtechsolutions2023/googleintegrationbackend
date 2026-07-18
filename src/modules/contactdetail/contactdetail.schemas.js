@@ -3,7 +3,7 @@ const Joi = require('joi');
 
 const createSchema = Joi.object({
   FirstName: Joi.string().required().max(100).trim(),
-  LastName: Joi.string().optional().max(100).trim().allow(null, ''),
+  LastName: Joi.string().required().max(100).trim(),
   MobileNo: Joi.string().optional().max(20).trim().allow(null, ''),
   AltMobileNo: Joi.string().optional().max(20).trim().allow(null, ''),
   Landline1: Joi.string().optional().max(20).trim().allow(null, ''),
@@ -16,7 +16,7 @@ const createSchema = Joi.object({
 
 const updateSchema = Joi.object({
   FirstName: Joi.string().optional().max(100).trim(),
-  LastName: Joi.string().optional().max(100).trim().allow(null, ''),
+  LastName: Joi.string().optional().max(100).trim(),
   MobileNo: Joi.string().optional().max(20).trim().allow(null, ''),
   AltMobileNo: Joi.string().optional().max(20).trim().allow(null, ''),
   Landline1: Joi.string().optional().max(20).trim().allow(null, ''),

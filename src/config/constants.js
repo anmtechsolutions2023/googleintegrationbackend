@@ -748,6 +748,158 @@ module.exports = {
       DELETE: 'DELETE FROM transactiontype WHERE Id = ? AND TenantId = ?',
     },
 
+    // ── POS (Front Desk) modules ──────────────────────────────────────────
+    POS_FLOOR: {
+      SELECT_ALL: 'SELECT * FROM pos_floor WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_floor WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_floor WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_floor (Id, TenantId, Name, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_floor SET Name = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_floor WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_TABLE: {
+      SELECT_ALL: 'SELECT * FROM pos_table WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_table WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_table WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_table (Id, TenantId, Name, FloorId, Capacity, Status, CurrentOrderId, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_table SET Name = ?, FloorId = ?, Capacity = ?, Status = ?, CurrentOrderId = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_table WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_CHANNEL: {
+      SELECT_ALL: 'SELECT * FROM pos_channel WHERE TenantId = ? ORDER BY SortOrder ASC, CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_channel WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_channel WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_channel (Id, TenantId, Name, Code, Description, SortOrder, Price, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_channel SET Name = ?, Code = ?, Description = ?, SortOrder = ?, Price = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_channel WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_VARIANT: {
+      SELECT_ALL: 'SELECT * FROM pos_variant WHERE TenantId = ? ORDER BY SortOrder ASC, CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_variant WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_variant WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_variant (Id, TenantId, Name, Code, Description, SortOrder, Price, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_variant SET Name = ?, Code = ?, Description = ?, SortOrder = ?, Price = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_variant WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_ITEM_META: {
+      // SELECT_ALL/SELECT_BY_ID aggregate linked channel/variant ids and the
+      // linked costinfo amount so the client can pre-select and price.
+      SELECT_ALL: `SELECT im.*,
+          (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c WHERE c.ItemMetaId = im.Id) AS ChannelIds,
+          (SELECT JSON_ARRAYAGG(v.VariantId) FROM pos_item_meta_variant v WHERE v.ItemMetaId = im.Id) AS VariantIds,
+          ci.Amount AS CostInfoAmount
+        FROM pos_item_meta im
+        LEFT JOIN costinfo ci ON ci.Id = im.CostInfoId
+        WHERE im.TenantId = ? ORDER BY im.CreatedOn DESC`,
+      COUNT: 'SELECT COUNT(*) as total FROM pos_item_meta WHERE TenantId = ?',
+      SELECT_BY_ID: `SELECT im.*,
+          (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c WHERE c.ItemMetaId = im.Id) AS ChannelIds,
+          (SELECT JSON_ARRAYAGG(v.VariantId) FROM pos_item_meta_variant v WHERE v.ItemMetaId = im.Id) AS VariantIds,
+          ci.Amount AS CostInfoAmount
+        FROM pos_item_meta im
+        LEFT JOIN costinfo ci ON ci.Id = im.CostInfoId
+        WHERE im.Id = ? AND im.TenantId = ?`,
+      INSERT: 'INSERT INTO pos_item_meta (Id, TenantId, ItemDetailId, FoodType, CostInfoId, Channels, Prices, Variants, Addons, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_item_meta SET ItemDetailId = ?, FoodType = ?, CostInfoId = ?, Channels = ?, Prices = ?, Variants = ?, Addons = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_item_meta WHERE Id = ? AND TenantId = ?',
+      // Join-table sync helpers (channels + variants)
+      DELETE_CHANNEL_LINKS: 'DELETE FROM pos_item_meta_channel WHERE ItemMetaId = ? AND TenantId = ?',
+      INSERT_CHANNEL_LINK: 'INSERT INTO pos_item_meta_channel (Id, ItemMetaId, ChannelId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
+      DELETE_VARIANT_LINKS: 'DELETE FROM pos_item_meta_variant WHERE ItemMetaId = ? AND TenantId = ?',
+      INSERT_VARIANT_LINK: 'INSERT INTO pos_item_meta_variant (Id, ItemMetaId, VariantId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
+    },
+
+    POS_CUSTOMER: {
+      SELECT_ALL: 'SELECT * FROM pos_customer WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_customer WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_customer WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_customer (Id, TenantId, Name, Phone, Email, Visits, TotalSpent, LoyaltyPoints, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_customer SET Name = ?, Phone = ?, Email = ?, Visits = ?, TotalSpent = ?, LoyaltyPoints = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_customer WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_ORDER: {
+      SELECT_ALL: 'SELECT * FROM pos_order WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_order WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_order WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_order (Id, TenantId, OrderNo, TableId, CustomerId, OrderType, Status, Items, SubTotal, TaxAmount, Total, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_order SET OrderNo = ?, TableId = ?, CustomerId = ?, OrderType = ?, Status = ?, Items = ?, SubTotal = ?, TaxAmount = ?, Total = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_order WHERE Id = ? AND TenantId = ?',
+      // Domain action helper: update order status (e.g. after firing a KOT)
+      SET_STATUS: 'UPDATE pos_order SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_KOT: {
+      SELECT_ALL: 'SELECT * FROM pos_kot WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_kot WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_kot WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_kot (Id, TenantId, KotNo, OrderId, TableId, Items, Status, FiredAt, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_kot SET KotNo = ?, OrderId = ?, TableId = ?, Items = ?, Status = ?, FiredAt = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_kot WHERE Id = ? AND TenantId = ?',
+      // Domain action: mark a KOT ready (KDS)
+      SET_STATUS: 'UPDATE pos_kot SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_BILL: {
+      SELECT_ALL: 'SELECT * FROM pos_bill WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_bill WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_bill WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_bill (Id, TenantId, BillNo, OrderId, SubTotal, TaxAmount, Discount, Total, Payments, Status, SettledAt, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_bill SET BillNo = ?, OrderId = ?, SubTotal = ?, TaxAmount = ?, Discount = ?, Total = ?, Payments = ?, Status = ?, SettledAt = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_bill WHERE Id = ? AND TenantId = ?',
+      // Domain action: settle a bill (record payments, mark paid)
+      SETTLE: 'UPDATE pos_bill SET Payments = ?, Discount = ?, Total = ?, Status = ?, SettledAt = NOW(), UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_ONLINE_ORDER: {
+      SELECT_ALL: 'SELECT * FROM pos_online_order WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_online_order WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_online_order WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_online_order (Id, TenantId, Platform, ExternalRef, Status, Payload, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_online_order SET Platform = ?, ExternalRef = ?, Status = ?, Payload = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_online_order WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_FEEDBACK: {
+      SELECT_ALL: 'SELECT * FROM pos_feedback WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_feedback WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_feedback WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_feedback (Id, TenantId, CustomerId, CustomerName, Rating, Comments, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_feedback SET CustomerId = ?, CustomerName = ?, Rating = ?, Comments = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_feedback WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_TOKEN: {
+      SELECT_ALL: 'SELECT * FROM pos_token WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_token WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_token WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_token (Id, TenantId, TokenNumber, OrderId, Status, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_token SET TokenNumber = ?, OrderId = ?, Status = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_token WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_EXPENSE: {
+      SELECT_ALL: 'SELECT * FROM pos_expense WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_expense WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_expense WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_expense (Id, TenantId, Category, Description, Amount, ExpenseDate, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_expense SET Category = ?, Description = ?, Amount = ?, ExpenseDate = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_expense WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_STAFF: {
+      SELECT_ALL: 'SELECT * FROM pos_staff WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_staff WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_staff WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_staff (Id, TenantId, Name, Role, Phone, Email, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_staff SET Name = ?, Role = ?, Phone = ?, Email = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_staff WHERE Id = ? AND TenantId = ?',
+    },
+
     // Role-based scope resolution (Path A) — UNIONed with PERMISSIONS.SELECT in auth.service
     ROLE_SCOPES: {
       SELECT_BY_USER_TENANT: `
@@ -905,6 +1057,7 @@ module.exports = {
     MASTER_DATA:  'MASTER_DATA',
     PAYMENTS:     'PAYMENTS',
     REPORTS:      'REPORTS',
+    POS:          'POS',
     GENERAL:      'GENERAL',
   },
   AUDIT_ACTIONS: {
@@ -981,5 +1134,19 @@ module.exports = {
     CONTACTS_WRITE: 'CONTACTS:WRITE',
     PAYMENTS_READ: 'PAYMENTS:READ',
     PAYMENTS_WRITE: 'PAYMENTS:WRITE',
+    // POS (Front Desk) feature-category scopes
+    POS_CONFIG_READ: 'POS_CONFIG:READ',
+    POS_CONFIG_WRITE: 'POS_CONFIG:WRITE',
+    POS_ORDER_READ: 'POS_ORDER:READ',
+    POS_ORDER_WRITE: 'POS_ORDER:WRITE',
+    POS_KITCHEN_READ: 'POS_KITCHEN:READ',
+    POS_KITCHEN_WRITE: 'POS_KITCHEN:WRITE',
+    POS_BILLING_READ: 'POS_BILLING:READ',
+    POS_BILLING_WRITE: 'POS_BILLING:WRITE',
+    POS_CRM_READ: 'POS_CRM:READ',
+    POS_CRM_WRITE: 'POS_CRM:WRITE',
+    POS_OPS_READ: 'POS_OPS:READ',
+    POS_OPS_WRITE: 'POS_OPS:WRITE',
+    POS_REPORTS_READ: 'POS_REPORTS:READ',
   },
 }

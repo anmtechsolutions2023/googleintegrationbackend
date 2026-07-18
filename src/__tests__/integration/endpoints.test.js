@@ -417,6 +417,20 @@ const MODULES = [
       Active: true,
     },
   },
+
+  // ─── POS (Front Desk) modules ───
+  { path: '/api/pos/floors', body: { Name: 'Main Dining', Active: true } },
+  { path: '/api/pos/tables', body: { Name: 'Table 1', Active: true }, updateBody: { Status: 'occupied' } },
+  { path: '/api/pos/item-meta', body: { ItemDetailId: UUID_1, FoodType: 'veg', Channels: { dinein: true }, Prices: { dinein: 100 }, Variants: [], Addons: [], BranchDetailId: UUID_1, Active: true }, updateBody: { FoodType: 'nonveg' } },
+  { path: '/api/pos/customers', body: { Name: 'Rahul Verma', Phone: '9876543210', Active: true } },
+  { path: '/api/pos/orders', body: { OrderNo: 'ORD-1', Active: true }, updateBody: { Status: 'closed' } },
+  { path: '/api/pos/kots', body: { KotNo: 'KOT-1', Active: true }, updateBody: { Status: 'ready' } },
+  { path: '/api/pos/bills', body: { BillNo: 'BILL-1', Active: true }, updateBody: { Status: 'paid' } },
+  { path: '/api/pos/online-orders', body: { Platform: 'Swiggy', Active: true }, updateBody: { Status: 'accepted' } },
+  { path: '/api/pos/feedback', body: { CustomerName: 'Rahul', Rating: 5, Active: true }, updateBody: { Rating: 4 } },
+  { path: '/api/pos/tokens', body: { TokenNumber: 1, Active: true }, updateBody: { Status: 'called' } },
+  { path: '/api/pos/expenses', body: { Category: 'Groceries', Amount: 500, Active: true }, updateBody: { Amount: 600 } },
+  { path: '/api/pos/staff', body: { Name: 'Head Chef', Role: 'Kitchen', Active: true }, updateBody: { Role: 'Manager' } },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1719,5 +1733,132 @@ describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POS DOMAIN ACTIONS — HTTP-level tests (beyond CRUD)
+// Covers auth (401), scope denial (403), validation (400), success, not-found (404)
+// for: fire-KOT, mark-KOT-ready, settle-bill.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('POS domain action: POST /api/pos/orders/:id/fire-kot', () => {
+  const path = `/api/pos/orders/${RECORD_ID}/fire-kot`;
+
+  it('no token → 401', async () => {
+    const res = await request(app).post(path).send({});
+    expect(res.status).toBe(401);
+  });
+
+  it('viewer scope → 403', async () => {
+    const res = await request(app).post(path).set('Authorization', viewerToken()).send({});
+    expect(res.status).toBe(403);
+  });
+
+  it('invalid UUID → 400', async () => {
+    const res = await request(app)
+      .post('/api/pos/orders/not-a-uuid/fire-kot')
+      .set('Authorization', adminToken())
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('admin, valid order → 201 with KOT summary', async () => {
+    const res = await request(app).post(path).set('Authorization', adminToken()).send({ KotNo: 'KOT-1' });
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    // This codebase returns the payload in `message` (the `data` field carries the text).
+    expect(res.body.message).toHaveProperty('KotId');
+  });
+
+  it('order not found → 404', async () => {
+    mockConnection.execute.mockImplementation(notFoundExecuteImpl);
+    try {
+      const res = await request(app).post(path).set('Authorization', adminToken()).send({});
+      expect(res.status).toBe(404);
+    } finally {
+      restoreDefaultMocks();
+    }
+  });
+});
+
+describe('POS domain action: PATCH /api/pos/kots/:id/ready', () => {
+  const path = `/api/pos/kots/${RECORD_ID}/ready`;
+
+  it('no token → 401', async () => {
+    const res = await request(app).patch(path);
+    expect(res.status).toBe(401);
+  });
+
+  it('viewer scope → 403', async () => {
+    const res = await request(app).patch(path).set('Authorization', viewerToken());
+    expect(res.status).toBe(403);
+  });
+
+  it('invalid UUID → 400', async () => {
+    const res = await request(app)
+      .patch('/api/pos/kots/not-a-uuid/ready')
+      .set('Authorization', adminToken());
+    expect(res.status).toBe(400);
+  });
+
+  it('admin, valid KOT → 200', async () => {
+    const res = await request(app).patch(path).set('Authorization', adminToken());
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('KOT not found → 404', async () => {
+    mockConnection.execute.mockImplementation(notFoundExecuteImpl);
+    try {
+      const res = await request(app).patch(path).set('Authorization', adminToken());
+      expect(res.status).toBe(404);
+    } finally {
+      restoreDefaultMocks();
+    }
+  });
+});
+
+describe('POS domain action: POST /api/pos/bills/:id/settle', () => {
+  const path = `/api/pos/bills/${RECORD_ID}/settle`;
+  const validBody = { Payments: [{ mode: 'cash', amount: 100 }], Discount: 0 };
+
+  it('no token → 401', async () => {
+    const res = await request(app).post(path).send(validBody);
+    expect(res.status).toBe(401);
+  });
+
+  it('viewer scope → 403', async () => {
+    const res = await request(app).post(path).set('Authorization', viewerToken()).send(validBody);
+    expect(res.status).toBe(403);
+  });
+
+  it('invalid UUID → 400', async () => {
+    const res = await request(app)
+      .post('/api/pos/bills/not-a-uuid/settle')
+      .set('Authorization', adminToken())
+      .send(validBody);
+    expect(res.status).toBe(400);
+  });
+
+  it('missing Payments → 400', async () => {
+    const res = await request(app).post(path).set('Authorization', adminToken()).send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('admin, valid settle → 200', async () => {
+    const res = await request(app).post(path).set('Authorization', adminToken()).send(validBody);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('bill not found → 404', async () => {
+    mockConnection.execute.mockImplementation(notFoundExecuteImpl);
+    try {
+      const res = await request(app).post(path).set('Authorization', adminToken()).send(validBody);
+      expect(res.status).toBe(404);
+    } finally {
+      restoreDefaultMocks();
+    }
   });
 });

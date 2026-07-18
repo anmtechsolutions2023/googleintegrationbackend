@@ -1,0 +1,50 @@
+// src/modules/posbill/posbill.schemas.js
+// Joi validation schemas for POS Bill operations.
+
+const Joi = require('joi');
+
+const createSchema = Joi.object({
+  BillNo: Joi.string().required().max(50).allow(null).trim(),
+  OrderId: Joi.string().uuid().optional().allow(null),
+  SubTotal: Joi.number().optional().default(0).allow(null),
+  TaxAmount: Joi.number().optional().default(0).allow(null),
+  Discount: Joi.number().optional().default(0).allow(null),
+  Total: Joi.number().optional().default(0).allow(null),
+  Payments: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
+  Status: Joi.string().optional().max(20).allow(null, '').trim(),
+  SettledAt: Joi.date().optional().allow(null),
+  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  Active: Joi.boolean().optional().default(true),
+});
+
+const updateSchema = Joi.object({
+  BillNo: Joi.string().optional().max(50).allow(null, '').trim(),
+  OrderId: Joi.string().uuid().optional().allow(null),
+  SubTotal: Joi.number().optional().allow(null),
+  TaxAmount: Joi.number().optional().allow(null),
+  Discount: Joi.number().optional().allow(null),
+  Total: Joi.number().optional().allow(null),
+  Payments: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
+  Status: Joi.string().optional().max(20).allow(null, '').trim(),
+  SettledAt: Joi.date().optional().allow(null),
+  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  Active: Joi.boolean().optional(),
+}).min(1);
+
+// Domain action: settle a bill. Payments is required (at least one payment line).
+const settleSchema = Joi.object({
+  Payments: Joi.alternatives(Joi.object(), Joi.array()).required(),
+  Discount: Joi.number().optional().allow(null),
+  Total: Joi.number().optional().allow(null),
+});
+
+const paginationSchema = Joi.object({
+  page: Joi.number().integer().min(1).optional().default(1),
+  limit: Joi.number().integer().min(1).max(100).optional().default(10),
+});
+
+const uuidParamSchema = Joi.object({
+  id: Joi.string().uuid().required(),
+});
+
+module.exports = { createSchema, updateSchema, settleSchema, paginationSchema, uuidParamSchema };

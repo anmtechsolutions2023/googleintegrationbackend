@@ -43,6 +43,23 @@ const paymentbreakupRoutes = require('../modules/paymentbreakup/paymentbreakup.r
 const transactiontypeRoutes = require('../modules/transactiontype/transactiontype.routes');
 const accounttypebaseRoutes = require('../modules/accounttypebase/accounttypebase.routes');
 
+// POS (Front Desk) modules
+const posfloorRoutes = require('../modules/posfloor/posfloor.routes');
+const postableRoutes = require('../modules/postable/postable.routes');
+const positemmetaRoutes = require('../modules/positemmeta/positemmeta.routes');
+const poschannelRoutes = require('../modules/poschannel/poschannel.routes');
+const posvariantRoutes = require('../modules/posvariant/posvariant.routes');
+const poscustomerRoutes = require('../modules/poscustomer/poscustomer.routes');
+const posorderRoutes = require('../modules/posorder/posorder.routes');
+const poskotRoutes = require('../modules/poskot/poskot.routes');
+const posbillRoutes = require('../modules/posbill/posbill.routes');
+const posonlineorderRoutes = require('../modules/posonlineorder/posonlineorder.routes');
+const posfeedbackRoutes = require('../modules/posfeedback/posfeedback.routes');
+const postokenRoutes = require('../modules/postoken/postoken.routes');
+const posexpenseRoutes = require('../modules/posexpense/posexpense.routes');
+const posstaffRoutes = require('../modules/posstaff/posstaff.routes');
+const posreportRoutes = require('../modules/posreport/posreport.routes');
+
 /**
  * Registers all application routes with the Express app.
  * @param {Object} app - Express application instance.
@@ -177,6 +194,23 @@ const registerRoutes = (app) => {
   // Account Type Base module
   app.use('/api/accounttypebases', accounttypebaseRoutes);
 
+  // ── POS (Front Desk) modules ──
+  app.use('/api/pos/floors', posfloorRoutes);
+  app.use('/api/pos/tables', postableRoutes);
+  app.use('/api/pos/item-meta', positemmetaRoutes);
+  app.use('/api/pos/channels', poschannelRoutes);
+  app.use('/api/pos/variants', posvariantRoutes);
+  app.use('/api/pos/customers', poscustomerRoutes);
+  app.use('/api/pos/orders', posorderRoutes);
+  app.use('/api/pos/kots', poskotRoutes);
+  app.use('/api/pos/bills', posbillRoutes);
+  app.use('/api/pos/online-orders', posonlineorderRoutes);
+  app.use('/api/pos/feedback', posfeedbackRoutes);
+  app.use('/api/pos/tokens', postokenRoutes);
+  app.use('/api/pos/expenses', posexpenseRoutes);
+  app.use('/api/pos/staff', posstaffRoutes);
+  app.use('/api/pos/reports', posreportRoutes);
+
   // Health check / root endpoint
   app.get('/', (req, res) => {
     res.json({
@@ -239,6 +273,21 @@ const registerRoutes = (app) => {
         { name: 'paymentbreakups', path: '/api/paymentbreakups' },
         { name: 'transactiontypes', path: '/api/transactiontypes' },
         { name: 'accounttypebases', path: '/api/accounttypebases' },
+        { name: 'pos-floors', path: '/api/pos/floors' },
+        { name: 'pos-tables', path: '/api/pos/tables' },
+        { name: 'pos-item-meta', path: '/api/pos/item-meta' },
+        { name: 'pos-channels', path: '/api/pos/channels' },
+        { name: 'pos-variants', path: '/api/pos/variants' },
+        { name: 'pos-customers', path: '/api/pos/customers' },
+        { name: 'pos-orders', path: '/api/pos/orders' },
+        { name: 'pos-kots', path: '/api/pos/kots' },
+        { name: 'pos-bills', path: '/api/pos/bills' },
+        { name: 'pos-online-orders', path: '/api/pos/online-orders' },
+        { name: 'pos-feedback', path: '/api/pos/feedback' },
+        { name: 'pos-tokens', path: '/api/pos/tokens' },
+        { name: 'pos-expenses', path: '/api/pos/expenses' },
+        { name: 'pos-staff', path: '/api/pos/staff' },
+        { name: 'pos-reports', path: '/api/pos/reports' },
       ],
     });
   });
