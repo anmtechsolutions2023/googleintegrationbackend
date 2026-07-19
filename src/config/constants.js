@@ -1060,6 +1060,10 @@ module.exports = {
     SUSPENDED: 'SUSPENDED',
     ACTIVATED: 'ACTIVATED',
   },
+  // Canonical POS table statuses — single source of truth shared by the
+  // Joi validation schema and the Swagger docs. The frontend landing page
+  // (occupancy view) color-codes tables by these exact values.
+  POS_TABLE_STATUSES: ['Available', 'Occupied', 'Reserved'],
   AUDIT_CATEGORIES: {
     AUTH:         'AUTH',
     ONBOARDING:   'ONBOARDING',
