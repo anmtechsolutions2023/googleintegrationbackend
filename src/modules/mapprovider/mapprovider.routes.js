@@ -9,8 +9,10 @@ const { auditLogCrud } = require('../../middleware/auditLogger');
 const { SCOPES } = require('../../config/constants');
 const controller = require('./mapprovider.controller');
 
-router.get('/', authenticateToken, auditLogCrud('Map Provider'), ...controller.getAll);
-router.get('/:id', authenticateToken, auditLogCrud('Map Provider'), ...controller.getById);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE), auditLogCrud('Map Provider'), ...controller.getAll);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE), auditLogCrud('Map Provider'), ...controller.getById);
 router.post(
   '/',
   authenticateToken,

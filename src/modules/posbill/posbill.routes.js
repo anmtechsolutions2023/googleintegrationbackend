@@ -14,10 +14,12 @@ const controller = require('./posbill.controller');
 const audit = auditLogCrud('POS Bill', AUDIT_CATEGORIES.POS);
 
 /** GET / — list all POS Bill records for the tenant. */
-router.get('/', authenticateToken, audit, ...controller.getAll);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_BILLING_READ, SCOPES.POS_BILLING_WRITE), audit, ...controller.getAll);
 
 /** GET /:id — get one POS Bill by ID. */
-router.get('/:id', authenticateToken, audit, ...controller.getById);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_BILLING_READ, SCOPES.POS_BILLING_WRITE), audit, ...controller.getById);
 
 /** POST / — create a POS Bill. */
 router.post(

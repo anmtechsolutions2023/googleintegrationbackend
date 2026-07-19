@@ -19,6 +19,7 @@ const taxtypeController = require('./taxtype.controller');
 router.get(
   '/',
   authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE),
   auditLogCrud('Tax Type'),
   ...taxtypeController.getAllTaxTypes
 );
@@ -30,6 +31,7 @@ router.get(
 router.get(
   '/:id',
   authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE),
   auditLogCrud('Tax Type'),
   ...taxtypeController.getTaxTypeById
 );

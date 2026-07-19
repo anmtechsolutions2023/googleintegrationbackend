@@ -4,22 +4,22 @@
 const Joi = require('joi');
 
 // Channels/Variants now come as ChannelIds/VariantIds arrays (synced to the
-// join tables) and price via CostInfoId. The legacy Channels/Prices/Variants/
-// Addons JSON columns are kept optional for backward compatibility.
+// join tables), price via CostInfoId, and food type via FoodTypeId (references
+// the pos_food_type master). The legacy Channels/Prices/Variants JSON columns
+// are kept optional for backward compatibility.
 const uuidArray = Joi.array().items(Joi.string().uuid());
 
 const jsonCol = Joi.alternatives(Joi.object(), Joi.array()).allow(null);
 
 const createSchema = Joi.object({
   ItemDetailId: Joi.string().uuid().required(),
-  FoodType: Joi.string().max(20).trim().required(),
+  FoodTypeId: Joi.string().uuid().required(),
   CostInfoId: Joi.string().uuid().optional().allow(null),
   ChannelIds: uuidArray.optional(),
   VariantIds: uuidArray.optional(),
   Channels: jsonCol.optional(),
   Prices: jsonCol.optional(),
   Variants: jsonCol.optional(),
-  Addons: jsonCol.optional(),
   BranchDetailId: Joi.string().uuid().required(),
   Active: Joi.boolean().optional().default(true),
   // Read-only fields the client may echo back on edit; ignored server-side.
@@ -28,14 +28,13 @@ const createSchema = Joi.object({
 
 const updateSchema = Joi.object({
   ItemDetailId: Joi.string().uuid().optional(),
-  FoodType: Joi.string().max(20).trim().optional(),
+  FoodTypeId: Joi.string().uuid().optional(),
   CostInfoId: Joi.string().uuid().optional().allow(null),
   ChannelIds: uuidArray.optional(),
   VariantIds: uuidArray.optional(),
   Channels: jsonCol.optional(),
   Prices: jsonCol.optional(),
   Variants: jsonCol.optional(),
-  Addons: jsonCol.optional(),
   BranchDetailId: Joi.string().uuid().optional(),
   Active: Joi.boolean().optional(),
   // Read-only fields the client may echo back on edit; ignored server-side.

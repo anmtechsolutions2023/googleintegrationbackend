@@ -9,8 +9,10 @@ const { auditLogCrud } = require('../../middleware/auditLogger');
 const { SCOPES } = require('../../config/constants');
 const controller = require('./batchdetail.controller');
 
-router.get('/', authenticateToken, auditLogCrud('Batch Detail'), ...controller.getAll);
-router.get('/:id', authenticateToken, auditLogCrud('Batch Detail'), ...controller.getById);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.INVENTORY_READ, SCOPES.INVENTORY_WRITE), auditLogCrud('Batch Detail'), ...controller.getAll);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.INVENTORY_READ, SCOPES.INVENTORY_WRITE), auditLogCrud('Batch Detail'), ...controller.getById);
 router.post(
   '/',
   authenticateToken,

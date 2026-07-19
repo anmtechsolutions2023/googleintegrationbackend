@@ -832,6 +832,7 @@ DROP TABLE IF EXISTS pos_item_meta_variant;
 DROP TABLE IF EXISTS pos_item_meta;
 DROP TABLE IF EXISTS pos_channel;
 DROP TABLE IF EXISTS pos_variant;
+DROP TABLE IF EXISTS pos_food_type;
 DROP TABLE IF EXISTS pos_table;
 DROP TABLE IF EXISTS pos_floor;
 DROP TABLE IF EXISTS pos_customer;
@@ -914,19 +915,38 @@ CREATE TABLE pos_variant (
     UNIQUE (Code, TenantId)
 );
 
+-- 4.4b pos_food_type — CRUD-managed food type master (Veg / Non-Veg / Vegan / …).
+-- Replaces the previously hardcoded veg/nonveg/vegan enum. IsVeg drives the
+-- veg/non-veg badge rendered on the Billing menu grid.
+CREATE TABLE pos_food_type (
+    Id              VARCHAR(50)   NOT NULL,
+    Name            VARCHAR(100)  NOT NULL,
+    Code            VARCHAR(50)   NOT NULL,
+    Description     VARCHAR(255)  NULL,
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    IsVeg           TINYINT(1)    NOT NULL DEFAULT 0,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Code, TenantId)
+);
+
 -- 4.5 pos_item_meta — POS-only extensions for a master itemdetail record.
 -- Channels/Variants live in normalized join tables; price references a costinfo
--- master row via CostInfoId. Legacy JSON columns kept (NULLable) for backward
--- compat with Billing's price fallback.
+-- master row via CostInfoId; FoodType references the pos_food_type master.
+-- Legacy JSON columns kept (NULLable) for backward compat with Billing's price fallback.
 CREATE TABLE pos_item_meta (
     Id              VARCHAR(50)   NOT NULL,
     ItemDetailId    VARCHAR(50)   NOT NULL,
-    FoodType        VARCHAR(20)   NOT NULL,
+    FoodTypeId      VARCHAR(50)   NOT NULL,
     CostInfoId      VARCHAR(50)   NULL,
     Channels        JSON          NULL,
     Prices          JSON          NULL,
     Variants        JSON          NULL,
-    Addons          JSON          NULL,
     BranchDetailId  VARCHAR(50)   NOT NULL,
     TenantId        VARCHAR(50)   NOT NULL,
     Active          TINYINT(1)    NOT NULL,
@@ -937,6 +957,7 @@ CREATE TABLE pos_item_meta (
     PRIMARY KEY (Id),
     UNIQUE (ItemDetailId, BranchDetailId, TenantId),
     FOREIGN KEY (ItemDetailId)   REFERENCES itemdetail(Id),
+    FOREIGN KEY (FoodTypeId)     REFERENCES pos_food_type(Id),
     FOREIGN KEY (CostInfoId)     REFERENCES costinfo(Id)
 );
 

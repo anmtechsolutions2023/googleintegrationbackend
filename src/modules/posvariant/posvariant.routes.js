@@ -14,10 +14,12 @@ const controller = require('./posvariant.controller');
 const audit = auditLogCrud('POS Variant', AUDIT_CATEGORIES.POS);
 
 /** GET / — list all POS Variant records for the tenant. */
-router.get('/', authenticateToken, audit, ...controller.getAll);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CONFIG_READ, SCOPES.POS_CONFIG_WRITE), audit, ...controller.getAll);
 
 /** GET /:id — get one POS Variant by ID. */
-router.get('/:id', authenticateToken, audit, ...controller.getById);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CONFIG_READ, SCOPES.POS_CONFIG_WRITE), audit, ...controller.getById);
 
 /** POST / — create a POS Variant. */
 router.post(

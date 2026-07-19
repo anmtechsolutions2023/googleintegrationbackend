@@ -49,6 +49,7 @@ const postableRoutes = require('../modules/postable/postable.routes');
 const positemmetaRoutes = require('../modules/positemmeta/positemmeta.routes');
 const poschannelRoutes = require('../modules/poschannel/poschannel.routes');
 const posvariantRoutes = require('../modules/posvariant/posvariant.routes');
+const posfoodtypeRoutes = require('../modules/posfoodtype/posfoodtype.routes');
 const poscustomerRoutes = require('../modules/poscustomer/poscustomer.routes');
 const posorderRoutes = require('../modules/posorder/posorder.routes');
 const poskotRoutes = require('../modules/poskot/poskot.routes');
@@ -200,6 +201,7 @@ const registerRoutes = (app) => {
   app.use('/api/pos/item-meta', positemmetaRoutes);
   app.use('/api/pos/channels', poschannelRoutes);
   app.use('/api/pos/variants', posvariantRoutes);
+  app.use('/api/pos/food-types', posfoodtypeRoutes);
   app.use('/api/pos/customers', poscustomerRoutes);
   app.use('/api/pos/orders', posorderRoutes);
   app.use('/api/pos/kots', poskotRoutes);
@@ -278,6 +280,7 @@ const registerRoutes = (app) => {
         { name: 'pos-item-meta', path: '/api/pos/item-meta' },
         { name: 'pos-channels', path: '/api/pos/channels' },
         { name: 'pos-variants', path: '/api/pos/variants' },
+        { name: 'pos-food-types', path: '/api/pos/food-types' },
         { name: 'pos-customers', path: '/api/pos/customers' },
         { name: 'pos-orders', path: '/api/pos/orders' },
         { name: 'pos-kots', path: '/api/pos/kots' },

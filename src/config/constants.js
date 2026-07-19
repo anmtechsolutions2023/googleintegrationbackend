@@ -785,26 +785,39 @@ module.exports = {
       DELETE: 'DELETE FROM pos_variant WHERE Id = ? AND TenantId = ?',
     },
 
+    POS_FOOD_TYPE: {
+      SELECT_ALL: 'SELECT * FROM pos_food_type WHERE TenantId = ? ORDER BY SortOrder ASC, CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_food_type WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_food_type WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_food_type (Id, TenantId, Name, Code, Description, SortOrder, IsVeg, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_food_type SET Name = ?, Code = ?, Description = ?, SortOrder = ?, IsVeg = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_food_type WHERE Id = ? AND TenantId = ?',
+    },
+
     POS_ITEM_META: {
       // SELECT_ALL/SELECT_BY_ID aggregate linked channel/variant ids and the
       // linked costinfo amount so the client can pre-select and price.
       SELECT_ALL: `SELECT im.*,
           (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c WHERE c.ItemMetaId = im.Id) AS ChannelIds,
           (SELECT JSON_ARRAYAGG(v.VariantId) FROM pos_item_meta_variant v WHERE v.ItemMetaId = im.Id) AS VariantIds,
-          ci.Amount AS CostInfoAmount
+          ci.Amount AS CostInfoAmount,
+          ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg
         FROM pos_item_meta im
         LEFT JOIN costinfo ci ON ci.Id = im.CostInfoId
+        LEFT JOIN pos_food_type ft ON ft.Id = im.FoodTypeId
         WHERE im.TenantId = ? ORDER BY im.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM pos_item_meta WHERE TenantId = ?',
       SELECT_BY_ID: `SELECT im.*,
           (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c WHERE c.ItemMetaId = im.Id) AS ChannelIds,
           (SELECT JSON_ARRAYAGG(v.VariantId) FROM pos_item_meta_variant v WHERE v.ItemMetaId = im.Id) AS VariantIds,
-          ci.Amount AS CostInfoAmount
+          ci.Amount AS CostInfoAmount,
+          ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg
         FROM pos_item_meta im
         LEFT JOIN costinfo ci ON ci.Id = im.CostInfoId
+        LEFT JOIN pos_food_type ft ON ft.Id = im.FoodTypeId
         WHERE im.Id = ? AND im.TenantId = ?`,
-      INSERT: 'INSERT INTO pos_item_meta (Id, TenantId, ItemDetailId, FoodType, CostInfoId, Channels, Prices, Variants, Addons, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_item_meta SET ItemDetailId = ?, FoodType = ?, CostInfoId = ?, Channels = ?, Prices = ?, Variants = ?, Addons = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_item_meta (Id, TenantId, ItemDetailId, FoodTypeId, CostInfoId, Channels, Prices, Variants, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_item_meta SET ItemDetailId = ?, FoodTypeId = ?, CostInfoId = ?, Channels = ?, Prices = ?, Variants = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_item_meta WHERE Id = ? AND TenantId = ?',
       // Join-table sync helpers (channels + variants)
       DELETE_CHANNEL_LINKS: 'DELETE FROM pos_item_meta_channel WHERE ItemMetaId = ? AND TenantId = ?',

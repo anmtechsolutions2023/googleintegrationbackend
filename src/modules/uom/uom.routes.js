@@ -15,13 +15,15 @@ const uomController = require('./uom.controller');
  * GET /api/uom
  * Get all UOMs for the authenticated user's tenant.
  */
-router.get('/', authenticateToken, auditLogCrud('Unit of Measure'), ...uomController.getAllUom);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE), auditLogCrud('Unit of Measure'), ...uomController.getAllUom);
 
 /**
  * GET /api/uom/:id
  * Get a specific UOM by ID.
  */
-router.get('/:id', authenticateToken, auditLogCrud('Unit of Measure'), ...uomController.getUomById);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE), auditLogCrud('Unit of Measure'), ...uomController.getUomById);
 
 /**
  * POST /api/uom

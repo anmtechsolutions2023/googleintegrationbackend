@@ -25,11 +25,12 @@ router.get(
 
 /**
  * GET /api/data/general
- * Requires only authentication.
+ * Requires TENANT:ADMIN scope.
  */
 router.get(
   '/general',
   authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN),
   auditLog(AUDIT_CATEGORIES.GENERAL, 'DEBUG', AUDIT_ACTIONS.VIEW_GENERAL_DATA),
   dataController.getGeneralData
 );

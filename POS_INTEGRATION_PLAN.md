@@ -22,7 +22,7 @@ platform. The current master-data modules become the backend support portal for 
 4. **Branch-scoped:** every `pos_*` table carries `BranchId`; every query filters by the
    cashier's branch (resolved via existing `branchusergroupmapper`).
 5. Menu items: **reuse `itemdetail`** for the item core + a linked **`pos_item_meta`** table for
-   POS-only fields (channels, per-channel prices, foodType, variants, addons).
+   POS-only fields (channels, per-channel prices, food type, variants).
 6. Every new endpoint is **audit-logged**; full **IAM** (features/roles/permissions/scopes) for
    POS following the existing category×READ/WRITE pattern; all new code follows **SOLID**.
 
@@ -46,7 +46,7 @@ platform. The current master-data modules become the backend support portal for 
 Every table: `Id VARCHAR(50)` UUID PK, `TenantId`, `BranchId`, `Active`, 4 audit columns,
 `UNIQUE(..., TenantId)`, FKs.
 - `pos_floor`, `pos_table` (FK floor)
-- `pos_item_meta` (FK `itemdetail.Id`; channels, per-channel prices, foodType, variants, addons)
+- `pos_item_meta` (FK `itemdetail.Id`; FK `pos_food_type.Id`; channels, per-channel prices, variants)
 - `pos_order`, `pos_order_item` (FK `itemdetail`)
 - `pos_kot`
 - `pos_bill`, `pos_bill_payment` (FK `paymentmode`)

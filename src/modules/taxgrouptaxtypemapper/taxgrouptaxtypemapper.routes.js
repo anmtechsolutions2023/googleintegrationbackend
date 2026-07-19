@@ -9,8 +9,10 @@ const { auditLogCrud } = require('../../middleware/auditLogger');
 const { SCOPES } = require('../../config/constants');
 const controller = require('./taxgrouptaxtypemapper.controller');
 
-router.get('/', authenticateToken, auditLogCrud('Tax Group Tax Type Mapper'), ...controller.getAll);
-router.get('/:id', authenticateToken, auditLogCrud('Tax Group Tax Type Mapper'), ...controller.getById);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE), auditLogCrud('Tax Group Tax Type Mapper'), ...controller.getAll);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE), auditLogCrud('Tax Group Tax Type Mapper'), ...controller.getById);
 router.post(
   '/',
   authenticateToken,

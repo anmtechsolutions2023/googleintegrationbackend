@@ -92,6 +92,40 @@ const validateUuidParam = (paramName) => {
 };
 
 /**
+ * Middleware to validate a string identifier parameter.
+ * Use for entity IDs stored as VARCHAR/CHAR string primary keys that are NOT
+ * strict UUIDs (e.g. roles.id, features.feature_id use prefixed identifiers
+ * like 'r0000001-iam0-...'). See database/01-schema-definition.sql.
+ * @param {string} paramName - Name of the parameter to validate (e.g., 'roleId').
+ * @returns {Function} Express middleware function.
+ * @example
+ * router.get('/:roleId', validateIdParam('roleId'), controller.getById);
+ */
+const validateIdParam = (paramName) => {
+  const schema = Joi.object({
+    [paramName]: Joi.string().trim().min(1).max(50).required(),
+  });
+
+  return (req, res, next) => {
+    const { error } = schema.validate(req.params);
+    if (error) {
+      logger.warn('ID parameter validation failed', {
+        param: paramName,
+        value: req.params[paramName],
+        error: error.details,
+      });
+      return next(
+        new HttpError(
+          `${MESSAGES.ERROR.VALIDATION_ERROR}${error.details[0].message}`,
+          MESSAGES.HTTP_STATUS.BAD_REQUEST
+        )
+      );
+    }
+    next();
+  };
+};
+
+/**
  * Middleware to validate multiple UUID parameters.
  * @param {...string} paramNames - Names of parameters to validate.
  * @returns {Function} Express middleware function.
@@ -157,4 +191,5 @@ module.exports = {
   validateParams,
   validateUuidParam,
   validateUuidParams,
+  validateIdParam,
 };

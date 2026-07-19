@@ -9,8 +9,10 @@ const { auditLogCrud } = require('../../middleware/auditLogger');
 const { SCOPES, AUDIT_CATEGORIES } = require('../../config/constants');
 const controller = require('./contactaddresstype.controller');
 
-router.get('/', authenticateToken, auditLogCrud('Contact Address Type'), ...controller.getAll);
-router.get('/:id', authenticateToken, auditLogCrud('Contact Address Type'), ...controller.getById);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE, SCOPES.CONTACTS_READ, SCOPES.CONTACTS_WRITE), auditLogCrud('Contact Address Type'), ...controller.getAll);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE, SCOPES.CONTACTS_READ, SCOPES.CONTACTS_WRITE), auditLogCrud('Contact Address Type'), ...controller.getById);
 router.post(
   '/',
   authenticateToken,

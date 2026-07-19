@@ -9,8 +9,10 @@ const { auditLogCrud } = require('../../middleware/auditLogger');
 const { SCOPES } = require('../../config/constants');
 const controller = require('./transactiontypeconversionmapper.controller');
 
-router.get('/', authenticateToken, auditLogCrud('Transaction Type Conversion Mapper'), ...controller.getAll);
-router.get('/:id', authenticateToken, auditLogCrud('Transaction Type Conversion Mapper'), ...controller.getById);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.TRANSACTIONS_READ, SCOPES.TRANSACTIONS_WRITE), auditLogCrud('Transaction Type Conversion Mapper'), ...controller.getAll);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.TRANSACTIONS_READ, SCOPES.TRANSACTIONS_WRITE), auditLogCrud('Transaction Type Conversion Mapper'), ...controller.getById);
 router.post(
   '/',
   authenticateToken,

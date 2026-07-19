@@ -41,8 +41,8 @@ const POS_MODULES = MODULE_REGISTRY.filter((m) => m.name.startsWith('pos'));
 beforeEach(() => jest.clearAllMocks());
 
 describe('POS module registry', () => {
-  it('registers all 14 POS modules', () => {
-    expect(POS_MODULES).toHaveLength(14);
+  it('registers all 15 POS modules', () => {
+    expect(POS_MODULES).toHaveLength(15);
   });
 });
 
@@ -318,15 +318,14 @@ describe('POS updated schema rules', () => {
 
   it('positemmeta: NOT NULL columns are required on create', () => {
     const { createSchema } = require('../../modules/positemmeta/positemmeta.schemas');
-    // Missing FoodType/Channels/Prices/Variants/Addons/BranchDetailId → error.
+    // Missing FoodTypeId/BranchDetailId → error.
     expect(createSchema.validate({ ItemDetailId: RECORD_ID }).error).toBeDefined();
     const valid = {
       ItemDetailId: RECORD_ID,
-      FoodType: 'veg',
+      FoodTypeId: RECORD_ID,
       Channels: { dinein: true },
       Prices: { dinein: 100 },
       Variants: [],
-      Addons: [],
       BranchDetailId: RECORD_ID,
     };
     expect(createSchema.validate(valid).error).toBeUndefined();

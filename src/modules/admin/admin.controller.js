@@ -7,7 +7,7 @@ const {
   noContentResponse,
   paginatedResponse,
 } = require('../../utils/responseHelper');
-const { validateBody, validateQuery, validateUuidParam } = require('../../middleware/validation');
+const { validateBody, validateQuery, validateUuidParam, validateIdParam } = require('../../middleware/validation');
 const service = require('./admin.service');
 const schemas = require('./admin.schemas');
 const MESSAGES = require('../../config/messages');
@@ -198,7 +198,7 @@ const createRole = [
 ];
 
 const updateRole = [
-  validateUuidParam('roleId'),
+  validateIdParam('roleId'),
   validateBody(schemas.updateRoleSchema),
   asyncHandler(async (req, res) => {
     const { userEmail, tenantId } = extractUserContext(req);
@@ -213,7 +213,7 @@ const updateRole = [
 ];
 
 const deleteRole = [
-  validateUuidParam('roleId'),
+  validateIdParam('roleId'),
   asyncHandler(async (req, res) => {
     const { userEmail, tenantId } = extractUserContext(req);
     await service.deleteRole(req.params.roleId, tenantId);
@@ -227,7 +227,7 @@ const deleteRole = [
 ];
 
 const getRolePermissions = [
-  validateUuidParam('roleId'),
+  validateIdParam('roleId'),
   asyncHandler(async (req, res) => {
     const permissions = await service.getRolePermissions(req.params.roleId);
     successResponse(res, 'Role permissions retrieved', permissions);
@@ -235,7 +235,7 @@ const getRolePermissions = [
 ];
 
 const setRolePermissions = [
-  validateUuidParam('roleId'),
+  validateIdParam('roleId'),
   validateBody(schemas.updateRolePermissionsSchema),
   asyncHandler(async (req, res) => {
     const { userEmail, tenantId } = extractUserContext(req);
@@ -273,7 +273,7 @@ const createFeature = [
 ];
 
 const updateFeature = [
-  validateUuidParam('featureId'),
+  validateIdParam('featureId'),
   validateBody(schemas.updateFeatureSchema),
   asyncHandler(async (req, res) => {
     const { userEmail, tenantId } = extractUserContext(req);
@@ -288,7 +288,7 @@ const updateFeature = [
 ];
 
 const deleteFeature = [
-  validateUuidParam('featureId'),
+  validateIdParam('featureId'),
   asyncHandler(async (req, res) => {
     const { userEmail, tenantId } = extractUserContext(req);
     await service.deleteFeature(req.params.featureId);

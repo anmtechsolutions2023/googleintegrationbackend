@@ -9,8 +9,10 @@ const { auditLogCrud } = require('../../middleware/auditLogger');
 const { SCOPES } = require('../../config/constants');
 const controller = require('./paymentmodetransactiondetail.controller');
 
-router.get('/', authenticateToken, auditLogCrud('Payment Mode Transaction Detail'), ...controller.getAll);
-router.get('/:id', authenticateToken, auditLogCrud('Payment Mode Transaction Detail'), ...controller.getById);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.PAYMENTS_READ, SCOPES.PAYMENTS_WRITE), auditLogCrud('Payment Mode Transaction Detail'), ...controller.getAll);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.PAYMENTS_READ, SCOPES.PAYMENTS_WRITE), auditLogCrud('Payment Mode Transaction Detail'), ...controller.getById);
 router.post(
   '/',
   authenticateToken,

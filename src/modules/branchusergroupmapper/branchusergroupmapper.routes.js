@@ -9,8 +9,10 @@ const { auditLogCrud } = require('../../middleware/auditLogger');
 const { SCOPES } = require('../../config/constants');
 const controller = require('./branchusergroupmapper.controller');
 
-router.get('/', authenticateToken, auditLogCrud('Branch User Group Mapper'), ...controller.getAll);
-router.get('/:id', authenticateToken, auditLogCrud('Branch User Group Mapper'), ...controller.getById);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.ORGANIZATION_READ, SCOPES.ORGANIZATION_WRITE), auditLogCrud('Branch User Group Mapper'), ...controller.getAll);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.ORGANIZATION_READ, SCOPES.ORGANIZATION_WRITE), auditLogCrud('Branch User Group Mapper'), ...controller.getById);
 router.post(
   '/',
   authenticateToken,

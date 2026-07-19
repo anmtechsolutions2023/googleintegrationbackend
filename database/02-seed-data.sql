@@ -476,6 +476,26 @@ WHERE r.name IN ('SUPER_ADMIN','TENANT_ADMIN')
       ('POS_CONFIG','POS_ORDER','POS_KITCHEN','POS_BILLING','POS_CRM','POS_OPS','POS_REPORTS');
 
 -- =============================================================================
+-- PART 8b — Preserve pre-gating read access
+-- =============================================================================
+-- Read (GET) endpoints used to be open to any authenticated user. They are now
+-- each gated by their category *_READ (or *_WRITE) scope. To preserve existing
+-- access, grant every role the READ feature for each previously-open category so
+-- current flows (e.g. POS Billing reading items/branches/menu) keep working.
+-- POS_REPORTS is intentionally excluded — its read was already gated before.
+-- Admins can revoke any of these per-role from the IAM dashboard afterwards.
+-- NOTE: users must re-login to pick up the new scopes in their JWT.
+INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
+SELECT UUID(), r.id, f.feature_id
+FROM roles r
+CROSS JOIN features f
+WHERE r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
+  AND f.scope = 'READ'
+  AND f.feature_short_name IN
+      ('MASTER_DATA','ORGANIZATION','TRANSACTIONS','INVENTORY','CONTACTS','PAYMENTS',
+       'POS_CONFIG','POS_ORDER','POS_KITCHEN','POS_BILLING','POS_CRM','POS_OPS');
+
+-- =============================================================================
 -- VERIFICATION QUERIES — run these manually after seeding to confirm correctness
 -- =============================================================================
 

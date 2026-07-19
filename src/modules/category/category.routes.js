@@ -18,6 +18,7 @@ const categoryController = require('./category.controller');
 router.get(
   '/',
   authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE),
   auditLogCrud('Category'),
   ...categoryController.getAllCategories
 );
@@ -29,6 +30,7 @@ router.get(
 router.get(
   '/:id',
   authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE),
   auditLogCrud('Category'),
   ...categoryController.getCategoryById
 );

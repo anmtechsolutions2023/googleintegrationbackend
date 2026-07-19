@@ -14,10 +14,12 @@ const controller = require('./posfeedback.controller');
 const audit = auditLogCrud('POS Feedback', AUDIT_CATEGORIES.POS);
 
 /** GET / — list all POS Feedback records for the tenant. */
-router.get('/', authenticateToken, audit, ...controller.getAll);
+router.get('/', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE), audit, ...controller.getAll);
 
 /** GET /:id — get one POS Feedback by ID. */
-router.get('/:id', authenticateToken, audit, ...controller.getById);
+router.get('/:id', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE), audit, ...controller.getById);
 
 /** POST / — create a POS Feedback. */
 router.post(

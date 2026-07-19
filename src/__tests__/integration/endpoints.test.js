@@ -82,10 +82,18 @@ const adminToken = () =>
     TEST_SECRET
   );
 
+// A VIEWER carries READ on every previously-open category (matches the
+// role_permissions seed) so it can read but not write.
+const VIEWER_READ_SCOPES = [
+  'MASTER_DATA:READ', 'ORGANIZATION:READ', 'TRANSACTIONS:READ',
+  'INVENTORY:READ', 'CONTACTS:READ', 'PAYMENTS:READ',
+  'POS_CONFIG:READ', 'POS_ORDER:READ', 'POS_KITCHEN:READ',
+  'POS_BILLING:READ', 'POS_CRM:READ', 'POS_OPS:READ',
+];
 const viewerToken = () =>
   'Bearer ' +
   jwt.sign(
-    { tid: TENANT_ID, email: 'viewer@test.com', scopes: ['TENANT:VIEWER'] },
+    { tid: TENANT_ID, email: 'viewer@test.com', scopes: ['TENANT:VIEWER', ...VIEWER_READ_SCOPES] },
     TEST_SECRET
   );
 
@@ -421,7 +429,8 @@ const MODULES = [
   // ─── POS (Front Desk) modules ───
   { path: '/api/pos/floors', body: { Name: 'Main Dining', Active: true } },
   { path: '/api/pos/tables', body: { Name: 'Table 1', Active: true }, updateBody: { Status: 'occupied' } },
-  { path: '/api/pos/item-meta', body: { ItemDetailId: UUID_1, FoodType: 'veg', Channels: { dinein: true }, Prices: { dinein: 100 }, Variants: [], Addons: [], BranchDetailId: UUID_1, Active: true }, updateBody: { FoodType: 'nonveg' } },
+  { path: '/api/pos/food-types', body: { Name: 'Veg', Code: 'veg', IsVeg: true, Active: true }, updateBody: { Name: 'Non-Veg' } },
+  { path: '/api/pos/item-meta', body: { ItemDetailId: UUID_1, FoodTypeId: UUID_1, Channels: { dinein: true }, Prices: { dinein: 100 }, Variants: [], BranchDetailId: UUID_1, Active: true }, updateBody: { FoodTypeId: UUID_1 } },
   { path: '/api/pos/customers', body: { Name: 'Rahul Verma', Phone: '9876543210', Active: true } },
   { path: '/api/pos/orders', body: { OrderNo: 'ORD-1', Active: true }, updateBody: { Status: 'closed' } },
   { path: '/api/pos/kots', body: { KotNo: 'KOT-1', Active: true }, updateBody: { Status: 'ready' } },
@@ -1393,6 +1402,26 @@ describe('Admin IAM endpoints — role management', () => {
       .send({ name: 'Editor', description: 'Can edit records' });
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
+  });
+});
+
+describe('Admin IAM endpoints — role permissions with non-UUID roleId', () => {
+  // roles.id is a VARCHAR(50) prefixed identifier (e.g. 'r0000001-iam0-...'),
+  // NOT a strict UUID. The route must accept it, not reject with a 400.
+  it('GET /api/admin/roles/:roleId/permissions — prefixed string id → not 400', async () => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    mockConnection.query.mockImplementation(defaultQueryImpl);
+    const res = await request(app)
+      .get('/api/admin/roles/r0000001-iam0-0000-0000-000000000001/permissions')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).not.toBe(400);
+  });
+
+  it('GET /api/admin/roles/:roleId/permissions — empty-ish id still validated', async () => {
+    const res = await request(app)
+      .get('/api/admin/roles/%20/permissions')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(400);
   });
 });
 
