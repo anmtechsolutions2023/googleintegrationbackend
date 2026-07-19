@@ -99,6 +99,20 @@ const rejectOnboarding = [
   }),
 ];
 
+const reopenOnboarding = [
+  validateUuidParam('id'),
+  asyncHandler(async (req, res) => {
+    const { userEmail: email, tenantId } = extractUserContext(req);
+    await service.reopenRequest(req.params.id, email);
+
+    await captureAudit(req, tenantId, email,
+      'ONBOARDING_REOPENED', STATUSES.UPDATED,
+      AUDIT_CATEGORIES.ONBOARDING, 'INFO', req.params.id);
+
+    successResponse(res, MESSAGES.SUCCESS.ONBOARDING_REOPENED);
+  }),
+];
+
 // ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
 
 const listUsers = [
@@ -308,6 +322,7 @@ module.exports = {
   listOnboarding,
   approveOnboarding,
   rejectOnboarding,
+  reopenOnboarding,
   listUsers,
   getUserDetail,
   getUserRoles,

@@ -98,6 +98,28 @@ const rejectRequest = (requestId, reason, reviewerEmail) =>
     ]);
   });
 
+// Reopen a previously REJECTED request, returning it to PENDING for another review.
+// Only REJECTED requests can be reopened; the prior review metadata is cleared.
+const reopenRequest = (requestId, reviewerEmail) =>
+  withConnection(async (conn) => {
+    const [reqRows] = await conn.execute(
+      'SELECT * FROM onboarding_requests WHERE id = ? AND status = "REJECTED"',
+      [requestId]
+    );
+    if (reqRows.length === 0) {
+      throw new HttpError('Rejected onboarding request not found.', 404);
+    }
+    await conn.execute(
+      `UPDATE onboarding_requests
+         SET status = 'PENDING', rejection_reason = NULL,
+             reviewed_by = NULL, reviewed_at = NULL, tenant_id = NULL,
+             updated_at = NOW()
+       WHERE id = ?`,
+      [requestId]
+    );
+    void reviewerEmail; // reviewer captured via audit log, not persisted on the row
+  });
+
 // ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
 
 const listUsers = (tenantId, page = 1, limit = 20) =>
@@ -293,6 +315,7 @@ module.exports = {
   listOnboardingRequests,
   approveRequest,
   rejectRequest,
+  reopenRequest,
   listUsers,
   getUserDetail,
   getUserRoles,

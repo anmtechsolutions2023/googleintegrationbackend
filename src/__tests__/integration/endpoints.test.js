@@ -111,6 +111,14 @@ const guestToken = () =>
     TEST_SECRET
   );
 
+// Read-only business user granted the new AUDIT:READ scope (no admin:access).
+const auditReadToken = () =>
+  'Bearer ' +
+  jwt.sign(
+    { tid: TENANT_ID, email: 'auditor@test.com', scopes: [...VIEWER_READ_SCOPES, 'AUDIT:READ'] },
+    TEST_SECRET
+  );
+
 // Shared mock row returned by SELECT queries.
 // Contains every field referenced across all 31 module services.
 const MOCK_ROW = {
@@ -1115,6 +1123,34 @@ describe('Root health check', () => {
 // AUDIT LOGGER MIDDLEWARE
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe('Audit routes — AUDIT:READ / admin:access gating', () => {
+  ['/api/audit/logs', '/api/audit/categories'].forEach((p) => {
+    it(`GET ${p} — no token → 401`, async () => {
+      const res = await request(app).get(p);
+      expect(res.status).toBe(401);
+    });
+
+    it(`GET ${p} — read-only user without AUDIT:READ → 403`, async () => {
+      const res = await request(app).get(p).set('Authorization', viewerToken());
+      expect(res.status).toBe(403);
+    });
+
+    it(`GET ${p} — AUDIT:READ token → not 403/401`, async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      mockConnection.query.mockImplementation(defaultQueryImpl);
+      const res = await request(app).get(p).set('Authorization', auditReadToken());
+      expect(res.status).toBe(200);
+    });
+
+    it(`GET ${p} — admin:access token still allowed → 200`, async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      mockConnection.query.mockImplementation(defaultQueryImpl);
+      const res = await request(app).get(p).set('Authorization', iamAdminToken());
+      expect(res.status).toBe(200);
+    });
+  });
+});
+
 describe('Audit logger middleware', () => {
   it('should call db.execute for audit logging after authenticated POST', async () => {
     const db = require('../../config/db');
@@ -1716,6 +1752,75 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
       .send({ rejectionReason: 'Not eligible at this time' });
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+  });
+});
+
+describe('Admin IAM — PUT /api/admin/onboarding/:id/reopen', () => {
+  it('no token → 401', async () => {
+    const res = await request(app).put(`/api/admin/onboarding/${RECORD_ID}/reopen`);
+    expect(res.status).toBe(401);
+  });
+
+  it('no admin:access scope → 403', async () => {
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/reopen`)
+      .set('Authorization', adminToken());
+    expect(res.status).toBe(403);
+  });
+
+  it('invalid UUID in :id → 400', async () => {
+    const res = await request(app)
+      .put('/api/admin/onboarding/not-a-uuid/reopen')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('no REJECTED request found → 404', async () => {
+    mockConnection.execute.mockResolvedValueOnce([[]]); // no REJECTED row
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/reopen`)
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(404);
+  });
+
+  it('valid reopen of a rejected request → 200', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', status: 'REJECTED' }]]) // rejected row found
+      .mockResolvedValueOnce([[{ affectedRows: 1 }]]); // UPDATE back to PENDING
+    const res = await request(app)
+      .put(`/api/admin/onboarding/${RECORD_ID}/reopen`)
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+describe('Admin IAM — onboarding list status filter', () => {
+  it('status=ALL returns rows without a status filter (no 400)', async () => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    mockConnection.query.mockImplementation(defaultQueryImpl);
+    const res = await request(app)
+      .get('/api/admin/onboarding?status=ALL')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('status=CANCELLED is accepted (no 400)', async () => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    mockConnection.query.mockImplementation(defaultQueryImpl);
+    const res = await request(app)
+      .get('/api/admin/onboarding?status=CANCELLED')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(200);
+  });
+
+  it('unknown status → 400', async () => {
+    const res = await request(app)
+      .get('/api/admin/onboarding?status=BOGUS')
+      .set('Authorization', iamAdminToken());
+    expect(res.status).toBe(400);
   });
 });
 

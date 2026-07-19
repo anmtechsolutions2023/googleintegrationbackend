@@ -6,13 +6,14 @@ const { authenticateToken, checkScope } = require('../../middleware/authMiddlewa
 const { SCOPES } = require('../../config/constants');
 const auditController = require('./audit.controller');
 
-// Audit logs are sensitive — restricted to IAM admins (admin:access).
-const adminAccess = checkScope(SCOPES.ADMIN_ACCESS);
+// Audit logs are viewable by users granted AUDIT:READ (e.g. read-only business
+// roles) as well as IAM admins (admin:access, who retain access).
+const auditRead = checkScope(SCOPES.AUDIT_READ, SCOPES.ADMIN_ACCESS);
 
 // GET /api/audit/logs  — tier-aware log retrieval
-router.get('/logs', authenticateToken, adminAccess, auditController.getAuditLogs);
+router.get('/logs', authenticateToken, auditRead, auditController.getAuditLogs);
 
 // GET /api/audit/categories  — valid category list for filter dropdowns
-router.get('/categories', authenticateToken, adminAccess, auditController.getCategories);
+router.get('/categories', authenticateToken, auditRead, auditController.getCategories);
 
 module.exports = router;

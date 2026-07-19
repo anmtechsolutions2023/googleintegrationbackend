@@ -1053,6 +1053,7 @@ module.exports = {
     ONBOARDING_ATTEMPT: 'ONBOARDING_ATTEMPT',
     ONBOARDING_APPROVED: 'ONBOARDING_APPROVED',
     ONBOARDING_REJECTED: 'ONBOARDING_REJECTED',
+    ONBOARDING_REOPENED: 'ONBOARDING_REOPENED',
     CREATED: 'CREATED',
     UPDATED: 'UPDATED',
     DELETED: 'DELETED',
@@ -1090,6 +1091,7 @@ module.exports = {
     VIEW_ONBOARDING:          'Viewed pending onboarding requests',
     APPROVE_ONBOARDING:       'Approved onboarding request',
     REJECT_ONBOARDING:        'Rejected onboarding request',
+    REOPEN_ONBOARDING:        'Reopened rejected onboarding request',
     // User management
     VIEW_USERS:               'Viewed user list',
     VIEW_USER_DETAIL:         'Viewed user details',
@@ -1134,6 +1136,7 @@ module.exports = {
     BILLING_WRITE: 'billing:WRITE',
     GUEST_EXPLORE: 'guest:explore',
     ADMIN_ACCESS: 'admin:access',
+    AUDIT_READ: 'AUDIT:READ',
     // Feature-category scopes (granted via IAM roles → role_permissions → features)
     MASTER_DATA_READ: 'MASTER_DATA:READ',
     MASTER_DATA_WRITE: 'MASTER_DATA:WRITE',

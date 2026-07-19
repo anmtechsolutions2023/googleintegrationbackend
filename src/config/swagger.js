@@ -1652,7 +1652,7 @@ const swaggerSpec = {
         tags: ['Admin — Onboarding'], summary: 'List onboarding requests (short URL)', security,
         parameters: [
           ...paginationParams,
-          { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'APPROVED', 'REJECTED', 'ALL'], default: 'PENDING' } },
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'ALL'], default: 'PENDING' } },
         ],
         responses: { ...paginatedResponse('OnboardingRequest'), ...responses.unauthorized, ...responses.forbidden },
       },
@@ -1673,6 +1673,13 @@ const swaggerSpec = {
         responses: { 200: { description: 'Request rejected' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },
     },
+    '/api/admin/onboarding/{id}/reopen': {
+      put: {
+        tags: ['Admin — Onboarding'], summary: 'Reopen a rejected onboarding request (returns it to PENDING)', security,
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { 200: { description: 'Request reopened and set to PENDING' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
 
     // ── Admin — Onboarding requests ───────────────────────────────────────
     '/api/admin/onboarding-requests': {
@@ -1680,7 +1687,7 @@ const swaggerSpec = {
         tags: ['Admin — Onboarding'], summary: 'List onboarding requests', security,
         parameters: [
           ...paginationParams,
-          { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'APPROVED', 'REJECTED', 'ALL'], default: 'PENDING' } },
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'ALL'], default: 'PENDING' } },
         ],
         responses: { ...paginatedResponse('OnboardingRequest'), ...responses.unauthorized, ...responses.forbidden },
       },

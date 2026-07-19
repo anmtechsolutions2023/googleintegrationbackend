@@ -65,7 +65,7 @@ const updateFeatureSchema = Joi.object({
 const listRequestsSchema = Joi.object({
   page:   Joi.number().integer().min(1).default(1),
   limit:  Joi.number().integer().min(1).max(100).default(20),
-  status: Joi.string().valid('PENDING', 'APPROVED', 'REJECTED', 'ALL').default('PENDING'),
+  status: Joi.string().valid('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'ALL').default('PENDING'),
 });
 
 const listUsersSchema = Joi.object({

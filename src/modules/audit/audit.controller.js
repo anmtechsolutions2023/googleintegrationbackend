@@ -108,7 +108,7 @@ const getAuditLogs = async (req, res, next) => {
 /**
  * GET /api/audit/categories
  * Returns the valid audit category list for populating filter dropdowns.
- * Available to any authenticated user.
+ * Gated (at the route) to users with AUDIT:READ or admin:access.
  */
 const getCategories = (req, res) => {
   const categories = Object.entries(AUDIT_CATEGORIES).map(([key, value]) => ({

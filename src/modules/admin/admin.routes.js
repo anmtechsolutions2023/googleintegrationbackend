@@ -30,6 +30,9 @@ router.put('/onboarding/:id/approve',
 router.put('/onboarding/:id/reject',
   ...adminOnly, auditLog(AUDIT_CATEGORIES.ONBOARDING, 'WARN', AUDIT_ACTIONS.REJECT_ONBOARDING), ...c.rejectOnboarding);
 
+router.put('/onboarding/:id/reopen',
+  ...adminOnly, auditLog(AUDIT_CATEGORIES.ONBOARDING, 'INFO', AUDIT_ACTIONS.REOPEN_ONBOARDING), ...c.reopenOnboarding);
+
 // ── User management ───────────────────────────────────────────────────────────
 router.get('/users',
   ...adminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USERS), ...c.listUsers);

@@ -110,7 +110,7 @@ INSERT IGNORE INTO roles (id, tenant_id, name, description, is_system_role, is_a
 
 -- =============================================================================
 -- PART 3 — IAM Features
--- 12 rows: 6 business categories × READ + WRITE scopes.
+-- 13 rows: 6 business categories × READ + WRITE scopes, plus AUDIT:READ.
 -- Fixed UUIDs — INSERT IGNORE skips on re-run.
 -- NOTE: Column is 'name' (not 'feature_name') — matches the application INSERT
 -- query in src/config/constants.js. See GAP #2 in 01-schema-definition.sql.
@@ -208,6 +208,14 @@ VALUES
      'Payments — Manage',
      'Payments',
      'Create and update payment records and payment breakup entries.',
+     1),
+
+    -- Audit (read-only; there is no AUDIT:WRITE — logs are system-generated)
+    ('f1000007-iam0-0000-0000-000000000001',
+     'Audit Logs Read',  'AUDIT', 'READ',
+     'Audit Logs — View',
+     'Audit',
+     'View the tenant audit log trail (who did what, and when).',
      1);
 
 -- =============================================================================
@@ -494,6 +502,21 @@ WHERE r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
   AND f.feature_short_name IN
       ('MASTER_DATA','ORGANIZATION','TRANSACTIONS','INVENTORY','CONTACTS','PAYMENTS',
        'POS_CONFIG','POS_ORDER','POS_KITCHEN','POS_BILLING','POS_CRM','POS_OPS');
+
+-- =============================================================================
+-- PART 8c — Grant AUDIT:READ to every role
+-- =============================================================================
+-- Audit log endpoints (/api/audit/*) accept AUDIT:READ or admin:access. Grant
+-- AUDIT:READ to every role in the tenant so read-only business users can view
+-- the audit trail out of the box. Admins can revoke it per-role from the IAM
+-- dashboard afterwards.
+INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
+SELECT UUID(), r.id, f.feature_id
+FROM roles r
+CROSS JOIN features f
+WHERE r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
+  AND f.feature_short_name = 'AUDIT'
+  AND f.scope = 'READ';
 
 -- =============================================================================
 -- VERIFICATION QUERIES — run these manually after seeding to confirm correctness
