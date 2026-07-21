@@ -353,7 +353,7 @@ const registry = [
     exports: POS,
     createData:  { Name: 'Dine In', Code: 'dinein', SortOrder: 1, Active: true },
     updateData:  { Name: 'Takeaway' },
-    existingRow: { Name: 'Dine In', Code: 'dinein', Description: null, SortOrder: 1, Price: null },
+    existingRow: { Name: 'Dine In', Code: 'dinein', Description: null, SortOrder: 1 },
   },
   {
     name: 'posvariant',

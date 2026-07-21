@@ -8,7 +8,6 @@ const createSchema = Joi.object({
   Code: Joi.string().max(50).trim().required(),
   Description: Joi.string().max(255).trim().allow('', null).optional(),
   SortOrder: Joi.number().integer().optional().default(0),
-  Price: Joi.number().optional().allow(null),
   Active: Joi.boolean().optional().default(true),
 });
 
@@ -17,7 +16,6 @@ const updateSchema = Joi.object({
   Code: Joi.string().max(50).trim().optional(),
   Description: Joi.string().max(255).trim().allow('', null).optional(),
   SortOrder: Joi.number().integer().optional(),
-  Price: Joi.number().optional().allow(null),
   Active: Joi.boolean().optional(),
 }).min(1);
 

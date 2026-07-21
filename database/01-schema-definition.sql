@@ -886,7 +886,6 @@ CREATE TABLE pos_channel (
     Code            VARCHAR(50)   NOT NULL,
     Description     VARCHAR(255)  NULL,
     SortOrder       INT           NOT NULL DEFAULT 0,
-    Price           DECIMAL(18,4) NULL,
     TenantId        VARCHAR(50)   NOT NULL,
     Active          TINYINT(1)    NOT NULL,
     CreatedOn       DATETIME,
