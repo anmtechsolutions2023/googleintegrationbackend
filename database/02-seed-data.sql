@@ -519,6 +519,51 @@ WHERE r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
   AND f.scope = 'READ';
 
 -- =============================================================================
+-- PART 9 — Baseline master data for onboarding
+-- =============================================================================
+-- The master-data setup wizard uses fixed 'Onboarding' master rows. Seed them
+-- up-front (idempotent, fixed UUIDs) so they exist before the first onboarding;
+-- the bootstrap's get-or-create reuses these rows on subsequent runs instead of
+-- hitting the UNIQUE constraints.
+
+-- 9a) Default contact address type (UNIQUE(Name, TenantId))
+INSERT IGNORE INTO contactaddresstype (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy)
+VALUES (
+    'c0000001-cat0-0000-0000-000000000001',
+    'e3845e08-dcc2-11f0-8e78-0242ac110002',
+    'Onboarding',
+    1,
+    NOW(),
+    'system-seed',
+    'system-seed'
+);
+
+-- 9b) Default transaction type config (UNIQUE TagName; reused via get-or-create).
+-- Prefix is NOT NULL — seeded as '' to match the app's default insert behaviour.
+INSERT IGNORE INTO transactiontypeconfig (Id, TenantId, StartCounterNo, Prefix, Format, TagName, Active, CreatedOn, CreatedBy, UpdatedBy)
+VALUES (
+    't0000001-ttc0-0000-0000-000000000001',
+    'e3845e08-dcc2-11f0-8e78-0242ac110002',
+    '1',
+    '',
+    'INV-{0000}',
+    'Onboarding',
+    1,
+    NOW(),
+    'system-seed',
+    'system-seed'
+);
+
+-- =============================================================================
+-- PART 10 — Application configuration defaults
+-- =============================================================================
+-- Onboarding auto-approval ships DISABLED. The super-admin turns it on from the
+-- Application Configuration screen. Idempotent — INSERT IGNORE keeps any value
+-- an admin has already set.
+INSERT IGNORE INTO app_settings (setting_key, setting_value, updated_by)
+VALUES ('onboarding.auto_approve.enabled', 'false', 'system-seed');
+
+-- =============================================================================
 -- VERIFICATION QUERIES — run these manually after seeding to confirm correctness
 -- =============================================================================
 

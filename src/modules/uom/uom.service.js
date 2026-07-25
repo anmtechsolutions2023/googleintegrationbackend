@@ -133,6 +133,7 @@ class UomService extends BaseCRUDService {
 const uomService = new UomService();
 
 module.exports = {
+  createTx: (conn, data, tenantId, userEmail) => uomService.createTx(conn, data, tenantId, userEmail),
   getAllUom: (tenantId, page, limit) =>
     uomService.getAllUom(tenantId, page, limit),
   getUomById: (id, tenantId) => uomService.getUomById(id, tenantId),

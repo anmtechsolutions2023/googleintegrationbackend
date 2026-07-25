@@ -121,6 +121,31 @@ describe(`${name} — service`, () => {
       await expect(svc[ex.delete](RECORD_ID, TENANT_ID)).rejects.toThrow();
     });
   });
+
+  describe('getOrCreateByTagNameTx', () => {
+    it('reuses an existing config when the TagName already exists (no insert)', async () => {
+      mockConnection.execute.mockResolvedValueOnce([[{ Id: RECORD_ID, TagName: 'Onboarding' }]]);
+      const result = await svc.getOrCreateByTagNameTx(
+        mockConnection, { TagName: 'Onboarding' }, TENANT_ID, USER_EMAIL,
+      );
+      expect(result).toMatchObject({ id: RECORD_ID, reused: true });
+      // only the lookup ran — no INSERT
+      expect(mockConnection.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('creates a new config when the TagName does not exist', async () => {
+      mockConnection.execute
+        .mockResolvedValueOnce([[]])                    // SELECT_BY_TAGNAME → none found
+        .mockResolvedValueOnce([[{ affectedRows: 1 }]]); // INSERT
+      const data = { StartCounterNo: 1, Prefix: '', Format: 'INV-{0000}', TagName: 'Fresh' };
+      const result = await svc.getOrCreateByTagNameTx(
+        mockConnection, data, TENANT_ID, USER_EMAIL,
+      );
+      expect(result).toMatchObject({ id: 'mock-uuid-generated', reused: false });
+      // lookup + insert
+      expect(mockConnection.execute).toHaveBeenCalledTimes(2);
+    });
+  });
 });
 
 describe('transactiontypeconfig — field validation', () => {

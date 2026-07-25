@@ -5,6 +5,7 @@
 const authRoutes = require('../modules/auth/auth.routes');
 const onboardingRoutes = require('../modules/onboarding/onboarding.routes');
 const adminRoutes = require('../modules/admin/admin.routes');
+const appconfigRoutes = require('../modules/appconfig/appconfig.routes');
 const tenantRoutes = require('../modules/tenant/tenant.routes');
 const reportsRoutes = require('../modules/reports/reports.routes');
 const dataRoutes = require('../modules/data/data.routes');
@@ -31,6 +32,7 @@ const branchdetailRoutes = require('../modules/branchdetail/branchdetail.routes'
 const branchusergroupmapperRoutes = require('../modules/branchusergroupmapper/branchusergroupmapper.routes');
 const batchdetailRoutes = require('../modules/batchdetail/batchdetail.routes');
 const itemdetailRoutes = require('../modules/itemdetail/itemdetail.routes');
+const mastersetupRoutes = require('../modules/mastersetup/mastersetup.routes');
 const transactiontypebaseconversionRoutes = require('../modules/transactiontypebaseconversion/transactiontypebaseconversion.routes');
 const transactiondetaillogRoutes = require('../modules/transactiondetaillog/transactiondetaillog.routes');
 const transactionitemdetailRoutes = require('../modules/transactionitemdetail/transactionitemdetail.routes');
@@ -72,6 +74,10 @@ const registerRoutes = (app) => {
   // Onboarding module - Guest/pending user status + note
   app.use('/api/onboarding', onboardingRoutes);
 
+  // Application Configuration - super-admin global settings (mounted before the
+  // broader /api/admin router so this more specific path wins).
+  app.use('/api/admin/app-config', appconfigRoutes);
+
   // Admin module - IAM panel (onboarding approval, user/role/feature management)
   app.use('/api/admin', adminRoutes);
 
@@ -104,6 +110,9 @@ const registerRoutes = (app) => {
 
   // Organization module
   app.use('/api/organizations', organizationRoutes);
+
+  // Master-data setup — first-time transactional bootstrap (org + branch + item)
+  app.use('/api/master-data', mastersetupRoutes);
 
   // UOM Factor module
   app.use('/api/uomfactors', uomfactorRoutes);

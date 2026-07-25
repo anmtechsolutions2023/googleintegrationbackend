@@ -138,6 +138,18 @@ CREATE TABLE onboarding_requests (
     UNIQUE KEY uq_onboarding_email (email)
 );
 
+-- 2.1b app_settings
+-- Global (system-wide) application configuration as key/value pairs. Owned by
+-- the super-admin. Currently holds the onboarding auto-approval flag; extend
+-- with new keys as needed without schema changes.
+CREATE TABLE app_settings (
+    setting_key    VARCHAR(100)  NOT NULL,
+    setting_value  TEXT          NULL,
+    updated_by     VARCHAR(255)  NULL,
+    updated_at     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (setting_key)
+);
+
 -- 2.2 roles
 -- Named permission groups per tenant. is_system_role=1 makes a role non-editable.
 -- NOTE: tenant_id is NOT NULL — roles are scoped per tenant, not global.
@@ -495,7 +507,7 @@ CREATE TABLE addressdetail (
     City                         VARCHAR(50),
     State                        VARCHAR(50),
     Pincode                      VARCHAR(50),
-    MapProviderLocationMapperId  VARCHAR(50)   NOT NULL,
+    MapProviderLocationMapperId  VARCHAR(50)   NULL,
     Landmark                     VARCHAR(50),
     ContactAddressTypeId         VARCHAR(50)   NOT NULL,
     TagName                      VARCHAR(100)  NULL,

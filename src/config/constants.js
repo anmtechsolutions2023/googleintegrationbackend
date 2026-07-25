@@ -87,6 +87,8 @@ module.exports = {
         'SELECT COUNT(*) as total FROM transactiontypeconfig WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM transactiontypeconfig WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_TAGNAME:
+        'SELECT * FROM transactiontypeconfig WHERE TagName = ? AND TenantId = ? LIMIT 1',
       INSERT:
         'INSERT INTO transactiontypeconfig (Id, TenantId, StartCounterNo, Prefix, Format, TagName, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -161,6 +163,8 @@ module.exports = {
         'SELECT COUNT(*) as total FROM contactaddresstype WHERE TenantId = ?',
       SELECT_BY_ID:
         'SELECT * FROM contactaddresstype WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_NAME:
+        'SELECT * FROM contactaddresstype WHERE Name = ? AND TenantId = ? LIMIT 1',
       INSERT:
         'INSERT INTO contactaddresstype (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
@@ -996,6 +1000,25 @@ module.exports = {
         WHERE ut.tenant_id = ?
         GROUP BY ut.user_email, ut.tenant_id
         ORDER BY ut.user_email ASC`,
+      // Cross-tenant listing for super admins only. No tenant_id filter; each row
+      // carries its tenant_id (plus a best-effort organization name for display).
+      SELECT_ALL_TENANTS: `
+        SELECT ut.user_email, ut.tenant_id, ut.is_admin, ut.is_super_admin,
+               ut.is_active, ut.status,
+               (SELECT o.Name FROM organizationdetail o
+                  WHERE o.TenantId = ut.tenant_id
+                  ORDER BY o.CreatedOn ASC LIMIT 1) AS tenant_name,
+               GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
+        FROM user_tenants ut
+        LEFT JOIN user_roles ur ON ut.user_email = ur.user_email AND ut.tenant_id = ur.tenant_id
+        LEFT JOIN roles r ON ur.role_id = r.id
+        GROUP BY ut.user_email, ut.tenant_id
+        ORDER BY ut.tenant_id ASC, ut.user_email ASC`,
+      COUNT_ALL_TENANTS: 'SELECT COUNT(*) as total FROM user_tenants',
+      // Membership flags for a single (email, tenant) pair — used by the super-admin
+      // cross-tenant status change to verify existence and guard super admins.
+      SELECT_FLAGS_BY_EMAIL_TENANT:
+        'SELECT is_super_admin FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
       SELECT_BY_EMAIL: `
         SELECT ut.*, GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
         FROM user_tenants ut
@@ -1005,6 +1028,10 @@ module.exports = {
         GROUP BY ut.user_email, ut.tenant_id`,
       INSERT_USER_TENANT:
         'INSERT INTO user_tenants (id, user_email, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, 0, 0, 1, "ACTIVE")',
+      // Parametrized variant: caller supplies is_admin / is_super_admin flags.
+      // Used by the shared provisioning core (manual approve → 0/0, auto-approve → 1/0).
+      INSERT_USER_TENANT_FLAGS:
+        'INSERT INTO user_tenants (id, user_email, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, ?, ?, 1, "ACTIVE")',
       UPDATE_STATUS:
         'UPDATE user_tenants SET is_active = ?, status = ?, updated_at = NOW() WHERE user_email = ? AND tenant_id = ?',
       DELETE:
@@ -1023,6 +1050,26 @@ module.exports = {
         'UPDATE features SET display_name = ?, scope = ?, category = ?, description = ?, is_active = ? WHERE feature_id = ?',
       CHECK_IN_USE:
         'SELECT COUNT(*) as cnt FROM role_permissions WHERE feature_id = ?',
+    },
+
+    // Application Settings (global key/value config, super-admin owned)
+    APP_SETTINGS: {
+      SELECT_ALL:
+        'SELECT setting_key, setting_value, updated_by, updated_at FROM app_settings ORDER BY setting_key ASC',
+      SELECT_BY_KEY:
+        'SELECT setting_key, setting_value FROM app_settings WHERE setting_key = ?',
+      UPSERT:
+        'INSERT INTO app_settings (setting_key, setting_value, updated_by, updated_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = NOW()',
+    },
+
+    // Per-tenant IAM provisioning (clone the standard role catalog to a new tenant)
+    TENANT_PROVISION: {
+      SELECT_TEMPLATE_ROLES:
+        'SELECT id, name, description, is_system_role, is_active FROM roles WHERE tenant_id = ?',
+      INSERT_ROLE_FULL:
+        'INSERT INTO roles (id, tenant_id, name, description, is_system_role, is_active) VALUES (?, ?, ?, ?, ?, ?)',
+      SELECT_ROLE_FEATURE_IDS:
+        'SELECT feature_id FROM role_permissions WHERE role_id = ?',
     },
 
     // Account Type Base Queries
@@ -1052,6 +1099,7 @@ module.exports = {
     UNAUTHORIZED: '401_UNAUTHORIZED',
     ONBOARDING_ATTEMPT: 'ONBOARDING_ATTEMPT',
     ONBOARDING_APPROVED: 'ONBOARDING_APPROVED',
+    ONBOARDING_AUTO_APPROVED: 'ONBOARDING_AUTO_APPROVED',
     ONBOARDING_REJECTED: 'ONBOARDING_REJECTED',
     ONBOARDING_REOPENED: 'ONBOARDING_REOPENED',
     CREATED: 'CREATED',
@@ -1089,6 +1137,7 @@ module.exports = {
     // Onboarding
     ONBOARDING_ATTEMPT:       'Onboarding request submitted',
     ONBOARDING_APPROVED:      'Onboarding request approved',
+    ONBOARDING_AUTO_APPROVED: 'Onboarding request auto-approved',
     ONBOARDING_REJECTED:      'Onboarding request rejected',
     CHECK_ONBOARDING_STATUS:  'Checked onboarding status',
     UPDATE_ONBOARDING_NOTE:   'Updated onboarding note',
@@ -1125,11 +1174,24 @@ module.exports = {
     VIEW_AUDIT_LOGS:          'Viewed audit logs',
     // General
     VIEW_APPLICATION:         'Viewed application',
+    VIEW_APP_CONFIG:          'Viewed application configuration',
+    UPDATE_APP_CONFIG:        'Updated application configuration',
   },
   DEFAULTS: {
     AUDIT_LIMIT: 50,
     AUDIT_OFFSET: 0,
     AUDIT_MAX_LIMIT: 500,
+  },
+  // Onboarding auto-approval configuration.
+  // TEMPLATE_TENANT_ID is the reference tenant whose standard role catalog is
+  // cloned into every auto-created tenant (the seeded ANM Tech tenant).
+  ONBOARDING: {
+    SETTING_AUTO_APPROVE: 'onboarding.auto_approve.enabled',
+    TEMPLATE_TENANT_ID:
+      process.env.ONBOARDING_TEMPLATE_TENANT_ID ||
+      'e3845e08-dcc2-11f0-8e78-0242ac110002',
+    AUTO_APPROVE_ROLE: 'TENANT_ADMIN',
+    AUTO_REVIEWER: 'system-auto',
   },
   SCOPES: {
     TENANT_ADMIN: 'TENANT:ADMIN',

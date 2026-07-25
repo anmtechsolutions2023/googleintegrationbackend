@@ -31,6 +31,13 @@ const updateUserStatusSchema = Joi.object({
   status: Joi.string().valid('ACTIVE', 'SUSPENDED').required(),
 });
 
+// Super-admin cross-tenant status change: target user + tenant come in the body.
+const updateUserStatusCrossTenantSchema = Joi.object({
+  email: Joi.string().email().required(),
+  tenantId: Joi.string().required(),
+  status: Joi.string().valid('ACTIVE', 'SUSPENDED').required(),
+});
+
 const updateRolePermissionsSchema = Joi.object({
   featureIds: Joi.array().items(Joi.string()).required(),
 });
@@ -80,6 +87,7 @@ module.exports = {
   rejectOnboardingSchema,
   updateUserRolesSchema,
   updateUserStatusSchema,
+  updateUserStatusCrossTenantSchema,
   updateRolePermissionsSchema,
   createRoleSchema,
   updateRoleSchema,

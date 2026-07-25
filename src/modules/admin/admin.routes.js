@@ -9,6 +9,8 @@ const { SCOPES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('../../config/consta
 const c = require('./admin.controller');
 
 const adminOnly = [authenticateToken, checkScope(SCOPES.ADMIN_ACCESS)];
+// Cross-tenant views are restricted to super admins.
+const superAdminOnly = [authenticateToken, checkScope(SCOPES.TENANT_SUPER_ADMIN)];
 
 // ── Onboarding requests ───────────────────────────────────────────────────────
 router.get('/onboarding-requests',
@@ -36,6 +38,16 @@ router.put('/onboarding/:id/reopen',
 // ── User management ───────────────────────────────────────────────────────────
 router.get('/users',
   ...adminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USERS), ...c.listUsers);
+
+// Super-admin-only cross-tenant listing. MUST precede '/users/:email' so the
+// literal 'all' segment isn't captured as an :email param.
+router.get('/users/all',
+  ...superAdminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USERS), ...c.listAllUsers);
+
+// Super-admin-only cross-tenant suspend/activate (target user + tenant in body).
+// MUST precede '/users/:email/status' so 'all' isn't captured as an :email param.
+router.put('/users/all/status',
+  ...superAdminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'WARN', AUDIT_ACTIONS.UPDATE_USER_STATUS), ...c.updateUserStatusCrossTenant);
 
 router.get('/users/:email/roles',
   ...adminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USER_ROLES), ...c.getUserRoles);

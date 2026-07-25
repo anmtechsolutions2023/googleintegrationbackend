@@ -55,6 +55,7 @@ class AddressDetailService extends BaseCRUDService {
 
 const service = new AddressDetailService();
 module.exports = {
+  createTx: (conn, data, tenantId, userEmail) => service.createTx(conn, data, tenantId, userEmail),
   getAll: (tenantId, page, limit, expand) =>
     service.getAll(tenantId, page, limit, expand),
   getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),

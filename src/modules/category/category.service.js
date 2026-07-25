@@ -125,6 +125,7 @@ class CategoryService extends BaseCRUDService {
 const categoryService = new CategoryService();
 
 module.exports = {
+  createTx: (conn, data, tenantId, userEmail) => categoryService.createTx(conn, data, tenantId, userEmail),
   getAllCategories: (tenantId, page, limit) =>
     categoryService.getAllCategories(tenantId, page, limit),
   getCategoryById: (id, tenantId) =>

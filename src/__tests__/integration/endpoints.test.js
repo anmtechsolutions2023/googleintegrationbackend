@@ -315,8 +315,14 @@ const MODULES = [
   // 18
   {
     path: '/api/addressdetails',
-    // AddressLine1: string required, TagName: string required
-    body: { AddressLine1: '123 Main St', TagName: 'addr-tag-001', Active: true },
+    // AddressLine1, TagName: string required; ContactAddressTypeId: uuid required (DB NOT NULL).
+    // MapProviderLocationMapperId (Location Mapper) is optional/nullable — omitted here on purpose.
+    body: {
+      AddressLine1: '123 Main St',
+      TagName: 'addr-tag-001',
+      ContactAddressTypeId: UUID_1,
+      Active: true,
+    },
   },
   // 19
   {
@@ -1148,6 +1154,106 @@ describe('Audit routes — AUDIT:READ / admin:access gating', () => {
       const res = await request(app).get(p).set('Authorization', iamAdminToken());
       expect(res.status).toBe(200);
     });
+  });
+});
+
+describe('Master-data bootstrap — POST /api/master-data/bootstrap', () => {
+  const validBootstrap = () => ({
+    organization: { Name: 'ANM Tech' },
+    branch: {
+      Name: 'Main Branch',
+      address: {
+        AddressLine1: '12 MG Road', TagName: 'HQ',
+        contactAddressType: { Name: 'Registered' },
+        locationMapper: {
+          TagName: 'HQ-LOC',
+          mapProvider: { ProviderName: 'Google' },
+          locationDetail: { Lat: 12.97, Lng: 77.59 },
+        },
+      },
+      contact: { FirstName: 'Ravi', LastName: 'K' },
+      transactionTypeConfig: { StartCounterNo: 1, Format: 'INV-{0000}', TagName: 'Invoice' },
+    },
+    item: {
+      Name: 'Masala Dosa',
+      category: { Name: 'South Indian' },
+      uom: { UnitName: 'Plate' },
+      costInfo: { Amount: 120, taxGroup: { Name: 'GST5' } },
+    },
+  });
+
+  it('no token → 401', async () => {
+    const res = await request(app).post('/api/master-data/bootstrap').send(validBootstrap());
+    expect(res.status).toBe(401);
+  });
+
+  it('read-only scope (no TENANT:ADMIN) → 403', async () => {
+    const res = await request(app)
+      .post('/api/master-data/bootstrap')
+      .set('Authorization', viewerToken())
+      .send(validBootstrap());
+    expect(res.status).toBe(403);
+  });
+
+  it('missing branch → 400', async () => {
+    const body = validBootstrap();
+    delete body.branch;
+    const res = await request(app)
+      .post('/api/master-data/bootstrap')
+      .set('Authorization', adminToken())
+      .send(body);
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('admin, valid tree → 201 with an id map, inside one committed transaction', async () => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    const res = await request(app)
+      .post('/api/master-data/bootstrap')
+      .set('Authorization', adminToken())
+      .send(validBootstrap());
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual(
+      expect.objectContaining({
+        organization: expect.any(String),
+        branch: expect.any(String),
+        item: expect.any(String),
+        taxGroup: expect.any(String),
+      })
+    );
+    expect(mockConnection.beginTransaction).toHaveBeenCalled();
+    expect(mockConnection.commit).toHaveBeenCalled();
+  });
+
+  it('admin, valid tree WITHOUT locationMapper → 201 (Location Mapper optional)', async () => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    const body = validBootstrap();
+    delete body.branch.address.locationMapper;
+    const res = await request(app)
+      .post('/api/master-data/bootstrap')
+      .set('Authorization', adminToken())
+      .send(body);
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(mockConnection.commit).toHaveBeenCalled();
+  });
+
+  it('mid-transaction failure → rolls back, nothing committed, → 500', async () => {
+    // Fail the branch insert; everything must roll back.
+    mockConnection.execute.mockImplementation((sql) => {
+      if ((sql || '').includes('INSERT INTO branchdetail')) {
+        return Promise.reject(new Error('branch insert failed'));
+      }
+      return defaultExecuteImpl(sql);
+    });
+    const res = await request(app)
+      .post('/api/master-data/bootstrap')
+      .set('Authorization', adminToken())
+      .send(validBootstrap());
+    expect(res.status).toBe(500);
+    expect(mockConnection.rollback).toHaveBeenCalled();
+    expect(mockConnection.commit).not.toHaveBeenCalled();
   });
 });
 

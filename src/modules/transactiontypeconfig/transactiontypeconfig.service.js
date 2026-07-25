@@ -24,6 +24,33 @@ class TransactionTypeConfigService extends BaseCRUDService {
     ];
   }
 
+  /**
+   * Find a transaction type config by TagName (unique) or create it if absent,
+   * reusing a caller-supplied transaction connection. Used by the master-data
+   * bootstrap so a repeated onboarding reuses the existing config instead of
+   * violating the UNIQUE TagName constraint.
+   * @param {Object} connection - Active DB connection (inside withTransaction)
+   * @param {Object} data - Config data (must include TagName)
+   * @param {string} tenantId - Tenant ID
+   * @param {string} userEmail - Acting user's email
+   * @returns {Promise<Object>} { id, ...row/data, reused } — reused=true when found
+   */
+  async getOrCreateByTagNameTx(connection, data, tenantId, userEmail) {
+    const [rows] = await connection.execute(
+      this.queries.SELECT_BY_TAGNAME,
+      [data.TagName, tenantId],
+    );
+    if (rows.length > 0) {
+      logger.info('Reusing existing Transaction Type Config', {
+        tagName: data.TagName,
+        tenantId,
+      });
+      return { id: rows[0].Id, ...rows[0], reused: true };
+    }
+    const created = await this.createTx(connection, data, tenantId, userEmail);
+    return { ...created, reused: false };
+  }
+
   prepareUpdateParams(data, existing, userEmail, id, tenantId) {
     return [
       data.StartCounterNo !== undefined
@@ -82,6 +109,9 @@ class TransactionTypeConfigService extends BaseCRUDService {
 const service = new TransactionTypeConfigService();
 
 module.exports = {
+  createTx: (conn, data, tenantId, userEmail) => service.createTx(conn, data, tenantId, userEmail),
+  getOrCreateByTagNameTx: (conn, data, tenantId, userEmail) =>
+    service.getOrCreateByTagNameTx(conn, data, tenantId, userEmail),
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
   create: (data, tenantId, userEmail) =>

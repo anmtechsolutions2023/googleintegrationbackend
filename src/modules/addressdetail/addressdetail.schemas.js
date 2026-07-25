@@ -2,27 +2,27 @@
 const Joi = require('joi');
 
 const createSchema = Joi.object({
-  AddressLine1: Joi.string().required().max(255).trim(),
-  AddressLine2: Joi.string().optional().max(255).trim().allow(null, ''),
-  City: Joi.string().optional().max(100).trim().allow(null, ''),
-  State: Joi.string().optional().max(100).trim().allow(null, ''),
-  Pincode: Joi.string().optional().max(20).trim().allow(null, ''),
+  AddressLine1: Joi.string().required().max(50).trim(),
+  AddressLine2: Joi.string().optional().max(50).trim().allow(null, ''),
+  City: Joi.string().optional().max(50).trim().allow(null, ''),
+  State: Joi.string().optional().max(50).trim().allow(null, ''),
+  Pincode: Joi.string().optional().max(50).trim().allow(null, ''),
   MapProviderLocationMapperId: Joi.string().uuid().optional().allow(null),
-  Landmark: Joi.string().optional().max(255).trim().allow(null, ''),
-  ContactAddressTypeId: Joi.string().uuid().optional().allow(null),
+  Landmark: Joi.string().optional().max(50).trim().allow(null, ''),
+  ContactAddressTypeId: Joi.string().uuid().required(),
   TagName: Joi.string().max(100).required(),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
-  AddressLine1: Joi.string().optional().max(255).trim(),
-  AddressLine2: Joi.string().optional().max(255).trim().allow(null, ''),
-  City: Joi.string().optional().max(100).trim().allow(null, ''),
-  State: Joi.string().optional().max(100).trim().allow(null, ''),
-  Pincode: Joi.string().optional().max(20).trim().allow(null, ''),
+  AddressLine1: Joi.string().optional().max(50).trim(),
+  AddressLine2: Joi.string().optional().max(50).trim().allow(null, ''),
+  City: Joi.string().optional().max(50).trim().allow(null, ''),
+  State: Joi.string().optional().max(50).trim().allow(null, ''),
+  Pincode: Joi.string().optional().max(50).trim().allow(null, ''),
   MapProviderLocationMapperId: Joi.string().uuid().optional().allow(null),
-  Landmark: Joi.string().optional().max(255).trim().allow(null, ''),
-  ContactAddressTypeId: Joi.string().uuid().optional().allow(null),
+  Landmark: Joi.string().optional().max(50).trim().allow(null, ''),
+  ContactAddressTypeId: Joi.string().uuid().optional(),
   TagName: Joi.string().max(100).optional(),
   Active: Joi.boolean().optional(),
 }).min(1);

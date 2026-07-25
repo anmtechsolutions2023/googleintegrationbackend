@@ -12,6 +12,8 @@ const { logger } = require('../../utils/logger');
 const MESSAGES = require('../../config/messages');
 const { QUERIES, STATUSES, SCOPES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('../../config/constants');
 const { GOOGLE_CLIENT_ID, JWT_SECRET } = require('../../config/envConfig');
+const appConfig = require('../appconfig/appconfig.service');
+const adminService = require('../admin/admin.service');
 
 const GOOGLE_OAUTH2_CLIENT = new OAuth2Client(GOOGLE_CLIENT_ID);
 
@@ -131,6 +133,54 @@ const findAndGetPermissions = async (req, userData) => {
       onboardingStatus = existing.status;
       rejectionReason = existing.rejection_reason;
     } else {
+      // Brand-new email. When the super-admin has enabled auto-approval, provision
+      // the user immediately into a new tenant as its TENANT_ADMIN and return an
+      // APPROVED result. Any failure falls back to the manual PENDING flow below.
+      if (await appConfig.isAutoApproveEnabled()) {
+        try {
+          await adminService.autoApproveOnboarding({ email, name, googleSub: googleId });
+
+          // Re-read the now-provisioned user exactly like the provisioned path.
+          const [newTenantRows] = await connection.execute(
+            QUERIES.USER_TENANTS.SELECT,
+            [email]
+          );
+          const selectedTenant = newTenantRows[0];
+          const newTenantId = selectedTenant.tenant_id;
+
+          const permissions = await getScopesForTenant(connection, newTenantId, email);
+          if (selectedTenant.is_admin) permissions.push(SCOPES.TENANT_ADMIN);
+          if (selectedTenant.is_super_admin) permissions.push(SCOPES.TENANT_SUPER_ADMIN);
+
+          const [roleRows] = await connection.execute(
+            QUERIES.USER_ROLES.SELECT_BY_USER_TENANT,
+            [email, newTenantId]
+          );
+
+          await captureAudit(
+            req, newTenantId, email,
+            AUDIT_ACTIONS.ONBOARDING_AUTO_APPROVED, STATUSES.SUCCESS,
+            AUDIT_CATEGORIES.ONBOARDING, 'INFO', null
+          );
+
+          return {
+            email,
+            name,
+            tenantId: newTenantId,
+            onboardingStatus: 'APPROVED',
+            permissions,
+            roles: roleRows.map((r) => r.role_name),
+            associatedTenants: newTenantRows,
+          };
+        } catch (autoErr) {
+          logger.error(
+            'Onboarding auto-approval failed; falling back to manual review',
+            autoErr
+          );
+          // fall through to the manual PENDING flow
+        }
+      }
+
       requestId = uuidv4();
       await connection.execute(QUERIES.ONBOARDING_REQUESTS.INSERT, [
         requestId,

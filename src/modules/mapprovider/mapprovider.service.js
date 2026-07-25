@@ -33,6 +33,7 @@ class MapProviderService extends BaseCRUDService {
 
 const service = new MapProviderService();
 module.exports = {
+  createTx: (conn, data, tenantId, userEmail) => service.createTx(conn, data, tenantId, userEmail),
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
   create: (data, tenantId, userEmail) =>

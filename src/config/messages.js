@@ -15,6 +15,8 @@ module.exports = {
     ONBOARDING_APPROVED: 'User approved and provisioned successfully.',
     ONBOARDING_REJECTED: 'Access request rejected.',
     ONBOARDING_REOPENED: 'Rejected request reopened for review.',
+    APP_CONFIG_RETRIEVED: 'Application configuration retrieved.',
+    APP_CONFIG_UPDATED: 'Application configuration updated.',
     ROLE_CREATED: 'Role created successfully.',
     ROLE_UPDATED: 'Role updated successfully.',
     ROLE_DELETED: 'Role deleted successfully.',

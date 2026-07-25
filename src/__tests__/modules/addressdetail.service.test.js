@@ -129,9 +129,18 @@ describe('addressdetail — field validation', () => {
   const { createSchema: createAddressSchema, updateSchema: updateAddressSchema } =
     require('../../modules/addressdetail/addressdetail.schemas');
 
+  // The DB (source of truth) requires ContactAddressTypeId (NOT NULL) on every
+  // address row, so it is part of the minimal valid create payload.
+  // MapProviderLocationMapperId (Location Mapper) is nullable/optional.
+  const REQUIRED_AD = {
+    AddressLine1: '123 Main St',
+    TagName: 'HOME',
+    ContactAddressTypeId: VALID_UUID_AD,
+  };
+
   describe('create schema — positive cases', () => {
     it('passes with all required fields', () => {
-      expect(createAddressSchema.validate({ AddressLine1: '123 Main St', TagName: 'HOME' }).error).toBeUndefined();
+      expect(createAddressSchema.validate({ ...REQUIRED_AD }).error).toBeUndefined();
     });
     it('passes with all fields provided', () => {
       const data = {
@@ -142,41 +151,56 @@ describe('addressdetail — field validation', () => {
       expect(createAddressSchema.validate(data).error).toBeUndefined();
     });
     it('accepts optional fields as null', () => {
-      expect(createAddressSchema.validate({ AddressLine1: '123 St', City: null, State: null, TagName: 'T' }).error).toBeUndefined();
+      expect(createAddressSchema.validate({ ...REQUIRED_AD, City: null, State: null }).error).toBeUndefined();
     });
     it('accepts optional fields as empty string', () => {
-      expect(createAddressSchema.validate({ AddressLine1: '123 St', City: '', State: '', TagName: 'T' }).error).toBeUndefined();
+      expect(createAddressSchema.validate({ ...REQUIRED_AD, City: '', State: '' }).error).toBeUndefined();
     });
     it('accepts TagName at exactly 100 characters', () => {
-      expect(createAddressSchema.validate({ AddressLine1: '1 St', TagName: 'x'.repeat(100) }).error).toBeUndefined();
+      expect(createAddressSchema.validate({ ...REQUIRED_AD, TagName: 'x'.repeat(100) }).error).toBeUndefined();
     });
     it('defaults Active to true when omitted', () => {
-      const { value } = createAddressSchema.validate({ AddressLine1: '1 St', TagName: 'T' });
+      const { value } = createAddressSchema.validate({ ...REQUIRED_AD });
       expect(value.Active).toBe(true);
+    });
+    it('passes when MapProviderLocationMapperId is omitted (optional)', () => {
+      expect(createAddressSchema.validate({ ...REQUIRED_AD }).error).toBeUndefined();
+    });
+    it('passes when MapProviderLocationMapperId is null (optional)', () => {
+      expect(createAddressSchema.validate({ ...REQUIRED_AD, MapProviderLocationMapperId: null }).error).toBeUndefined();
+    });
+    it('passes when MapProviderLocationMapperId is a valid UUID', () => {
+      expect(createAddressSchema.validate({ ...REQUIRED_AD, MapProviderLocationMapperId: VALID_UUID_AD }).error).toBeUndefined();
     });
   });
 
   describe('create schema — negative cases', () => {
     it('fails when AddressLine1 is missing', () => {
-      expect(createAddressSchema.validate({ TagName: 'HOME' }).error).toBeDefined();
+      const { AddressLine1, ...rest } = REQUIRED_AD;
+      expect(createAddressSchema.validate(rest).error).toBeDefined();
     });
     it('fails when TagName is missing', () => {
-      expect(createAddressSchema.validate({ AddressLine1: '123 Main St' }).error).toBeDefined();
+      const { TagName, ...rest } = REQUIRED_AD;
+      expect(createAddressSchema.validate(rest).error).toBeDefined();
     });
-    it('fails when AddressLine1 exceeds 255 characters', () => {
-      expect(createAddressSchema.validate({ AddressLine1: 'x'.repeat(256), TagName: 'T' }).error).toBeDefined();
+    it('fails when ContactAddressTypeId is missing', () => {
+      const { ContactAddressTypeId, ...rest } = REQUIRED_AD;
+      expect(createAddressSchema.validate(rest).error).toBeDefined();
+    });
+    it('fails when AddressLine1 exceeds 50 characters', () => {
+      expect(createAddressSchema.validate({ ...REQUIRED_AD, AddressLine1: 'x'.repeat(51) }).error).toBeDefined();
     });
     it('fails when TagName exceeds 100 characters', () => {
-      expect(createAddressSchema.validate({ AddressLine1: '123 St', TagName: 'x'.repeat(101) }).error).toBeDefined();
+      expect(createAddressSchema.validate({ ...REQUIRED_AD, TagName: 'x'.repeat(101) }).error).toBeDefined();
     });
     it('fails when MapProviderLocationMapperId is not a valid UUID', () => {
-      expect(createAddressSchema.validate({ AddressLine1: '1 St', TagName: 'T', MapProviderLocationMapperId: 'bad' }).error).toBeDefined();
+      expect(createAddressSchema.validate({ ...REQUIRED_AD, MapProviderLocationMapperId: 'bad' }).error).toBeDefined();
     });
     it('fails when ContactAddressTypeId is not a valid UUID', () => {
-      expect(createAddressSchema.validate({ AddressLine1: '1 St', TagName: 'T', ContactAddressTypeId: 'bad' }).error).toBeDefined();
+      expect(createAddressSchema.validate({ ...REQUIRED_AD, ContactAddressTypeId: 'bad' }).error).toBeDefined();
     });
-    it('fails when Pincode exceeds 20 characters', () => {
-      expect(createAddressSchema.validate({ AddressLine1: '1 St', TagName: 'T', Pincode: '1'.repeat(21) }).error).toBeDefined();
+    it('fails when Pincode exceeds 50 characters', () => {
+      expect(createAddressSchema.validate({ ...REQUIRED_AD, Pincode: '1'.repeat(51) }).error).toBeDefined();
     });
   });
 
@@ -199,8 +223,8 @@ describe('addressdetail — field validation', () => {
     it('fails for an empty body', () => {
       expect(updateAddressSchema.validate({}).error).toBeDefined();
     });
-    it('fails when AddressLine1 exceeds 255 characters', () => {
-      expect(updateAddressSchema.validate({ AddressLine1: 'x'.repeat(256) }).error).toBeDefined();
+    it('fails when AddressLine1 exceeds 50 characters', () => {
+      expect(updateAddressSchema.validate({ AddressLine1: 'x'.repeat(51) }).error).toBeDefined();
     });
     it('fails when MapProviderLocationMapperId is not a valid UUID', () => {
       expect(updateAddressSchema.validate({ MapProviderLocationMapperId: 'not-uuid' }).error).toBeDefined();

@@ -467,16 +467,30 @@ const swaggerSpec = {
         properties: { ...auditFields, FirstName: { type: 'string' }, LastName: { type: 'string' }, MobileNo: { type: 'string', nullable: true }, AltMobileNo: { type: 'string', nullable: true }, ContactAddressTypeId: { type: 'string', nullable: true } },
       },
 
+      // ─── App Config (super-admin) ──────────────────────────────────────────
+      AppConfig: {
+        type: 'object',
+        properties: {
+          autoApproveOnboarding: { type: 'boolean', example: false, description: 'When true, brand-new sign-ins are auto-provisioned into a new tenant as TENANT_ADMIN.' },
+        },
+      },
+      AppConfigUpdate: {
+        type: 'object', minProperties: 1,
+        properties: {
+          autoApproveOnboarding: { type: 'boolean', example: true },
+        },
+      },
+
       // ─── AddressDetail ─────────────────────────────────────────────────────
       AddressDetailCreate: {
-        type: 'object', required: ['MapProviderLocationMapperId', 'ContactAddressTypeId'],
+        type: 'object', required: ['ContactAddressTypeId'],
         properties: {
           AddressLine1:               { type: 'string', maxLength: 50, nullable: true, example: '123 Main St' },
           AddressLine2:               { type: 'string', maxLength: 50, nullable: true },
           City:                       { type: 'string', maxLength: 50, nullable: true, example: 'Bengaluru' },
           State:                      { type: 'string', maxLength: 50, nullable: true, example: 'Karnataka' },
           Pincode:                    { type: 'string', maxLength: 50, nullable: true, example: '560001' },
-          MapProviderLocationMapperId: { type: 'string', format: 'uuid' },
+          MapProviderLocationMapperId: { type: 'string', format: 'uuid', nullable: true },
           Landmark:                   { type: 'string', maxLength: 50, nullable: true },
           ContactAddressTypeId:       { type: 'string', format: 'uuid' },
           TagName:                    { type: 'string', maxLength: 100, nullable: true },
@@ -488,7 +502,7 @@ const swaggerSpec = {
         properties: {
           AddressLine1: { type: 'string', maxLength: 50, nullable: true }, AddressLine2: { type: 'string', maxLength: 50, nullable: true },
           City: { type: 'string', nullable: true }, State: { type: 'string', nullable: true }, Pincode: { type: 'string', nullable: true },
-          MapProviderLocationMapperId: { type: 'string', format: 'uuid' }, Landmark: { type: 'string', nullable: true },
+          MapProviderLocationMapperId: { type: 'string', format: 'uuid', nullable: true }, Landmark: { type: 'string', nullable: true },
           ContactAddressTypeId: { type: 'string', format: 'uuid' }, TagName: { type: 'string', nullable: true }, Active: { type: 'boolean' },
         },
       },
@@ -1145,6 +1159,71 @@ const swaggerSpec = {
           Active: {"type":"boolean"},
         },
       },
+      // ── Master-data bootstrap (nested, no ids) ──────────────────────────
+      MasterDataBootstrap: {
+        type: 'object', required: ['organization', 'branch'],
+        properties: {
+          organization: { type: 'object', required: ['Name'], properties: { Name: { type: 'string' } } },
+          branch: {
+            type: 'object', required: ['Name', 'address', 'contact', 'transactionTypeConfig'],
+            properties: {
+              Name: { type: 'string' },
+              address: {
+                type: 'object', required: ['AddressLine1', 'TagName', 'contactAddressType', 'locationMapper'],
+                properties: {
+                  AddressLine1: { type: 'string' },
+                  TagName: { type: 'string' },
+                  contactAddressType: { type: 'object', required: ['Name'], properties: { Name: { type: 'string' } } },
+                  locationMapper: {
+                    type: 'object', required: ['TagName', 'mapProvider', 'locationDetail'],
+                    properties: {
+                      TagName: { type: 'string' },
+                      mapProvider: { type: 'object', required: ['ProviderName'], properties: { ProviderName: { type: 'string' } } },
+                      locationDetail: { type: 'object', required: ['Lat', 'Lng'], properties: { Lat: { type: 'number' }, Lng: { type: 'number' } } },
+                    },
+                  },
+                },
+              },
+              contact: { type: 'object', required: ['FirstName', 'LastName'], properties: { FirstName: { type: 'string' }, LastName: { type: 'string' } } },
+              transactionTypeConfig: {
+                type: 'object', required: ['StartCounterNo', 'Format', 'TagName'],
+                properties: { StartCounterNo: { type: 'integer' }, Format: { type: 'string' }, TagName: { type: 'string' } },
+              },
+            },
+          },
+          item: {
+            type: 'object', required: ['Name', 'category', 'uom', 'costInfo'],
+            properties: {
+              Name: { type: 'string' },
+              category: { type: 'object', required: ['Name'], properties: { Name: { type: 'string' } } },
+              uom: { type: 'object', required: ['UnitName'], properties: { UnitName: { type: 'string' } } },
+              costInfo: {
+                type: 'object', required: ['Amount', 'taxGroup'],
+                properties: { Amount: { type: 'number' }, taxGroup: { type: 'object', required: ['Name'], properties: { Name: { type: 'string' } } } },
+              },
+            },
+          },
+        },
+      },
+      MasterDataBootstrapResult: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          message: { type: 'string' },
+          data: {
+            type: 'object',
+            description: 'Map of created entity → generated UUID',
+            properties: {
+              organization: { type: 'string' }, branch: { type: 'string' },
+              address: { type: 'string' }, contactAddressType: { type: 'string' },
+              locationMapper: { type: 'string' }, mapProvider: { type: 'string' }, locationDetail: { type: 'string' },
+              contact: { type: 'string' }, transactionTypeConfig: { type: 'string' },
+              item: { type: 'string' }, category: { type: 'string' }, uom: { type: 'string' },
+              costInfo: { type: 'string' }, taxGroup: { type: 'string' },
+            },
+          },
+        },
+      },
       PosChannelCreate: {
         type: 'object', required: ["Name", "Code"],
         properties: {
@@ -1561,6 +1640,58 @@ const swaggerSpec = {
     ...crudPaths('Categories',                     '/api/categories',                      'CategoryCreate',                      'CategoryUpdate',                      'Category',                      false),
     ...crudPaths('TransactionTypeConfig',          '/api/transactiontypeconfigs',          'TransactionTypeConfigCreate',         'TransactionTypeConfigUpdate',         'TransactionTypeConfig',         true),
     ...crudPaths('Organizations',                  '/api/organizations',                   'OrganizationCreate',                  'OrganizationUpdate',                  'Organization',                  false),
+    '/api/master-data/bootstrap': {
+      post: {
+        tags: ['Master Data — Setup'],
+        summary: 'First-time master-data bootstrap (Organization + Branch + optional Item) in one transaction',
+        description:
+          'Creates the whole nested master-data tree atomically. Send a nested payload with NO ids — the server resolves foreign keys and inserts bottom-up inside a single transaction. If any step fails, the entire operation is rolled back. Requires TENANT:ADMIN.',
+        security,
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/MasterDataBootstrap' } } },
+        },
+        responses: {
+          201: {
+            description: 'All records created; returns a map of entity → generated id',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MasterDataBootstrapResult' } } },
+          },
+          ...responses.validation,
+          ...responses.unauthorized,
+          ...responses.forbidden,
+          409: { description: 'Conflict — a unique constraint (e.g. Code/Name) was violated; nothing was saved' },
+        },
+      },
+    },
+    '/api/admin/app-config': {
+      get: {
+        tags: ['Admin — App Config'],
+        summary: 'Get global application configuration (SUPER-ADMIN only)',
+        description: 'Returns system-wide settings such as the onboarding auto-approval flag. Requires TENANT:SUPER_ADMIN.',
+        security,
+        responses: {
+          200: { description: 'Current application configuration', content: { 'application/json': { schema: { $ref: '#/components/schemas/AppConfig' } } } },
+          ...responses.unauthorized,
+          ...responses.forbidden,
+        },
+      },
+      patch: {
+        tags: ['Admin — App Config'],
+        summary: 'Update global application configuration (SUPER-ADMIN only)',
+        description: 'Updates system-wide settings. When onboarding auto-approval is enabled, brand-new sign-ins are provisioned automatically into a new tenant as its TENANT_ADMIN. Requires TENANT:SUPER_ADMIN.',
+        security,
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/AppConfigUpdate' } } },
+        },
+        responses: {
+          200: { description: 'Updated application configuration', content: { 'application/json': { schema: { $ref: '#/components/schemas/AppConfig' } } } },
+          ...responses.validation,
+          ...responses.unauthorized,
+          ...responses.forbidden,
+        },
+      },
+    },
     ...crudPaths('UOMFactors',                     '/api/uomfactors',                      'UOMFactorCreate',                     'UOMFactorUpdate',                     'UOMFactor',                     false),
     ...crudPaths('TransactionTypes',               '/api/transactiontypes',                'TransactionTypeCreate',               'TransactionTypeUpdate',               'TransactionType',               true),
     ...crudPaths('AccountTypeBases',               '/api/accounttypebases',                'AccountTypeBaseCreate',               'AccountTypeBaseUpdate',               'AccountTypeBase',               false),
@@ -1712,6 +1843,43 @@ const swaggerSpec = {
         tags: ['Admin — Users'], summary: 'List users in caller\'s tenant', security,
         parameters: paginationParams,
         responses: { ...paginatedResponse('AdminUser'), ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/users/all': {
+      get: {
+        tags: ['Admin — Users'],
+        summary: 'List users across ALL tenants (super admin only)',
+        description: 'Cross-tenant listing of every user_tenants membership. Requires TENANT:SUPER_ADMIN. Each row carries its tenant_id and a best-effort organization name (tenant_name).',
+        security,
+        parameters: paginationParams,
+        responses: { ...paginatedResponse('AdminUser'), ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/users/all/status': {
+      put: {
+        tags: ['Admin — Users'],
+        summary: 'Activate or suspend a user in any tenant (super admin only)',
+        description: 'Suspending a user sets is_active = 0, which blocks their login (the login query filters is_active = TRUE). Activating restores access. Requires TENANT:SUPER_ADMIN. Suspending a super admin is rejected with 403.',
+        security,
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['email', 'tenantId', 'status'],
+            properties: {
+              email:    { type: 'string', format: 'email', description: 'Target user email' },
+              tenantId: { type: 'string', description: 'Tenant the membership belongs to' },
+              status:   { type: 'string', enum: ['ACTIVE', 'SUSPENDED'] },
+            },
+          }}},
+        },
+        responses: {
+          200: { description: 'Status updated' },
+          ...responses.validation,
+          ...responses.forbidden,
+          ...responses.notFound,
+          ...responses.unauthorized,
+        },
       },
     },
     '/api/admin/users/{email}': {

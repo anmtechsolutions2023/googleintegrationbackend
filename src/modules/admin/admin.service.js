@@ -4,9 +4,10 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { withConnection, withTransaction } = require('../../utils/dbHelper');
-const { QUERIES } = require('../../config/constants');
+const { QUERIES, ONBOARDING } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
+const { logger } = require('../../utils/logger');
 const {
   calculatePagination,
   getPaginationMetadata,
@@ -34,6 +35,113 @@ const listOnboardingRequests = (status = 'PENDING', page = 1, limit = 20) =>
     return { data: rows, pagination: getPaginationMetadata(total, pageNum, limitNum) };
   });
 
+/**
+ * Shared provisioning core: adds an approved user to a tenant and marks their
+ * onboarding request APPROVED. Runs on a caller-supplied transaction connection
+ * so both the manual admin approval and the auto-approver reuse one code path.
+ * @param {Object} conn - Active transaction connection.
+ * @param {Object} p
+ * @param {string} [p.requestId] - Onboarding request to mark APPROVED (optional).
+ * @param {string} p.email
+ * @param {string} p.tenantId
+ * @param {string[]} p.roleIds
+ * @param {string} p.reviewerEmail
+ * @param {boolean} [p.isAdmin=false] - Whether to grant the tenant-admin flag.
+ */
+const provisionApprovedUser = async (
+  conn,
+  { requestId, email, tenantId, roleIds, reviewerEmail, isAdmin = false }
+) => {
+  const [existing] = await conn.execute(
+    'SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
+    [email, tenantId]
+  );
+  if (existing.length > 0) {
+    throw new HttpError(MESSAGES.ERROR.USER_ALREADY_EXISTS, 409);
+  }
+
+  await conn.execute(QUERIES.ADMIN_USERS.INSERT_USER_TENANT_FLAGS, [
+    uuidv4(),
+    email,
+    tenantId,
+    isAdmin ? 1 : 0,
+    0,
+  ]);
+
+  for (const roleId of roleIds) {
+    await conn.execute(QUERIES.USER_ROLES.INSERT, [
+      uuidv4(),
+      email,
+      tenantId,
+      roleId,
+      reviewerEmail,
+    ]);
+  }
+
+  if (requestId) {
+    await conn.execute(QUERIES.ONBOARDING_REQUESTS.UPDATE_STATUS, [
+      'APPROVED',
+      null,
+      reviewerEmail,
+      tenantId,
+      requestId,
+    ]);
+  }
+};
+
+/**
+ * Clones the standard role catalog (+ their permissions) from a template tenant
+ * into a brand-new tenant, so an auto-created tenant has a full IAM setup.
+ * Features are global; only roles + role_permissions are per-tenant.
+ * @param {Object} conn - Active transaction connection.
+ * @param {string} newTenantId - Tenant to populate.
+ * @param {string} [templateTenantId] - Source tenant (defaults to the seeded one).
+ * @returns {Promise<Object>} Map of roleName → new roleId for the new tenant.
+ */
+const provisionTenantIam = async (
+  conn,
+  newTenantId,
+  templateTenantId = ONBOARDING.TEMPLATE_TENANT_ID
+) => {
+  const [templateRoles] = await conn.execute(
+    QUERIES.TENANT_PROVISION.SELECT_TEMPLATE_ROLES,
+    [templateTenantId]
+  );
+  if (templateRoles.length === 0) {
+    throw new HttpError(
+      'Cannot provision new tenant: template tenant has no roles.',
+      500
+    );
+  }
+
+  const roleIdByName = {};
+  for (const tr of templateRoles) {
+    const newRoleId = uuidv4();
+    await conn.execute(QUERIES.TENANT_PROVISION.INSERT_ROLE_FULL, [
+      newRoleId,
+      newTenantId,
+      tr.name,
+      tr.description,
+      tr.is_system_role,
+      tr.is_active,
+    ]);
+    roleIdByName[tr.name] = newRoleId;
+
+    const [perms] = await conn.execute(
+      QUERIES.TENANT_PROVISION.SELECT_ROLE_FEATURE_IDS,
+      [tr.id]
+    );
+    for (const perm of perms) {
+      await conn.execute(QUERIES.ROLE_PERMISSIONS.INSERT, [
+        uuidv4(),
+        newRoleId,
+        perm.feature_id,
+      ]);
+    }
+  }
+  return roleIdByName;
+};
+
 const approveRequest = (requestId, tenantId, roleIds, reviewerEmail) =>
   withTransaction(async (conn) => {
     const [reqRows] = await conn.execute(
@@ -45,39 +153,61 @@ const approveRequest = (requestId, tenantId, roleIds, reviewerEmail) =>
     }
     const { email, name } = reqRows[0];
 
-    const [existing] = await conn.execute(
-      'SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
-      [email, tenantId]
-    );
-    if (existing.length > 0) {
-      throw new HttpError(MESSAGES.ERROR.USER_ALREADY_EXISTS, 409);
-    }
-
-    await conn.execute(QUERIES.ADMIN_USERS.INSERT_USER_TENANT, [
-      uuidv4(),
+    await provisionApprovedUser(conn, {
+      requestId,
       email,
       tenantId,
-    ]);
-
-    for (const roleId of roleIds) {
-      await conn.execute(QUERIES.USER_ROLES.INSERT, [
-        uuidv4(),
-        email,
-        tenantId,
-        roleId,
-        reviewerEmail,
-      ]);
-    }
-
-    await conn.execute(QUERIES.ONBOARDING_REQUESTS.UPDATE_STATUS, [
-      'APPROVED',
-      null,
+      roleIds,
       reviewerEmail,
-      tenantId,
-      requestId,
-    ]);
+      isAdmin: false,
+    });
 
     return { email, name, tenantId, roleIds };
+  });
+
+/**
+ * Auto-approves a brand-new (unprovisioned) email: creates a new tenant, clones
+ * the standard IAM catalog into it, provisions the user as its TENANT_ADMIN, and
+ * marks a fresh onboarding request APPROVED — all in one transaction. Called
+ * from the auth guest path when the super-admin has enabled auto-approval.
+ * @param {Object} p - { email, name, googleSub }
+ * @returns {Promise<Object>} { tenantId, requestId, roleName }
+ */
+const autoApproveOnboarding = ({ email, name, googleSub }) =>
+  withTransaction(async (conn) => {
+    const newTenantId = uuidv4();
+    const requestId = uuidv4();
+
+    await conn.execute(QUERIES.ONBOARDING_REQUESTS.INSERT, [
+      requestId,
+      email,
+      name,
+      googleSub || null,
+    ]);
+
+    const roleIdByName = await provisionTenantIam(conn, newTenantId);
+    const adminRoleId = roleIdByName[ONBOARDING.AUTO_APPROVE_ROLE];
+    if (!adminRoleId) {
+      throw new HttpError(
+        `Template tenant is missing the '${ONBOARDING.AUTO_APPROVE_ROLE}' role.`,
+        500
+      );
+    }
+
+    await provisionApprovedUser(conn, {
+      requestId,
+      email,
+      tenantId: newTenantId,
+      roleIds: [adminRoleId],
+      reviewerEmail: ONBOARDING.AUTO_REVIEWER,
+      isAdmin: true,
+    });
+
+    logger.info('Onboarding auto-approved into new tenant', {
+      email,
+      tenantId: newTenantId,
+    });
+    return { tenantId: newTenantId, requestId, roleName: ONBOARDING.AUTO_APPROVE_ROLE };
   });
 
 const rejectRequest = (requestId, reason, reviewerEmail) =>
@@ -136,6 +266,18 @@ const listUsers = (tenantId, page = 1, limit = 20) =>
     return { data: rows, pagination: getPaginationMetadata(total, pageNum, limitNum) };
   });
 
+// Super-admin-only cross-tenant listing: every user_tenants row across all
+// tenants. Not tenant-scoped — gated at the route by TENANT:SUPER_ADMIN.
+const listAllUsers = (page = 1, limit = 20) =>
+  withConnection(async (conn) => {
+    const { pageNum, limitNum, offset } = calculatePagination(page, limit);
+    const [[{ total }]] = await conn.execute(QUERIES.ADMIN_USERS.COUNT_ALL_TENANTS);
+    const [rows] = await conn.query(
+      `${QUERIES.ADMIN_USERS.SELECT_ALL_TENANTS} LIMIT ${limitNum} OFFSET ${offset}`
+    );
+    return { data: rows, pagination: getPaginationMetadata(total, pageNum, limitNum) };
+  });
+
 const getUserDetail = (email, tenantId) =>
   withConnection(async (conn) => {
     const [rows] = await conn.execute(QUERIES.ADMIN_USERS.SELECT_BY_EMAIL, [
@@ -172,6 +314,28 @@ const updateUserRoles = (email, tenantId, roleIds, adminEmail) =>
 
 const updateUserStatus = (email, tenantId, status) =>
   withConnection(async (conn) => {
+    const isActive = status === 'ACTIVE' ? 1 : 0;
+    await conn.execute(QUERIES.ADMIN_USERS.UPDATE_STATUS, [
+      isActive,
+      status,
+      email,
+      tenantId,
+    ]);
+  });
+
+// Super-admin-only: suspend/activate a user in ANY tenant (SUSPENDED blocks
+// login because USER_TENANTS.SELECT filters is_active = TRUE). Guards against
+// disabling a super admin — including yourself — to avoid a system lockout.
+const updateUserStatusCrossTenant = (email, tenantId, status) =>
+  withConnection(async (conn) => {
+    const [rows] = await conn.execute(
+      QUERIES.ADMIN_USERS.SELECT_FLAGS_BY_EMAIL_TENANT,
+      [email, tenantId]
+    );
+    if (rows.length === 0) throw new HttpError('User not found in tenant.', 404);
+    if (rows[0].is_super_admin) {
+      throw new HttpError('Super admins cannot be suspended.', 403);
+    }
     const isActive = status === 'ACTIVE' ? 1 : 0;
     await conn.execute(QUERIES.ADMIN_USERS.UPDATE_STATUS, [
       isActive,
@@ -314,13 +478,18 @@ const deleteFeature = (featureId) =>
 module.exports = {
   listOnboardingRequests,
   approveRequest,
+  provisionApprovedUser,
+  provisionTenantIam,
+  autoApproveOnboarding,
   rejectRequest,
   reopenRequest,
   listUsers,
+  listAllUsers,
   getUserDetail,
   getUserRoles,
   updateUserRoles,
   updateUserStatus,
+  updateUserStatusCrossTenant,
   removeUser,
   listRoles,
   createRole,

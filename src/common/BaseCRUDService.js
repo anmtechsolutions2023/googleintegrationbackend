@@ -158,35 +158,50 @@ class BaseCRUDService {
   async create(data, tenantId, userEmail) {
     logger.info(`Creating ${this.entityName}`, { tenantId, userEmail })
 
-    return await withConnection(async (connection) => {
-      const id = uuidv4()
+    return await withConnection(async (connection) =>
+      this.createTx(connection, data, tenantId, userEmail),
+    )
+  }
 
-      // Prepare insert parameters - this should be overridden in child classes
-      const params = this.prepareInsertParams(id, data, tenantId, userEmail)
+  /**
+   * Insert a new record on a caller-supplied connection WITHOUT managing the
+   * connection or transaction. The caller owns commit/rollback — use this to
+   * compose several inserts across modules inside a single transaction
+   * (e.g. the master-data bootstrap orchestrator).
+   * @param {Object} connection - Active DB connection (typically inside withTransaction)
+   * @param {Object} data - Record data
+   * @param {string} tenantId - Tenant ID
+   * @param {string} userEmail - User email
+   * @returns {Promise<Object>} Created record ({ id, ...data })
+   */
+  async createTx(connection, data, tenantId, userEmail) {
+    const id = uuidv4()
 
-      // Debug logging to catch undefined parameters
-      logger.info(`${this.entityName} INSERT params:`, {
-        params,
-        query: this.queries.INSERT,
-      })
+    // Prepare insert parameters - this should be overridden in child classes
+    const params = this.prepareInsertParams(id, data, tenantId, userEmail)
 
-      // Check for undefined parameters
-      if (params.some((param) => param === undefined)) {
-        logger.error(`Undefined parameters detected:`, { params })
-        throw new HttpError(
-          `Invalid parameters: contains undefined values`,
-          MESSAGES.HTTP_STATUS.BAD_REQUEST,
-        )
-      }
-
-      await connection.execute(this.queries.INSERT, params)
-
-      logger.info(`${this.entityName} created successfully`, { id, tenantId })
-      return {
-        id,
-        ...data,
-      }
+    // Debug logging to catch undefined parameters
+    logger.info(`${this.entityName} INSERT params:`, {
+      params,
+      query: this.queries.INSERT,
     })
+
+    // Check for undefined parameters
+    if (params.some((param) => param === undefined)) {
+      logger.error(`Undefined parameters detected:`, { params })
+      throw new HttpError(
+        `Invalid parameters: contains undefined values`,
+        MESSAGES.HTTP_STATUS.BAD_REQUEST,
+      )
+    }
+
+    await connection.execute(this.queries.INSERT, params)
+
+    logger.info(`${this.entityName} created successfully`, { id, tenantId })
+    return {
+      id,
+      ...data,
+    }
   }
 
   /**

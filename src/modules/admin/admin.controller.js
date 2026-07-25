@@ -125,6 +125,16 @@ const listUsers = [
   }),
 ];
 
+// Super-admin only: list users across every tenant (route-gated by scope).
+const listAllUsers = [
+  validateQuery(schemas.listUsersSchema),
+  asyncHandler(async (req, res) => {
+    const { page, limit } = req.validatedQuery;
+    const result = await service.listAllUsers(page, limit);
+    paginatedResponse(res, result.data, result.pagination, 'All users retrieved');
+  }),
+];
+
 const getUserDetail = [
   asyncHandler(async (req, res) => {
     const { tenantId } = extractUserContext(req);
@@ -168,6 +178,26 @@ const updateUserStatus = [
       AUDIT_CATEGORIES.USER_MGMT,
       isSuspend ? 'WARN' : 'INFO',
       req.params.email);
+
+    successResponse(res, MESSAGES.SUCCESS.USER_STATUS_UPDATED);
+  }),
+];
+
+// Super-admin only: suspend/activate a user in any tenant (target in the body).
+const updateUserStatusCrossTenant = [
+  validateBody(schemas.updateUserStatusCrossTenantSchema),
+  asyncHandler(async (req, res) => {
+    const { userEmail: adminEmail } = extractUserContext(req);
+    const { email, tenantId, status } = req.body;
+    await service.updateUserStatusCrossTenant(email, tenantId, status);
+
+    const isSuspend = status === 'SUSPENDED';
+    await captureAudit(req, tenantId, adminEmail,
+      isSuspend ? 'SUSPEND_USER' : 'ACTIVATE_USER',
+      isSuspend ? STATUSES.SUSPENDED : STATUSES.ACTIVATED,
+      AUDIT_CATEGORIES.USER_MGMT,
+      isSuspend ? 'WARN' : 'INFO',
+      email);
 
     successResponse(res, MESSAGES.SUCCESS.USER_STATUS_UPDATED);
   }),
@@ -324,10 +354,12 @@ module.exports = {
   rejectOnboarding,
   reopenOnboarding,
   listUsers,
+  listAllUsers,
   getUserDetail,
   getUserRoles,
   updateUserRoles,
   updateUserStatus,
+  updateUserStatusCrossTenant,
   removeUser,
   listRoles,
   createRole,
