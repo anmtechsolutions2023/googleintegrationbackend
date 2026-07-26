@@ -41,6 +41,11 @@ module.exports = {
     TENANT_SWITCH_FAILED: 'Tenant switch failed',
     FORBIDDEN_NO_SCOPES: 'Forbidden. No active permissions found for tenant ',
     FORBIDDEN_MISSING_SCOPE: 'Forbidden. Access requires one of these scopes: ',
+    // First-time tenancy setup gate
+    TENANT_SETUP_REQUIRED:
+      'Tenancy setup is not complete. Finish the first-time setup wizard before using this feature.',
+    TENANT_SETUP_ALREADY_DONE:
+      'Tenancy setup has already been completed for this tenant.',
     // Validation
     VALIDATION_ERROR: 'Validation error: ',
     INVALID_TOKEN_PAYLOAD: 'Token payload missing tenant ID or scopes.',

@@ -1002,17 +1002,23 @@ module.exports = {
         ORDER BY ut.user_email ASC`,
       // Cross-tenant listing for super admins only. No tenant_id filter; each row
       // carries its tenant_id (plus a best-effort organization name for display).
+      // setup_status is per TENANT, so every row of the same tenant carries the
+      // same value. A tenant with no tenant_setup row has never run the
+      // first-time wizard and reports PENDING.
       SELECT_ALL_TENANTS: `
         SELECT ut.user_email, ut.tenant_id, ut.is_admin, ut.is_super_admin,
                ut.is_active, ut.status,
                (SELECT o.Name FROM organizationdetail o
                   WHERE o.TenantId = ut.tenant_id
                   ORDER BY o.CreatedOn ASC LIMIT 1) AS tenant_name,
+               COALESCE(ts.status, 'PENDING') AS setup_status,
+               ts.completed_at AS setup_completed_at,
                GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
         FROM user_tenants ut
         LEFT JOIN user_roles ur ON ut.user_email = ur.user_email AND ut.tenant_id = ur.tenant_id
         LEFT JOIN roles r ON ur.role_id = r.id
-        GROUP BY ut.user_email, ut.tenant_id
+        LEFT JOIN tenant_setup ts ON ts.tenant_id = ut.tenant_id
+        GROUP BY ut.user_email, ut.tenant_id, ts.status, ts.completed_at
         ORDER BY ut.tenant_id ASC, ut.user_email ASC`,
       COUNT_ALL_TENANTS: 'SELECT COUNT(*) as total FROM user_tenants',
       // Membership flags for a single (email, tenant) pair — used by the super-admin
@@ -1060,6 +1066,15 @@ module.exports = {
         'SELECT setting_key, setting_value FROM app_settings WHERE setting_key = ?',
       UPSERT:
         'INSERT INTO app_settings (setting_key, setting_value, updated_by, updated_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = NOW()',
+    },
+
+    // First-time master-data setup state, one row per tenant. A missing row is
+    // equivalent to PENDING — see database/01-schema-definition.sql §1.1b.
+    TENANT_SETUP: {
+      SELECT_BY_TENANT:
+        'SELECT tenant_id, status, completed_at, completed_by FROM tenant_setup WHERE tenant_id = ?',
+      UPSERT_COMPLETED:
+        "INSERT INTO tenant_setup (tenant_id, status, completed_at, completed_by) VALUES (?, 'COMPLETED', NOW(), ?) ON DUPLICATE KEY UPDATE status = 'COMPLETED', completed_at = NOW(), completed_by = VALUES(completed_by)",
     },
 
     // Per-tenant IAM provisioning (clone the standard role catalog to a new tenant)
@@ -1166,6 +1181,9 @@ module.exports = {
     CREATE_FEATURE:           'Created new feature',
     UPDATE_FEATURE:           'Updated feature',
     DELETE_FEATURE:           'Deleted feature',
+    // First-time tenancy setup
+    MASTER_SETUP_COMPLETED:   'Completed first-time tenancy setup',
+    MASTER_SETUP_BLOCKED:     'Access blocked — tenancy setup incomplete',
     // Data / reports
     VIEW_ADMIN_SETTINGS:      'Viewed admin settings',
     VIEW_GENERAL_DATA:        'Viewed general data',
@@ -1192,6 +1210,27 @@ module.exports = {
       'e3845e08-dcc2-11f0-8e78-0242ac110002',
     AUTO_APPROVE_ROLE: 'TENANT_ADMIN',
     AUTO_REVIEWER: 'system-auto',
+  },
+  // First-time tenancy (master-data) setup gate.
+  TENANT_SETUP: {
+    STATUS_PENDING: 'PENDING',
+    STATUS_COMPLETED: 'COMPLETED',
+    // Machine-readable code on the 403 the gate returns, so clients can route
+    // the user to the wizard instead of matching on message text.
+    ERROR_CODE: 'TENANT_SETUP_REQUIRED',
+    // Path prefixes that stay reachable while a tenant's setup is incomplete:
+    // sign-in, the guest/onboarding flow, logout/profile, audit logs, the setup
+    // wizard itself, tenant switching, and the super-admin app-config endpoint.
+    ALLOWED_PATH_PREFIXES: [
+      '/api/auth',
+      '/api/onboarding',
+      '/api/user',
+      '/api/audit',
+      '/api/master-data',
+      '/api/tenants',
+      '/api/admin/app-config',
+      '/api-docs',
+    ],
   },
   SCOPES: {
     TENANT_ADMIN: 'TENANT:ADMIN',

@@ -14,6 +14,9 @@ const { QUERIES, STATUSES, SCOPES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('
 const { GOOGLE_CLIENT_ID, JWT_SECRET } = require('../../config/envConfig');
 const appConfig = require('../appconfig/appconfig.service');
 const adminService = require('../admin/admin.service');
+// Repository, not the service: mastersetup.service pulls in ~14 CRUD services.
+// This file only needs the setup flag.
+const setupRepository = require('../mastersetup/mastersetup.repository');
 
 const GOOGLE_OAUTH2_CLIENT = new OAuth2Client(GOOGLE_CLIENT_ID);
 
@@ -116,6 +119,7 @@ const findAndGetPermissions = async (req, userData) => {
         permissions,
         roles: roleRows.map((r) => r.role_name),
         associatedTenants: tenantRows,
+        setupCompleted: await setupRepository.isSetupComplete(tenantId),
       };
     }
 
@@ -171,6 +175,9 @@ const findAndGetPermissions = async (req, userData) => {
             permissions,
             roles: roleRows.map((r) => r.role_name),
             associatedTenants: newTenantRows,
+            // A freshly auto-provisioned tenant has no tenant_setup row, so this
+            // resolves to false and the new tenant admin lands in the wizard.
+            setupCompleted: await setupRepository.isSetupComplete(newTenantId),
           };
         } catch (autoErr) {
           logger.error(
@@ -265,6 +272,9 @@ const switchTenantPermissions = async (
       permissions,
       roles: [],
       associatedTenants: tenantRows,
+      // Resolved for the TARGET tenant: a user who belongs to a set-up tenant
+      // and an unfinished one must be gated after switching into the latter.
+      setupCompleted: await setupRepository.isSetupComplete(targetTenantId),
     };
   } catch (error) {
     logger.error('Switch Tenant Error:', error);
@@ -300,8 +310,41 @@ const generateAppToken = (userPermissions) => {
     appPayload.onboardingRequestId = userPermissions.onboardingRequestId;
   }
 
+  // First-time tenancy setup flag, for provisioned users only (guests have no
+  // tenant to set up). Only ever written when the caller resolved it, so the
+  // claim is absent — and therefore non-blocking — on any path that did not.
+  if (!isGuest && userPermissions.setupCompleted !== undefined) {
+    appPayload.setupCompleted = !!userPermissions.setupCompleted;
+  }
+
   const expiry = isGuest ? config.JWT.GUEST_EXPIRATION : config.JWT.EXPIRATION;
   return jwt.sign(appPayload, JWT_SECRET, { expiresIn: expiry });
+};
+
+/**
+ * Re-signs the caller's current token with setupCompleted: true.
+ *
+ * Used the moment the setup wizard succeeds: the bearer token in that very
+ * request still says the tenant is incomplete, so returning a refreshed one
+ * unlocks the app without forcing a re-login. Identity, scopes, roles and
+ * tenant list are carried over verbatim — nothing is elevated here, only the
+ * setup flag changes.
+ *
+ * @param {Object} tokenPayload - Decoded JWT payload from req.user.
+ * @returns {string} Newly signed JWT.
+ */
+const reissueTokenWithSetupComplete = (tokenPayload) => {
+  // Drop the previous iat/exp — jwt.sign issues fresh ones, and passing the old
+  // values alongside expiresIn is an error.
+  const claims = { ...tokenPayload };
+  delete claims.iat;
+  delete claims.exp;
+
+  return jwt.sign(
+    { ...claims, setupCompleted: true },
+    JWT_SECRET,
+    { expiresIn: config.JWT.EXPIRATION }
+  );
 };
 
 module.exports = {
@@ -309,4 +352,5 @@ module.exports = {
   findAndGetPermissions,
   switchTenantPermissions,
   generateAppToken,
+  reissueTokenWithSetupComplete,
 };

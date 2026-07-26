@@ -28,6 +28,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- =============================================================================
 
 DROP TABLE IF EXISTS tenant_features;
+DROP TABLE IF EXISTS tenant_setup;
 DROP TABLE IF EXISTS user_tenants;
 DROP TABLE IF EXISTS features;
 DROP TABLE IF EXISTS audit_logs;
@@ -48,6 +49,26 @@ CREATE TABLE user_tenants (
     PRIMARY KEY (id),
     UNIQUE KEY uk_tenant_user (tenant_id, user_email),
     INDEX idx_user_lookup (user_email)
+);
+
+-- 1.1b tenant_setup
+-- One row per tenant recording whether the first-time master-data setup wizard
+-- (POST /api/master-data/bootstrap) has been completed. Until it is, the tenant's
+-- users are gated to Home / Audit Logs / Logout by the requireTenantSetup
+-- middleware.
+--
+-- The ABSENCE of a row is equivalent to status = 'PENDING' — a brand-new tenant
+-- has no row and is therefore gated. There is no FK: user_tenants.tenant_id is
+-- not unique (one row per membership) and no standalone tenants table exists.
+CREATE TABLE tenant_setup (
+    tenant_id     CHAR(36)                       NOT NULL,
+    status        ENUM('PENDING','COMPLETED')    NOT NULL DEFAULT 'PENDING',
+    completed_at  TIMESTAMP                      NULL,
+    completed_by  VARCHAR(255)                   NULL,
+    created_at    TIMESTAMP                      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP                      NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                                 ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id)
 );
 
 -- 1.2 features
@@ -293,7 +314,11 @@ CREATE TABLE transactiontypeconfig (
     UpdatedBy       VARCHAR(50),
     PRIMARY KEY (Id),
     UNIQUE (StartCounterNo, Prefix, Format, TenantId),
-    UNIQUE KEY uk_ttc_tagname (TagName)
+    -- Scoped by TenantId, like every other UNIQUE in this file. Without the
+    -- TenantId column this is a GLOBAL namespace: once any tenant owns the tag
+    -- 'Onboarding' or 'Invoice', no other tenant can ever create it, and the
+    -- first-time setup wizard fails for every tenant after the first.
+    UNIQUE KEY uk_ttc_tagname (TagName, TenantId)
 );
 
 -- 3.5 organizationdetail
@@ -468,7 +493,8 @@ CREATE TABLE mapproviderlocationmapper (
     UpdatedBy         VARCHAR(50),
     PRIMARY KEY (Id),
     UNIQUE (MapProviderId, LocationDetailId, TenantId),
-    UNIQUE KEY uk_mplm_tagname (TagName),
+    -- Tenant-scoped — see the note on transactiontypeconfig.uk_ttc_tagname.
+    UNIQUE KEY uk_mplm_tagname (TagName, TenantId),
     FOREIGN KEY (MapProviderId)    REFERENCES mapprovider(Id),
     FOREIGN KEY (LocationDetailId) REFERENCES locationdetail(Id)
 );
@@ -519,7 +545,8 @@ CREATE TABLE addressdetail (
     UpdatedBy                    VARCHAR(50),
     PRIMARY KEY (Id),
     UNIQUE (AddressLine1, City, ContactAddressTypeId, TenantId),
-    UNIQUE KEY uk_ad_tagname (TagName),
+    -- Tenant-scoped — see the note on transactiontypeconfig.uk_ttc_tagname.
+    UNIQUE KEY uk_ad_tagname (TagName, TenantId),
     FOREIGN KEY (ContactAddressTypeId)        REFERENCES contactaddresstype(Id),
     FOREIGN KEY (MapProviderLocationMapperId) REFERENCES mapproviderlocationmapper(Id)
 );

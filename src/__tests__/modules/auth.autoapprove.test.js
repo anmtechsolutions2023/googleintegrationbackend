@@ -20,10 +20,16 @@ jest.mock('../../modules/appconfig/appconfig.service', () => ({
 jest.mock('../../modules/admin/admin.service', () => ({
   autoApproveOnboarding: jest.fn(),
 }));
+// Setup-state lookup is a collaborator here, not the subject. Mocked so it does
+// not consume entries from the sequenced mockConn.execute queue below.
+jest.mock('../../modules/mastersetup/mastersetup.repository', () => ({
+  isSetupComplete: jest.fn(async () => false),
+}));
 
 const { findAndGetPermissions } = require('../../modules/auth/auth.service');
 const appConfig = require('../../modules/appconfig/appconfig.service');
 const adminService = require('../../modules/admin/admin.service');
+const setupRepository = require('../../modules/mastersetup/mastersetup.repository');
 const { SCOPES } = require('../../config/constants');
 
 const req = { headers: {}, ip: '127.0.0.1' };
@@ -57,6 +63,30 @@ describe('findAndGetPermissions — guest path auto-approval', () => {
     expect(result.roles).toEqual(['TENANT_ADMIN']);
     expect(result.permissions).toContain(SCOPES.TENANT_ADMIN);
     expect(result.permissions).toContain('MASTER_DATA:READ');
+  });
+
+  it('reports the freshly created tenant as needing first-time setup', async () => {
+    appConfig.isAutoApproveEnabled.mockResolvedValue(true);
+    adminService.autoApproveOnboarding.mockResolvedValue({
+      tenantId: 'new-tenant', requestId: 'req-1', roleName: 'TENANT_ADMIN',
+    });
+    // A brand-new tenant has no tenant_setup row.
+    setupRepository.isSetupComplete.mockResolvedValue(false);
+
+    mockConn.execute
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[{ tenant_id: 'new-tenant', is_admin: 1, is_super_admin: 0 }]])
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[{ role_name: 'TENANT_ADMIN' }]]);
+
+    const result = await findAndGetPermissions(req, userData);
+
+    // Drives setupCompleted:false into the JWT, so the new tenant admin is sent
+    // straight to the setup wizard rather than into an unconfigured app.
+    expect(setupRepository.isSetupComplete).toHaveBeenCalledWith('new-tenant');
+    expect(result.setupCompleted).toBe(false);
   });
 
   it('leaves a brand-new email PENDING when the flag is OFF', async () => {

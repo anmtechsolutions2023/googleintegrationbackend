@@ -2,6 +2,8 @@
 // Centralized route configuration and registration.
 // All module routes are imported and registered here.
 
+const { requireTenantSetup } = require('../middleware/setupGate');
+
 const authRoutes = require('../modules/auth/auth.routes');
 const onboardingRoutes = require('../modules/onboarding/onboarding.routes');
 const adminRoutes = require('../modules/admin/admin.routes');
@@ -68,6 +70,12 @@ const posreportRoutes = require('../modules/posreport/posreport.routes');
  * @param {Object} app - Express application instance.
  */
 const registerRoutes = (app) => {
+  // First-time tenancy setup gate. Registered BEFORE every module router so a
+  // tenant that has not completed the setup wizard cannot reach any feature by
+  // direct URL. Its own allowlist (constants.TENANT_SETUP.ALLOWED_PATH_PREFIXES)
+  // keeps auth, onboarding, logout, audit logs and the wizard itself reachable.
+  app.use(requireTenantSetup);
+
   // Authentication module - Google OAuth
   app.use('/api/auth', authRoutes);
 

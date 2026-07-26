@@ -1269,6 +1269,202 @@ describe('Master-data bootstrap — POST /api/master-data/bootstrap', () => {
     expect(mockConnection.rollback).toHaveBeenCalled();
     expect(mockConnection.commit).not.toHaveBeenCalled();
   });
+
+  it('returns a refreshed setupToken so the caller is no longer gated', async () => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    const res = await request(server)
+      .post('/api/master-data/bootstrap')
+      .set('Authorization', adminToken())
+      .send(validBootstrap());
+
+    expect(res.status).toBe(201);
+    expect(typeof res.body.data.setupToken).toBe('string');
+
+    const claims = jwt.verify(res.body.data.setupToken, TEST_SECRET);
+    expect(claims.setupCompleted).toBe(true);
+    // Identity and scopes carried over verbatim — nothing is elevated here.
+    expect(claims.tid).toBe(TENANT_ID);
+    expect(claims.email).toBe('admin@test.com');
+    expect(claims.scopes).toEqual(['TENANT:ADMIN']);
+  });
+
+  it('rejects a second bootstrap with 409 once the tenant is set up', async () => {
+    mockConnection.execute.mockImplementation((sql) => {
+      if ((sql || '').includes('FROM tenant_setup')) {
+        return Promise.resolve([[{ tenant_id: TENANT_ID, status: 'COMPLETED' }]]);
+      }
+      return defaultExecuteImpl(sql);
+    });
+
+    const res = await request(server)
+      .post('/api/master-data/bootstrap')
+      .set('Authorization', adminToken())
+      .send(validBootstrap());
+
+    expect(res.status).toBe(409);
+    // Guard runs before the transaction — no duplicate master-data tree.
+    expect(mockConnection.beginTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('Tenancy setup status — GET /api/master-data/status', () => {
+  it('no token → 401', async () => {
+    const res = await request(server).get('/api/master-data/status');
+    expect(res.status).toBe(401);
+  });
+
+  it('reports COMPLETED when the tenant has a completed row', async () => {
+    mockConnection.execute.mockImplementation((sql) => {
+      if ((sql || '').includes('FROM tenant_setup')) {
+        return Promise.resolve([
+          [{ tenant_id: TENANT_ID, status: 'COMPLETED', completed_at: null, completed_by: 'a@b.com' }],
+        ]);
+      }
+      return defaultExecuteImpl(sql);
+    });
+
+    const res = await request(server)
+      .get('/api/master-data/status')
+      .set('Authorization', adminToken());
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ status: 'COMPLETED', isComplete: true });
+  });
+
+  it('reports PENDING when the tenant has no row at all', async () => {
+    mockConnection.execute.mockImplementation((sql) => {
+      if ((sql || '').includes('FROM tenant_setup')) return Promise.resolve([[]]);
+      return defaultExecuteImpl(sql);
+    });
+
+    const res = await request(server)
+      .get('/api/master-data/status')
+      .set('Authorization', adminToken());
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ status: 'PENDING', isComplete: false });
+  });
+
+  it('is reachable by a non-admin (a gated user must be able to see why)', async () => {
+    const res = await request(server)
+      .get('/api/master-data/status')
+      .set('Authorization', viewerToken());
+    expect(res.status).toBe(200);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FIRST-TIME SETUP GATE
+//
+// End-to-end proof that a tenant which has not finished the wizard cannot reach
+// features by direct API call, and that the allowlisted routes stay open.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('First-time setup gate', () => {
+  // Same shape as adminToken(), plus the explicit "not set up" claim.
+  const gatedAdminToken = () =>
+    'Bearer ' +
+    jwt.sign(
+      {
+        tid: TENANT_ID,
+        email: 'admin@test.com',
+        scopes: ['TENANT:ADMIN'],
+        setupCompleted: false,
+      },
+      TEST_SECRET
+    );
+
+  const gatedSuperAdminToken = () =>
+    'Bearer ' +
+    jwt.sign(
+      {
+        tid: TENANT_ID,
+        email: 'super@test.com',
+        scopes: ['TENANT:SUPER_ADMIN'],
+        setupCompleted: false,
+      },
+      TEST_SECRET
+    );
+
+  // The gate re-checks the DB before blocking; keep it saying "not complete".
+  const pendingSetupImpl = (sql) => {
+    if ((sql || '').includes('FROM tenant_setup')) return Promise.resolve([[]]);
+    return defaultExecuteImpl(sql);
+  };
+
+  beforeEach(() => {
+    mockConnection.execute.mockImplementation(pendingSetupImpl);
+  });
+
+  it.each([
+    '/api/categories',
+    '/api/itemdetails',
+    '/api/organizations',
+    '/api/pos/orders',
+    '/api/reports',
+  ])('blocks %s with 403 TENANT_SETUP_REQUIRED', async (path) => {
+    const res = await request(server).get(path).set('Authorization', gatedAdminToken());
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('TENANT_SETUP_REQUIRED');
+  });
+
+  it('blocks writes too, not just reads', async () => {
+    const res = await request(server)
+      .post('/api/categories')
+      .set('Authorization', gatedAdminToken())
+      .send({ Name: 'Should not be created', Active: true });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('TENANT_SETUP_REQUIRED');
+  });
+
+  it('allows the audit log', async () => {
+    const res = await request(server).get('/api/audit').set('Authorization', gatedAdminToken());
+    expect(res.status).not.toBe(403);
+  });
+
+  it('allows the setup status endpoint', async () => {
+    const res = await request(server)
+      .get('/api/master-data/status')
+      .set('Authorization', gatedAdminToken());
+    expect(res.status).toBe(200);
+  });
+
+  it('allows the wizard itself', async () => {
+    const res = await request(server)
+      .post('/api/master-data/bootstrap')
+      .set('Authorization', gatedAdminToken())
+      .send({});
+    // 400 for the empty body — the point is it is NOT 403 from the gate.
+    expect(res.status).toBe(400);
+  });
+
+  it('allows logout', async () => {
+    const res = await request(server).post('/api/user/logout').set('Authorization', gatedAdminToken());
+    expect(res.status).not.toBe(403);
+  });
+
+  it('exempts super admins from the gate', async () => {
+    const res = await request(server)
+      .get('/api/categories')
+      .set('Authorization', gatedSuperAdminToken());
+    expect(res.status).not.toBe(403);
+  });
+
+  it('does not gate a token that carries no setupCompleted claim', async () => {
+    // The backward-compatibility contract: pre-existing sessions keep working.
+    const res = await request(server).get('/api/categories').set('Authorization', adminToken());
+    expect(res.status).toBe(200);
+  });
+
+  it('lets a gated token through once the database says setup is complete', async () => {
+    mockConnection.execute.mockImplementation((sql) => {
+      if ((sql || '').includes('FROM tenant_setup')) {
+        return Promise.resolve([[{ tenant_id: TENANT_ID, status: 'COMPLETED' }]]);
+      }
+      return defaultExecuteImpl(sql);
+    });
+    const res = await request(server).get('/api/categories').set('Authorization', gatedAdminToken());
+    expect(res.status).toBe(200);
+  });
 });
 
 describe('Audit logger middleware', () => {

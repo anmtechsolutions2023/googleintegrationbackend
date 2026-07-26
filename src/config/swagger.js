@@ -10,7 +10,7 @@ const security = [{ bearerAuth: [] }];
 
 const responses = {
   unauthorized: { 401: { description: 'Unauthorized — missing or invalid bearer token' } },
-  forbidden:    { 403: { description: 'Forbidden — insufficient scope' } },
+  forbidden:    { 403: { description: 'Forbidden — insufficient scope, OR the tenant has not completed first-time setup (body carries `code: "TENANT_SETUP_REQUIRED"`; send the user to the setup wizard). Super admins are exempt from the setup gate.' } },
   notFound:     { 404: { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } } },
   noContent:    { 204: { description: 'Deleted successfully — no content' } },
   validation:   { 400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } } },
@@ -944,6 +944,14 @@ const swaggerSpec = {
           is_active:      { type: 'integer', enum: [0, 1] },
           status:         { type: 'string', enum: ['ACTIVE', 'SUSPENDED'] },
           roles:          { type: 'string', nullable: true, description: 'Comma-separated role names' },
+          tenant_name:    { type: 'string', nullable: true, description: 'Organization name of the tenant (cross-tenant listing only)' },
+          setup_status: {
+            type: 'string',
+            enum: ['PENDING', 'COMPLETED'],
+            description:
+              'Whether the tenant has completed the first-time setup wizard. Per TENANT, so every row of the same tenant carries the same value. Cross-tenant listing (GET /api/admin/users/all) only.',
+          },
+          setup_completed_at: { type: 'string', format: 'date-time', nullable: true },
         },
       },
       UserRole: {
@@ -1220,8 +1228,23 @@ const swaggerSpec = {
               contact: { type: 'string' }, transactionTypeConfig: { type: 'string' },
               item: { type: 'string' }, category: { type: 'string' }, uom: { type: 'string' },
               costInfo: { type: 'string' }, taxGroup: { type: 'string' },
+              setupToken: {
+                type: 'string',
+                description:
+                  'Refreshed JWT identical to the caller\'s but with setupCompleted: true. Store it in place of the current token so the first-time setup gate stops blocking requests without forcing a re-login.',
+              },
             },
           },
+        },
+      },
+      TenantSetupStatus: {
+        type: 'object',
+        properties: {
+          tenantId:    { type: 'string' },
+          status:      { type: 'string', enum: ['PENDING', 'COMPLETED'] },
+          completedAt: { type: 'string', format: 'date-time', nullable: true },
+          completedBy: { type: 'string', nullable: true, description: 'Email of the user who completed the wizard' },
+          isComplete:  { type: 'boolean', description: 'Convenience flag — true when status is COMPLETED' },
         },
       },
       PosChannelCreate: {
@@ -1645,7 +1668,8 @@ const swaggerSpec = {
         tags: ['Master Data — Setup'],
         summary: 'First-time master-data bootstrap (Organization + Branch + optional Item) in one transaction',
         description:
-          'Creates the whole nested master-data tree atomically. Send a nested payload with NO ids — the server resolves foreign keys and inserts bottom-up inside a single transaction. If any step fails, the entire operation is rolled back. Requires TENANT:ADMIN.',
+          'Creates the whole nested master-data tree atomically. Send a nested payload with NO ids — the server resolves foreign keys and inserts bottom-up inside a single transaction. If any step fails, the entire operation is rolled back. Requires TENANT:ADMIN.\n\n' +
+          'This endpoint runs ONCE per tenant. On success the tenant is marked COMPLETED in `tenant_setup` (inside the same transaction), which lifts the first-time setup gate; a second call returns 409. The 201 response carries a refreshed `setupToken` — a JWT identical to the caller\'s but with `setupCompleted: true` — so the client can unlock the application without a re-login.',
         security,
         requestBody: {
           required: true,
@@ -1653,13 +1677,37 @@ const swaggerSpec = {
         },
         responses: {
           201: {
-            description: 'All records created; returns a map of entity → generated id',
+            description: 'All records created; returns a map of entity → generated id, plus a refreshed setupToken',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/MasterDataBootstrapResult' } } },
           },
           ...responses.validation,
           ...responses.unauthorized,
           ...responses.forbidden,
-          409: { description: 'Conflict — a unique constraint (e.g. Code/Name) was violated; nothing was saved' },
+          409: { description: 'Conflict — either this tenant has already completed setup, or a unique constraint (e.g. Code/Name) was violated; nothing was saved' },
+        },
+      },
+    },
+    '/api/master-data/status': {
+      get: {
+        tags: ['Master Data — Setup'],
+        summary: 'First-time tenancy setup status for the caller\'s tenant',
+        description:
+          'Reports whether this tenant has completed the first-time setup wizard. A tenant that has never run it reports PENDING.\n\n' +
+          'Authenticated but deliberately NOT scope-gated beyond that: a non-admin user who is blocked by the setup gate still needs to be able to see why.',
+        security,
+        responses: {
+          200: {
+            description: 'Current tenancy setup status',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: {
+                success: { type: 'boolean', example: true },
+                message: { type: 'string' },
+                data: { $ref: '#/components/schemas/TenantSetupStatus' },
+              },
+            }}},
+          },
+          ...responses.unauthorized,
         },
       },
     },

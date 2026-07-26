@@ -65,13 +65,16 @@ create table if not exists transactiontypeconfig
     UpdatedBy varchar(50),
     PRIMARY KEY (Id),
     UNIQUE (StartCounterNo, Prefix, Format, TenantId),
-    UNIQUE KEY uk_ttc_tagname (TagName)
+    -- MUST include TenantId. Without it this is a global namespace across all
+    -- tenants, and the first-time setup wizard fails for every tenant after
+    -- the first with "Duplicate entry 'Onboarding' for key uk_ttc_tagname".
+    UNIQUE KEY uk_ttc_tagname (TagName, TenantId)
 );
 
 -- Migration: add TagName to existing transactiontypeconfig tables
 -- Run these statements once on existing databases:
 -- ALTER TABLE transactiontypeconfig ADD COLUMN TagName varchar(100) NULL AFTER Format;
--- ALTER TABLE transactiontypeconfig ADD UNIQUE KEY uk_ttc_tagname (TagName);
+-- ALTER TABLE transactiontypeconfig ADD UNIQUE KEY uk_ttc_tagname (TagName, TenantId);
 
 -- Organization Detail table
 create table if not exists organizationdetail
@@ -261,7 +264,8 @@ create table if not exists mapproviderlocationmapper
     UpdatedBy varchar(50),
     PRIMARY KEY (Id),
     UNIQUE (MapProviderId, LocationDetailId, TenantId),
-    UNIQUE KEY uk_mplm_tagname (TagName),
+    -- Tenant-scoped — see the note on transactiontypeconfig.uk_ttc_tagname.
+    UNIQUE KEY uk_mplm_tagname (TagName, TenantId),
     FOREIGN KEY (MapProviderId) REFERENCES mapprovider(Id),
     FOREIGN KEY (LocationDetailId) REFERENCES locationdetail(Id)
 );
@@ -269,7 +273,7 @@ create table if not exists mapproviderlocationmapper
 -- Migration: add TagName to existing mapproviderlocationmapper tables
 -- Run these statements once on existing databases:
 -- ALTER TABLE mapproviderlocationmapper ADD COLUMN TagName varchar(100) NULL AFTER LocationDetailId;
--- ALTER TABLE mapproviderlocationmapper ADD UNIQUE KEY uk_mplm_tagname (TagName);
+-- ALTER TABLE mapproviderlocationmapper ADD UNIQUE KEY uk_mplm_tagname (TagName, TenantId);
 
 -- Contact Detail table
 create table if not exists contactdetail
@@ -396,7 +400,8 @@ create table if not exists addressdetail
     UpdatedBy varchar(50),
     PRIMARY KEY (Id),
     UNIQUE (AddressLine1, City, ContactAddressTypeId, TenantId),
-    UNIQUE KEY uk_ad_tagname (TagName),
+    -- Tenant-scoped — see the note on transactiontypeconfig.uk_ttc_tagname.
+    UNIQUE KEY uk_ad_tagname (TagName, TenantId),
     FOREIGN KEY (ContactAddressTypeId) REFERENCES contactaddresstype(Id),
     FOREIGN KEY (MapProviderLocationMapperId) REFERENCES mapproviderlocationmapper(Id)
 );
@@ -404,7 +409,7 @@ create table if not exists addressdetail
 -- Migration: add TagName to existing addressdetail tables
 -- Run these statements once on existing databases:
 -- ALTER TABLE addressdetail ADD COLUMN TagName varchar(100) NULL AFTER ContactAddressTypeId;
--- ALTER TABLE addressdetail ADD UNIQUE KEY uk_ad_tagname (TagName);
+-- ALTER TABLE addressdetail ADD UNIQUE KEY uk_ad_tagname (TagName, TenantId);
 
 -- Cost Info table
 create table if not exists costinfo

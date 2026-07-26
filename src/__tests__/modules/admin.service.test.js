@@ -315,6 +315,29 @@ describe('listAllUsers', () => {
     expect(result.data).toHaveLength(2);
     expect(result.pagination.total).toBe(1); // from mocked getPaginationMetadata
   });
+
+  it('passes through the per-tenant setup status used by the tracking column', async () => {
+    mockConn.execute.mockResolvedValueOnce([[{ total: 1 }]]);
+    mockConn.query.mockResolvedValueOnce([[
+      { user_email: 'a@x.com', tenant_id: 't1', setup_status: 'COMPLETED' },
+    ]]);
+
+    const result = await service.listAllUsers(1, 20);
+    expect(result.data[0].setup_status).toBe('COMPLETED');
+  });
+
+  // This suite stubs QUERIES, so the SQL text itself is asserted against the
+  // real constants module — otherwise the assertion would only prove the mock.
+  it('the real cross-tenant query joins tenant_setup and defaults to PENDING', () => {
+    const { QUERIES } = jest.requireActual('../../config/constants');
+    const sql = QUERIES.ADMIN_USERS.SELECT_ALL_TENANTS;
+
+    expect(sql).toContain('LEFT JOIN tenant_setup ts ON ts.tenant_id = ut.tenant_id');
+    // A tenant with no tenant_setup row must report PENDING, not null.
+    expect(sql).toContain("COALESCE(ts.status, 'PENDING') AS setup_status");
+    // Grouped columns must include the joined ones under ONLY_FULL_GROUP_BY.
+    expect(sql).toContain('GROUP BY ut.user_email, ut.tenant_id, ts.status, ts.completed_at');
+  });
 });
 
 // ─── updateUserStatusCrossTenant (super-admin suspend/activate) ───────────────

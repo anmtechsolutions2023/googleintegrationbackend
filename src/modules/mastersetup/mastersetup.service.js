@@ -9,6 +9,9 @@
 
 const { withTransaction } = require('../../utils/dbHelper');
 const { logger } = require('../../utils/logger');
+const { HttpError } = require('../../middleware/errorHandler');
+const MESSAGES = require('../../config/messages');
+const setupRepository = require('./mastersetup.repository');
 
 const organization = require('../organization/organization.service');
 const contactAddressType = require('../contactaddresstype/contactaddresstype.service');
@@ -27,13 +30,29 @@ const itemDetail = require('../itemdetail/itemdetail.service');
 
 /**
  * Create the full master-data tree atomically.
+ *
+ * Runs exactly once per tenant: on success the tenant is marked COMPLETED in
+ * tenant_setup (inside the same transaction), and any later call is rejected
+ * with 409. That is the server-side half of "the wizard is never offered twice"
+ * — hiding the menu entry alone would not stop a replayed request from
+ * duplicating the org/branch tree.
+ *
  * @param {Object} payload - Validated nested payload (see mastersetup.schemas).
  * @param {string} tenantId - Tenant ID.
  * @param {string} userEmail - Acting user's email.
  * @returns {Promise<Object>} Map of every created entity → generated id.
+ * @throws {HttpError} 409 when this tenant has already completed setup.
  */
 const bootstrap = async (payload, tenantId, userEmail) => {
   logger.info('Master-data bootstrap started', { tenantId, userEmail });
+
+  if (await setupRepository.isSetupComplete(tenantId)) {
+    logger.warn('Master-data bootstrap rejected — already completed', { tenantId });
+    throw new HttpError(
+      MESSAGES.ERROR.TENANT_SETUP_ALREADY_DONE,
+      MESSAGES.HTTP_STATUS.CONFLICT
+    );
+  }
 
   const ids = await withTransaction(async (conn) => {
     const created = {};
@@ -131,6 +150,12 @@ const bootstrap = async (payload, tenantId, userEmail) => {
       });
     }
 
+    // 4) Mark the tenancy set up ------------------------------------------------
+    // Inside the transaction on purpose: if any step above fails, the rollback
+    // takes this with it and the tenant stays gated. A tenant must never be
+    // unlocked by a bootstrap that did not actually persist its master data.
+    await setupRepository.markCompletedTx(conn, tenantId, userEmail);
+
     return created;
   });
 
@@ -138,4 +163,11 @@ const bootstrap = async (payload, tenantId, userEmail) => {
   return ids;
 };
 
-module.exports = { bootstrap };
+/**
+ * Reads the first-time setup status for a tenant.
+ * @param {string} tenantId - Tenant ID.
+ * @returns {Promise<Object>} { tenantId, status, completedAt, completedBy, isComplete }
+ */
+const getStatus = (tenantId) => setupRepository.getStatus(tenantId);
+
+module.exports = { bootstrap, getStatus };

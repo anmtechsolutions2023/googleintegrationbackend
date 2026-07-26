@@ -30,8 +30,16 @@ jest.mock('../../modules/costinfo/costinfo.service', () => ({ createTx: jest.fn(
 jest.mock('../../modules/category/category.service', () => ({ createTx: jest.fn(async (_c, d) => ({ id: 'cat-id', ...d })) }));
 jest.mock('../../modules/uom/uom.service', () => ({ createTx: jest.fn(async (_c, d) => ({ id: 'uom-id', ...d })) }));
 jest.mock('../../modules/itemdetail/itemdetail.service', () => ({ createTx: jest.fn(async (_c, d) => ({ id: 'item-id', ...d })) }));
+// Setup-state repository — mocked like every other collaborator so this stays a
+// pure orchestrator unit test. Defaults to "not yet set up" so bootstrap runs.
+jest.mock('../../modules/mastersetup/mastersetup.repository', () => ({
+  isSetupComplete: jest.fn(async () => false),
+  markCompletedTx: jest.fn(async () => undefined),
+  getStatus: jest.fn(),
+}));
 
 const service = require('../../modules/mastersetup/mastersetup.service');
+const setupRepository = require('../../modules/mastersetup/mastersetup.repository');
 const organization = require('../../modules/organization/organization.service');
 const mapProvider = require('../../modules/mapprovider/mapprovider.service');
 const contactAddressType = require('../../modules/contactaddresstype/contactaddresstype.service');
@@ -76,6 +84,9 @@ describe('mastersetup.service — bootstrap orchestrator', () => {
     jest.clearAllMocks();
     // withTransaction just runs the callback with a fake connection.
     dbHelper.withTransaction.mockImplementation((cb) => cb(FAKE_CONN));
+    // Default: tenant has not completed setup, so bootstrap is allowed to run.
+    setupRepository.isSetupComplete.mockResolvedValue(false);
+    setupRepository.markCompletedTx.mockResolvedValue(undefined);
   });
 
   it('returns an id map for every created entity', async () => {
@@ -188,5 +199,46 @@ describe('mastersetup.service — bootstrap orchestrator', () => {
     await expect(service.bootstrap(payload(), TENANT, USER)).rejects.toThrow('branch insert failed');
     // item subtree never ran because branch threw first
     expect(itemDetail.createTx).not.toHaveBeenCalled();
+  });
+
+  // ── First-time setup gate ──────────────────────────────────────────────────
+  describe('tenancy setup completion', () => {
+    it('marks the tenant COMPLETED on the same transaction connection', async () => {
+      await service.bootstrap(payload(), TENANT, USER);
+      // Same FAKE_CONN as every insert — the flag must commit or roll back with
+      // the data it describes, never independently of it.
+      expect(setupRepository.markCompletedTx).toHaveBeenCalledWith(FAKE_CONN, TENANT, USER);
+      expect(setupRepository.markCompletedTx).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not mark the tenant complete when the tree fails midway', async () => {
+      branchDetail.createTx.mockRejectedValueOnce(new Error('branch insert failed'));
+      await expect(service.bootstrap(payload(), TENANT, USER)).rejects.toThrow();
+      // A rolled-back bootstrap must leave the tenant gated.
+      expect(setupRepository.markCompletedTx).not.toHaveBeenCalled();
+    });
+
+    it('rejects a second bootstrap with 409 and creates nothing', async () => {
+      setupRepository.isSetupComplete.mockResolvedValue(true);
+
+      await expect(service.bootstrap(payload(), TENANT, USER)).rejects.toMatchObject({
+        statusCode: 409,
+      });
+
+      // Guard runs before the transaction opens — no duplicate org/branch tree.
+      expect(dbHelper.withTransaction).not.toHaveBeenCalled();
+      expect(organization.createTx).not.toHaveBeenCalled();
+      expect(branchDetail.createTx).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getStatus', () => {
+    it('delegates to the setup repository', async () => {
+      const expected = { tenantId: TENANT, status: 'COMPLETED', isComplete: true };
+      setupRepository.getStatus.mockResolvedValue(expected);
+
+      await expect(service.getStatus(TENANT)).resolves.toEqual(expected);
+      expect(setupRepository.getStatus).toHaveBeenCalledWith(TENANT);
+    });
   });
 });

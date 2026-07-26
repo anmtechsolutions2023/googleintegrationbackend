@@ -6,9 +6,13 @@ const { logger } = require('../utils/logger')
 const MESSAGES = require('../config/messages')
 
 class HttpError extends Error {
-  constructor(message, statusCode) {
+  // `code` is an optional machine-readable identifier (e.g. 'TENANT_SETUP_REQUIRED')
+  // that clients can branch on instead of matching message text. When omitted the
+  // error response carries no `code` field, exactly as before.
+  constructor(message, statusCode, code = null) {
     super(message)
     this.statusCode = statusCode
+    if (code) this.code = code
   }
 }
 
@@ -85,11 +89,16 @@ const errorHandler = (err, req, res, next) => {
       ? MESSAGES.INFO.INTERNAL_ERROR
       : err.message
 
-  res.status(statusCode).json({
+  const body = {
     success: false,
     status: statusCode,
     message: message,
-  })
+  }
+  // Surface an explicit HttpError code (never a raw MySQL errno string) so
+  // clients can branch on it. Absent for every error that does not set one.
+  if (err.code && err instanceof HttpError) body.code = err.code
+
+  res.status(statusCode).json(body)
 }
 
 module.exports = { errorHandler, HttpError }

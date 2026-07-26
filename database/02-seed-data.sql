@@ -564,6 +564,30 @@ INSERT IGNORE INTO app_settings (setting_key, setting_value, updated_by)
 VALUES ('onboarding.auto_approve.enabled', 'false', 'system-seed');
 
 -- =============================================================================
+-- TENANT SETUP STATE (first-time setup wizard gate)
+-- =============================================================================
+-- Marks a tenant COMPLETED when it ALREADY has both an organizationdetail and a
+-- branchdetail row — the two things the setup wizard creates. Tenants with that
+-- data are already operating and must not be sent back through the wizard; a
+-- tenant with no row here resolves to PENDING and will be prompted on next login.
+--
+-- ON A FRESH INSTALL THIS MATCHES NOTHING, which is the intended outcome: this
+-- seed creates no organizationdetail/branchdetail rows, so the seeded tenant
+-- starts PENDING and its admin is taken straight to the setup wizard.
+--
+-- It earns its keep in two other cases:
+--   a) re-running this seed against a database that already holds master data;
+--   b) upgrading an existing deployment in place — run just this statement
+--      (plus the tenant_setup CREATE TABLE from 01-schema-definition.sql §1.1b)
+--      against the live database so current users are not locked out.
+INSERT INTO tenant_setup (tenant_id, status, completed_at, completed_by)
+SELECT DISTINCT ut.tenant_id, 'COMPLETED', NOW(), 'SYSTEM_SEED'
+FROM   user_tenants ut
+WHERE  EXISTS (SELECT 1 FROM organizationdetail o WHERE o.TenantId = ut.tenant_id)
+  AND  EXISTS (SELECT 1 FROM branchdetail       b WHERE b.TenantId = ut.tenant_id)
+ON DUPLICATE KEY UPDATE status = 'COMPLETED';
+
+-- =============================================================================
 -- VERIFICATION QUERIES — run these manually after seeding to confirm correctness
 -- =============================================================================
 
@@ -583,6 +607,16 @@ VALUES ('onboarding.auto_approve.enabled', 'false', 'system-seed');
 --   JOIN features f ON f.feature_id   = rp.feature_id
 --   WHERE r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
 --   ORDER BY r.name, f.feature_short_name, f.scope;
+
+-- Check tenancy setup state (expect ZERO rows on a fresh install — every tenant
+-- is PENDING and will be prompted for the first-time setup wizard):
+-- SELECT * FROM tenant_setup;
+
+-- Which tenants will be prompted for setup (no row = PENDING):
+-- SELECT DISTINCT ut.tenant_id
+--   FROM user_tenants ut
+--   LEFT JOIN tenant_setup ts ON ts.tenant_id = ut.tenant_id
+--   WHERE ts.tenant_id IS NULL OR ts.status <> 'COMPLETED';
 
 -- Check super admin role assignment:
 -- SELECT ur.user_email, r.name AS role, ur.assigned_by
