@@ -442,7 +442,7 @@ const MODULES = [
 
   // ─── POS (Front Desk) modules ───
   { path: '/api/pos/floors', body: { Name: 'Main Dining', Active: true } },
-  { path: '/api/pos/tables', body: { Name: 'Table 1', Active: true }, updateBody: { Status: 'occupied' } },
+  { path: '/api/pos/tables', body: { Name: 'Table 1', Active: true }, updateBody: { Status: 'Occupied' } },
   { path: '/api/pos/food-types', body: { Name: 'Veg', Code: 'veg', IsVeg: true, Active: true }, updateBody: { Name: 'Non-Veg' } },
   { path: '/api/pos/item-meta', body: { ItemDetailId: UUID_1, FoodTypeId: UUID_1, Channels: { dinein: true }, Prices: { dinein: 100 }, Variants: [], BranchDetailId: UUID_1, Active: true }, updateBody: { FoodTypeId: UUID_1 } },
   { path: '/api/pos/customers', body: { Name: 'Rahul Verma', Phone: '9876543210', Active: true } },
@@ -458,16 +458,30 @@ const MODULES = [
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BUILD APP ONCE
+//
+// The suite is bound to a single long-lived listener rather than passing the
+// bare express app to supertest. `request(server)` spins up a NEW http server on a
+// fresh ephemeral port for every call — this file issues ~1165 of them, and the
+// resulting port churn intermittently reused a port still in TIME_WAIT, so a
+// request would come back as a bare 400 with an empty body (Node's clientError
+// response, never our errorHandler). Reusing one listener removes that race.
 // ─────────────────────────────────────────────────────────────────────────────
 
 let app;
+let server;
 
-beforeAll(() => {
+beforeAll((done) => {
   app = express();
   app.use(cors());
   app.use(express.json());
   registerRoutes(app);
   app.use(errorHandler);
+  server = app.listen(0, done);
+});
+
+afterAll((done) => {
+  if (server) server.close(done);
+  else done();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -513,13 +527,13 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     // ── GET list ──────────────────────────────────────────────────────────────
 
     it('GET list — no token → 401', async () => {
-      const res = await request(app).get(basePath);
+      const res = await request(server).get(basePath);
       expect(res.status).toBe(401);
       expect(res.body.success).toBe(false);
     });
 
     it('GET list — with admin token → 200', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .get(basePath)
         .set('Authorization', adminToken());
       expect(res.status).toBe(200);
@@ -527,7 +541,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     });
 
     it('GET list — with viewer token → 200', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .get(basePath)
         .set('Authorization', viewerToken());
       expect(res.status).toBe(200);
@@ -535,7 +549,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     });
 
     it('GET list — with query params page=1&limit=5 → 200', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .get(`${basePath}?page=1&limit=5`)
         .set('Authorization', adminToken());
       expect(res.status).toBe(200);
@@ -545,7 +559,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     // ── GET by ID ─────────────────────────────────────────────────────────────
 
     it('GET /:id — valid UUID, record found → 200', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .get(`${basePath}/${RECORD_ID}`)
         .set('Authorization', adminToken());
       expect(res.status).toBe(200);
@@ -555,7 +569,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     it('GET /:id — valid UUID, record not found → 404', async () => {
       mockConnection.execute.mockImplementation(notFoundExecuteImpl);
       try {
-        const res = await request(app)
+        const res = await request(server)
           .get(`${basePath}/${RECORD_ID}`)
           .set('Authorization', adminToken());
         expect(res.status).toBe(404);
@@ -566,12 +580,12 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     });
 
     it('GET /:id — no token → 401', async () => {
-      const res = await request(app).get(`${basePath}/${RECORD_ID}`);
+      const res = await request(server).get(`${basePath}/${RECORD_ID}`);
       expect(res.status).toBe(401);
     });
 
     it('GET /:id — invalid UUID format → 400', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .get(`${basePath}/not-a-uuid`)
         .set('Authorization', adminToken());
       expect(res.status).toBe(400);
@@ -581,13 +595,13 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     // ── POST ──────────────────────────────────────────────────────────────────
 
     it('POST — no token → 401', async () => {
-      const res = await request(app).post(basePath).send(createBody);
+      const res = await request(server).post(basePath).send(createBody);
       expect(res.status).toBe(401);
       expect(res.body.success).toBe(false);
     });
 
     it('POST — viewer scope → 403', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .post(basePath)
         .set('Authorization', viewerToken())
         .send(createBody);
@@ -596,7 +610,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     });
 
     it('POST — admin token, empty body → 400', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .post(basePath)
         .set('Authorization', adminToken())
         .send({});
@@ -605,7 +619,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     });
 
     it('POST — admin token, valid body → 201', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .post(basePath)
         .set('Authorization', adminToken())
         .send(createBody);
@@ -616,7 +630,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     // ── PUT ───────────────────────────────────────────────────────────────────
 
     it('PUT /:id — no token → 401', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .put(`${basePath}/${RECORD_ID}`)
         .send(putBody);
       expect(res.status).toBe(401);
@@ -624,7 +638,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     });
 
     it('PUT /:id — viewer scope → 403', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .put(`${basePath}/${RECORD_ID}`)
         .set('Authorization', viewerToken())
         .send(putBody);
@@ -633,7 +647,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     });
 
     it('PUT /:id — invalid UUID → 400', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .put(`${basePath}/not-a-uuid`)
         .set('Authorization', adminToken())
         .send(putBody);
@@ -642,7 +656,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     });
 
     it('PUT /:id — admin token, valid body → 200', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .put(`${basePath}/${RECORD_ID}`)
         .set('Authorization', adminToken())
         .send(putBody);
@@ -653,7 +667,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     it('PUT /:id — admin token, record not found → 404', async () => {
       mockConnection.execute.mockImplementation(notFoundExecuteImpl);
       try {
-        const res = await request(app)
+        const res = await request(server)
           .put(`${basePath}/${RECORD_ID}`)
           .set('Authorization', adminToken())
           .send(putBody);
@@ -667,13 +681,13 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     // ── DELETE ────────────────────────────────────────────────────────────────
 
     it('DELETE /:id — no token → 401', async () => {
-      const res = await request(app).delete(`${basePath}/${RECORD_ID}`);
+      const res = await request(server).delete(`${basePath}/${RECORD_ID}`);
       expect(res.status).toBe(401);
       expect(res.body.success).toBe(false);
     });
 
     it('DELETE /:id — viewer scope → 403', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .delete(`${basePath}/${RECORD_ID}`)
         .set('Authorization', viewerToken());
       expect(res.status).toBe(403);
@@ -681,7 +695,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     });
 
     it('DELETE /:id — invalid UUID → 400', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .delete(`${basePath}/not-a-uuid`)
         .set('Authorization', adminToken());
       expect(res.status).toBe(400);
@@ -689,7 +703,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     });
 
     it('DELETE /:id — admin token, valid ID → 204', async () => {
-      const res = await request(app)
+      const res = await request(server)
         .delete(`${basePath}/${RECORD_ID}`)
         .set('Authorization', adminToken());
       expect(res.status).toBe(204);
@@ -698,7 +712,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
     it('DELETE /:id — admin token, record not found → 404', async () => {
       mockConnection.execute.mockImplementation(notFoundExecuteImpl);
       try {
-        const res = await request(app)
+        const res = await request(server)
           .delete(`${basePath}/${RECORD_ID}`)
           .set('Authorization', adminToken());
         expect(res.status).toBe(404);
@@ -722,7 +736,7 @@ describe('Auth middleware edge cases', () => {
         { tid: TENANT_ID, email: 'hacker@test.com', scopes: ['TENANT:ADMIN'] },
         'wrong-secret'
       );
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes')
       .set('Authorization', badToken);
     expect(res.status).toBe(403);
@@ -730,7 +744,7 @@ describe('Auth middleware edge cases', () => {
   });
 
   it('should return 401 when Authorization header is missing', async () => {
-    const res = await request(app).get('/api/uom');
+    const res = await request(server).get('/api/uom');
     expect(res.status).toBe(401);
   });
 
@@ -741,7 +755,7 @@ describe('Auth middleware edge cases', () => {
         { email: 'user@test.com', scopes: ['TENANT:ADMIN'] },
         TEST_SECRET
       );
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/categories')
       .set('Authorization', noTidToken);
     expect(res.status).toBe(403);
@@ -751,7 +765,7 @@ describe('Auth middleware edge cases', () => {
     const noScopesToken =
       'Bearer ' +
       jwt.sign({ tid: TENANT_ID, email: 'user@test.com' }, TEST_SECRET);
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/categories')
       .set('Authorization', noScopesToken);
     expect(res.status).toBe(403);
@@ -768,7 +782,7 @@ describe('Auth middleware edge cases', () => {
         },
         TEST_SECRET
       );
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/taxtypes')
       .set('Authorization', superAdminToken)
       .send({ Name: 'GST', Value: 18, Active: true });
@@ -783,7 +797,7 @@ describe('Auth middleware edge cases', () => {
         { tid: TENANT_ID, email: 'empty@test.com', scopes: [] },
         TEST_SECRET
       );
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/taxtypes')
       .set('Authorization', emptyScope)
       .send({ Name: 'GST', Value: 18, Active: true });
@@ -792,7 +806,7 @@ describe('Auth middleware edge cases', () => {
   });
 
   it('should return 403 on malformed Bearer token value', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes')
       .set('Authorization', 'Bearer notavalidjwt');
     expect(res.status).toBe(403);
@@ -823,7 +837,7 @@ describe('Error handler — duplicate entry', () => {
       return Promise.reject(err);
     });
 
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/taxtypes')
       .set('Authorization', adminToken())
       .send({ Name: 'GST', Value: 18, Active: true });
@@ -851,7 +865,7 @@ describe('Error handler — foreign key constraint', () => {
       return Promise.reject(err);
     });
 
-    const res = await request(app)
+    const res = await request(server)
       .delete(`/api/taxtypes/${RECORD_ID}`)
       .set('Authorization', adminToken());
 
@@ -867,7 +881,7 @@ describe('Error handler — foreign key constraint', () => {
 
 describe('Pagination query parameter validation', () => {
   it('should return 400 when page=0 (below minimum of 1)', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes?page=0')
       .set('Authorization', adminToken());
     expect(res.status).toBe(400);
@@ -875,7 +889,7 @@ describe('Pagination query parameter validation', () => {
   });
 
   it('should return 400 when limit exceeds maximum (>100)', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes?limit=101')
       .set('Authorization', adminToken());
     expect(res.status).toBe(400);
@@ -883,7 +897,7 @@ describe('Pagination query parameter validation', () => {
   });
 
   it('should return 400 when limit=0', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes?limit=0')
       .set('Authorization', adminToken());
     expect(res.status).toBe(400);
@@ -891,7 +905,7 @@ describe('Pagination query parameter validation', () => {
   });
 
   it('should return 200 for valid page=2&limit=20', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes?page=2&limit=20')
       .set('Authorization', adminToken());
     expect(res.status).toBe(200);
@@ -899,7 +913,7 @@ describe('Pagination query parameter validation', () => {
   });
 
   it('should return 200 for page=1&limit=100 (max limit)', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/uom?page=1&limit=100')
       .set('Authorization', adminToken());
     expect(res.status).toBe(200);
@@ -913,7 +927,7 @@ describe('Pagination query parameter validation', () => {
 
 describe('Content-Type handling', () => {
   it('should return 201 with explicit application/json Content-Type', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/categories')
       .set('Authorization', adminToken())
       .set('Content-Type', 'application/json')
@@ -932,7 +946,7 @@ describe('Database failure handling', () => {
     const db = require('../../config/db');
     db.getConnection.mockRejectedValueOnce(new Error('DB connection failed'));
 
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes')
       .set('Authorization', adminToken());
     expect(res.status).toBe(500);
@@ -948,7 +962,7 @@ describe('Database failure handling', () => {
       return Promise.reject(new Error('DB write failed unexpectedly'));
     });
 
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/categories')
       .set('Authorization', adminToken())
       .send({ Name: 'Electronics', Active: true });
@@ -961,7 +975,7 @@ describe('Database failure handling', () => {
       Promise.reject(new Error('DB read failed'))
     );
 
-    const res = await request(app)
+    const res = await request(server)
       .get(`/api/categories/${RECORD_ID}`)
       .set('Authorization', adminToken());
     expect(res.status).toBe(500);
@@ -975,7 +989,7 @@ describe('Database failure handling', () => {
 
 describe('Body validation — required fields', () => {
   it('POST /api/transactiontypeconfigs — missing TagName → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/transactiontypeconfigs')
       .set('Authorization', adminToken())
       // StartCounterNo and Format present but TagName missing
@@ -985,7 +999,7 @@ describe('Body validation — required fields', () => {
   });
 
   it('POST /api/uomfactors — missing Factor → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/uomfactors')
       .set('Authorization', adminToken())
       .send({ PrimaryUOMId: UUID_1, SecondaryUOMId: UUID_1 }); // Factor omitted
@@ -994,7 +1008,7 @@ describe('Body validation — required fields', () => {
   });
 
   it('POST /api/addressdetails — missing AddressLine1 → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/addressdetails')
       .set('Authorization', adminToken())
       .send({ TagName: 'addr-tag-001' }); // AddressLine1 omitted
@@ -1003,7 +1017,7 @@ describe('Body validation — required fields', () => {
   });
 
   it('POST /api/mapproviderlocationmappers — missing TagName → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/mapproviderlocationmappers')
       .set('Authorization', adminToken())
       .send({ MapProviderId: UUID_1, LocationDetailId: UUID_1 }); // TagName omitted
@@ -1012,7 +1026,7 @@ describe('Body validation — required fields', () => {
   });
 
   it('POST /api/locationdetails — missing Lng → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/locationdetails')
       .set('Authorization', adminToken())
       .send({ Lat: 12.97 }); // Lng omitted
@@ -1021,7 +1035,7 @@ describe('Body validation — required fields', () => {
   });
 
   it('POST /api/transactiontypes — missing TransactionTypeConfigId → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/transactiontypes')
       .set('Authorization', adminToken())
       .send({ Name: 'Sales' }); // TransactionTypeConfigId omitted
@@ -1030,7 +1044,7 @@ describe('Body validation — required fields', () => {
   });
 
   it('POST /api/paymentbreakups — missing Timestamp → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/paymentbreakups')
       .set('Authorization', adminToken())
       .send({
@@ -1045,7 +1059,7 @@ describe('Body validation — required fields', () => {
   });
 
   it('POST /api/taxgrouptaxtypemappers — missing TaxTypeId → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/taxgrouptaxtypemappers')
       .set('Authorization', adminToken())
       .send({ TaxGroupId: UUID_1 }); // TaxTypeId omitted
@@ -1054,7 +1068,7 @@ describe('Body validation — required fields', () => {
   });
 
   it('POST /api/transactiontypeconversionmappers — missing TransactionTypeStatusId → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/transactiontypeconversionmappers')
       .set('Authorization', adminToken())
       .send({
@@ -1067,7 +1081,7 @@ describe('Body validation — required fields', () => {
   });
 
   it('POST /api/paymentdetails — missing TotalAmount → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/paymentdetails')
       .set('Authorization', adminToken())
       .send({
@@ -1081,7 +1095,7 @@ describe('Body validation — required fields', () => {
   });
 
   it('PUT /:id — empty body → 400 (at least one field required)', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/taxtypes/${RECORD_ID}`)
       .set('Authorization', adminToken())
       .send({});
@@ -1096,7 +1110,7 @@ describe('Body validation — required fields', () => {
 
 describe('CORS headers', () => {
   it('should include Access-Control-Allow-Origin header on GET', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes')
       .set('Authorization', adminToken())
       .set('Origin', 'http://example.com');
@@ -1104,7 +1118,7 @@ describe('CORS headers', () => {
   });
 
   it('OPTIONS preflight should succeed (200 or 204)', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .options('/api/taxtypes')
       .set('Origin', 'http://example.com')
       .set('Access-Control-Request-Method', 'POST');
@@ -1118,7 +1132,7 @@ describe('CORS headers', () => {
 
 describe('Root health check', () => {
   it('GET / → 200 with API metadata', async () => {
-    const res = await request(app).get('/');
+    const res = await request(server).get('/');
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('message');
     expect(res.body).toHaveProperty('status');
@@ -1132,26 +1146,26 @@ describe('Root health check', () => {
 describe('Audit routes — AUDIT:READ / admin:access gating', () => {
   ['/api/audit/logs', '/api/audit/categories'].forEach((p) => {
     it(`GET ${p} — no token → 401`, async () => {
-      const res = await request(app).get(p);
+      const res = await request(server).get(p);
       expect(res.status).toBe(401);
     });
 
     it(`GET ${p} — read-only user without AUDIT:READ → 403`, async () => {
-      const res = await request(app).get(p).set('Authorization', viewerToken());
+      const res = await request(server).get(p).set('Authorization', viewerToken());
       expect(res.status).toBe(403);
     });
 
     it(`GET ${p} — AUDIT:READ token → not 403/401`, async () => {
       mockConnection.execute.mockImplementation(defaultExecuteImpl);
       mockConnection.query.mockImplementation(defaultQueryImpl);
-      const res = await request(app).get(p).set('Authorization', auditReadToken());
+      const res = await request(server).get(p).set('Authorization', auditReadToken());
       expect(res.status).toBe(200);
     });
 
     it(`GET ${p} — admin:access token still allowed → 200`, async () => {
       mockConnection.execute.mockImplementation(defaultExecuteImpl);
       mockConnection.query.mockImplementation(defaultQueryImpl);
-      const res = await request(app).get(p).set('Authorization', iamAdminToken());
+      const res = await request(server).get(p).set('Authorization', iamAdminToken());
       expect(res.status).toBe(200);
     });
   });
@@ -1183,12 +1197,12 @@ describe('Master-data bootstrap — POST /api/master-data/bootstrap', () => {
   });
 
   it('no token → 401', async () => {
-    const res = await request(app).post('/api/master-data/bootstrap').send(validBootstrap());
+    const res = await request(server).post('/api/master-data/bootstrap').send(validBootstrap());
     expect(res.status).toBe(401);
   });
 
   it('read-only scope (no TENANT:ADMIN) → 403', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/master-data/bootstrap')
       .set('Authorization', viewerToken())
       .send(validBootstrap());
@@ -1198,7 +1212,7 @@ describe('Master-data bootstrap — POST /api/master-data/bootstrap', () => {
   it('missing branch → 400', async () => {
     const body = validBootstrap();
     delete body.branch;
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/master-data/bootstrap')
       .set('Authorization', adminToken())
       .send(body);
@@ -1208,7 +1222,7 @@ describe('Master-data bootstrap — POST /api/master-data/bootstrap', () => {
 
   it('admin, valid tree → 201 with an id map, inside one committed transaction', async () => {
     mockConnection.execute.mockImplementation(defaultExecuteImpl);
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/master-data/bootstrap')
       .set('Authorization', adminToken())
       .send(validBootstrap());
@@ -1230,7 +1244,7 @@ describe('Master-data bootstrap — POST /api/master-data/bootstrap', () => {
     mockConnection.execute.mockImplementation(defaultExecuteImpl);
     const body = validBootstrap();
     delete body.branch.address.locationMapper;
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/master-data/bootstrap')
       .set('Authorization', adminToken())
       .send(body);
@@ -1247,7 +1261,7 @@ describe('Master-data bootstrap — POST /api/master-data/bootstrap', () => {
       }
       return defaultExecuteImpl(sql);
     });
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/master-data/bootstrap')
       .set('Authorization', adminToken())
       .send(validBootstrap());
@@ -1261,7 +1275,7 @@ describe('Audit logger middleware', () => {
   it('should call db.execute for audit logging after authenticated POST', async () => {
     const db = require('../../config/db');
 
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/taxtypes')
       .set('Authorization', adminToken())
       .send({ Name: 'GST', Value: 18, Active: true });
@@ -1274,7 +1288,7 @@ describe('Audit logger middleware', () => {
   it('should call db.execute for audit logging after authenticated GET list', async () => {
     const db = require('../../config/db');
 
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes')
       .set('Authorization', adminToken());
 
@@ -1285,7 +1299,7 @@ describe('Audit logger middleware', () => {
   it('should NOT call db.execute for audit when request is unauthenticated (no token)', async () => {
     const db = require('../../config/db');
 
-    await request(app).get('/api/taxtypes'); // no token → 401 before auditLog runs
+    await request(server).get('/api/taxtypes'); // no token → 401 before auditLog runs
 
     expect(db.execute).not.toHaveBeenCalled();
   });
@@ -1295,7 +1309,7 @@ describe('Audit logger middleware', () => {
     // Make audit INSERT fail silently (auditLogger catches the error)
     db.execute.mockRejectedValue(new Error('Audit DB failure'));
 
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes')
       .set('Authorization', adminToken());
 
@@ -1311,7 +1325,7 @@ describe('Audit logger middleware', () => {
 
 describe('Response shape assertions', () => {
   it('GET list response has success:true', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/taxtypes')
       .set('Authorization', adminToken());
     expect(res.status).toBe(200);
@@ -1319,7 +1333,7 @@ describe('Response shape assertions', () => {
   });
 
   it('GET by ID response has success:true', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get(`/api/taxtypes/${RECORD_ID}`)
       .set('Authorization', adminToken());
     expect(res.status).toBe(200);
@@ -1327,7 +1341,7 @@ describe('Response shape assertions', () => {
   });
 
   it('POST 201 response has success:true', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/taxtypes')
       .set('Authorization', adminToken())
       .send({ Name: 'GST', Value: 18, Active: true });
@@ -1336,7 +1350,7 @@ describe('Response shape assertions', () => {
   });
 
   it('PUT 200 response has success:true', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/taxtypes/${RECORD_ID}`)
       .set('Authorization', adminToken())
       .send({ Active: false });
@@ -1345,7 +1359,7 @@ describe('Response shape assertions', () => {
   });
 
   it('DELETE 204 response has empty body', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .delete(`/api/taxtypes/${RECORD_ID}`)
       .set('Authorization', adminToken());
     expect(res.status).toBe(204);
@@ -1353,14 +1367,14 @@ describe('Response shape assertions', () => {
   });
 
   it('401 response has success:false and message', async () => {
-    const res = await request(app).get('/api/taxtypes');
+    const res = await request(server).get('/api/taxtypes');
     expect(res.status).toBe(401);
     expect(res.body).toHaveProperty('success', false);
     expect(res.body).toHaveProperty('message');
   });
 
   it('403 response has success:false and message', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/taxtypes')
       .set('Authorization', viewerToken())
       .send({ Name: 'GST', Value: 18, Active: true });
@@ -1370,7 +1384,7 @@ describe('Response shape assertions', () => {
   });
 
   it('400 response has success:false and message', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/taxtypes')
       .set('Authorization', adminToken())
       .send({});
@@ -1382,7 +1396,7 @@ describe('Response shape assertions', () => {
   it('404 response has success:false and message', async () => {
     mockConnection.execute.mockImplementation(notFoundExecuteImpl);
     try {
-      const res = await request(app)
+      const res = await request(server)
         .get(`/api/taxtypes/${RECORD_ID}`)
         .set('Authorization', adminToken());
       expect(res.status).toBe(404);
@@ -1404,7 +1418,7 @@ describe('Response shape assertions', () => {
       return Promise.reject(err);
     });
 
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/taxtypes')
       .set('Authorization', adminToken())
       .send({ Name: 'GST', Value: 18, Active: true });
@@ -1418,7 +1432,7 @@ describe('Response shape assertions', () => {
     const db = require('../../config/db');
     db.getConnection.mockRejectedValueOnce(new Error('Unexpected DB error'));
 
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/uom')
       .set('Authorization', adminToken());
     expect(res.status).toBe(500);
@@ -1441,12 +1455,12 @@ describe('Onboarding guest endpoints', () => {
   };
 
   it('GET /api/onboarding/status — no token → 401', async () => {
-    const res = await request(app).get('/api/onboarding/status');
+    const res = await request(server).get('/api/onboarding/status');
     expect(res.status).toBe(401);
   });
 
   it('GET /api/onboarding/status — non-guest (no guest:explore scope) → 403', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/onboarding/status')
       .set('Authorization', adminToken());
     expect(res.status).toBe(403);
@@ -1454,7 +1468,7 @@ describe('Onboarding guest endpoints', () => {
 
   it('GET /api/onboarding/status — guest token, record found → 200', async () => {
     mockConnection.execute.mockResolvedValueOnce([[ONBOARDING_ROW]]);
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/onboarding/status')
       .set('Authorization', guestToken());
     expect(res.status).toBe(200);
@@ -1463,7 +1477,7 @@ describe('Onboarding guest endpoints', () => {
 
   it('GET /api/onboarding/status — guest token, no record → 404', async () => {
     mockConnection.execute.mockResolvedValueOnce([[]]);
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/onboarding/status')
       .set('Authorization', guestToken());
     expect(res.status).toBe(404);
@@ -1471,7 +1485,7 @@ describe('Onboarding guest endpoints', () => {
   });
 
   it('PUT /api/onboarding/note — no token → 401', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put('/api/onboarding/note')
       .send({ requestNote: 'Please add me' });
     expect(res.status).toBe(401);
@@ -1479,7 +1493,7 @@ describe('Onboarding guest endpoints', () => {
 
   it('PUT /api/onboarding/note — guest token → 200', async () => {
     mockConnection.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
-    const res = await request(app)
+    const res = await request(server)
       .put('/api/onboarding/note')
       .set('Authorization', guestToken())
       .send({ requestNote: 'Updated note' });
@@ -1502,12 +1516,12 @@ describe('Admin IAM endpoints — auth guards', () => {
 
   ADMIN_PATHS.forEach((p) => {
     it(`GET ${p} — no token → 401`, async () => {
-      const res = await request(app).get(p);
+      const res = await request(server).get(p);
       expect(res.status).toBe(401);
     });
 
     it(`GET ${p} — no admin:access scope → 403`, async () => {
-      const res = await request(app)
+      const res = await request(server)
         .get(p)
         .set('Authorization', adminToken()); // has TENANT:ADMIN, not admin:access
       expect(res.status).toBe(403);
@@ -1516,7 +1530,7 @@ describe('Admin IAM endpoints — auth guards', () => {
     it(`GET ${p} — admin:access token → 200`, async () => {
       mockConnection.execute.mockImplementation(defaultExecuteImpl);
       mockConnection.query.mockImplementation(defaultQueryImpl);
-      const res = await request(app)
+      const res = await request(server)
         .get(p)
         .set('Authorization', iamAdminToken());
       expect([200, 404]).toContain(res.status);
@@ -1526,7 +1540,7 @@ describe('Admin IAM endpoints — auth guards', () => {
 
 describe('Admin IAM endpoints — role management', () => {
   it('POST /api/admin/roles — missing name → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/admin/roles')
       .set('Authorization', iamAdminToken())
       .send({});
@@ -1538,7 +1552,7 @@ describe('Admin IAM endpoints — role management', () => {
     mockConnection.execute
       .mockResolvedValueOnce([{ insertId: 1 }])
       .mockResolvedValueOnce([[{ id: RECORD_ID, name: 'Editor' }]]);
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/admin/roles')
       .set('Authorization', iamAdminToken())
       .send({ name: 'Editor', description: 'Can edit records' });
@@ -1553,14 +1567,14 @@ describe('Admin IAM endpoints — role permissions with non-UUID roleId', () => 
   it('GET /api/admin/roles/:roleId/permissions — prefixed string id → not 400', async () => {
     mockConnection.execute.mockImplementation(defaultExecuteImpl);
     mockConnection.query.mockImplementation(defaultQueryImpl);
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/roles/r0000001-iam0-0000-0000-000000000001/permissions')
       .set('Authorization', iamAdminToken());
     expect(res.status).not.toBe(400);
   });
 
   it('GET /api/admin/roles/:roleId/permissions — empty-ish id still validated', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/roles/%20/permissions')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(400);
@@ -1569,7 +1583,7 @@ describe('Admin IAM endpoints — role permissions with non-UUID roleId', () => 
 
 describe('Admin IAM endpoints — feature management', () => {
   it('POST /api/admin/features — missing required fields → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/admin/features')
       .set('Authorization', iamAdminToken())
       .send({ displayName: 'Reports' }); // featureShortName and scope missing
@@ -1580,7 +1594,7 @@ describe('Admin IAM endpoints — feature management', () => {
     mockConnection.execute
       .mockResolvedValueOnce([{ insertId: 1 }])
       .mockResolvedValueOnce([[{ feature_id: RECORD_ID, scope: 'READ' }]]);
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/admin/features')
       .set('Authorization', iamAdminToken())
       .send({ featureShortName: 'REPORTS', scope: 'READ', displayName: 'Reports Read' });
@@ -1591,7 +1605,7 @@ describe('Admin IAM endpoints — feature management', () => {
 
 describe('Admin IAM endpoints — user status update', () => {
   it('PUT /api/admin/users/user@test.com/status — invalid status → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put('/api/admin/users/user@test.com/status')
       .set('Authorization', iamAdminToken())
       .send({ status: 'BANNED' }); // not valid
@@ -1600,7 +1614,7 @@ describe('Admin IAM endpoints — user status update', () => {
 
   it('PUT /api/admin/users/user@test.com/status — ACTIVE → 200', async () => {
     mockConnection.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
-    const res = await request(app)
+    const res = await request(server)
       .put('/api/admin/users/user@test.com/status')
       .set('Authorization', iamAdminToken())
       .send({ status: 'ACTIVE' });
@@ -1615,7 +1629,7 @@ describe('Admin IAM endpoints — user status update', () => {
 
 describe('Auth middleware — null tid guest token', () => {
   it('null-tid guest token fails checkScope on POST route (scope guard returns 403)', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/taxtypes')
       .set('Authorization', guestToken())
       .send({ Name: 'GST', Value: 18, Active: true });
@@ -1654,7 +1668,7 @@ describe('Cross-module smoke tests', () => {
 
   samplePaths.forEach((p) => {
     it(`GET ${p} — authenticated → 200`, async () => {
-      const res = await request(app)
+      const res = await request(server)
         .get(p)
         .set('Authorization', adminToken());
       expect(res.status).toBe(200);
@@ -1662,7 +1676,7 @@ describe('Cross-module smoke tests', () => {
     });
 
     it(`GET ${p}/${RECORD_ID} — authenticated → 200`, async () => {
-      const res = await request(app)
+      const res = await request(server)
         .get(`${p}/${RECORD_ID}`)
         .set('Authorization', adminToken());
       expect(res.status).toBe(200);
@@ -1677,19 +1691,19 @@ describe('Cross-module smoke tests', () => {
 
 describe('Admin IAM — GET /api/admin/onboarding', () => {
   it('no token → 401', async () => {
-    const res = await request(app).get('/api/admin/onboarding');
+    const res = await request(server).get('/api/admin/onboarding');
     expect(res.status).toBe(401);
   });
 
   it('no admin:access scope → 403', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/onboarding')
       .set('Authorization', adminToken());
     expect(res.status).toBe(403);
   });
 
   it('admin:access token, default status PENDING → 200 with data + pagination', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/onboarding')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(200);
@@ -1699,7 +1713,7 @@ describe('Admin IAM — GET /api/admin/onboarding', () => {
   });
 
   it('?status=ALL → 200', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/onboarding?status=ALL')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(200);
@@ -1707,14 +1721,14 @@ describe('Admin IAM — GET /api/admin/onboarding', () => {
   });
 
   it('?status=APPROVED → 200', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/onboarding?status=APPROVED')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(200);
   });
 
   it('invalid status value → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/onboarding?status=UNKNOWN')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(400);
@@ -1724,14 +1738,14 @@ describe('Admin IAM — GET /api/admin/onboarding', () => {
 
 describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
   it('no token → 401', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
       .send({ tenantId: TENANT_ID });
     expect(res.status).toBe(401);
   });
 
   it('no admin:access scope → 403', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
       .set('Authorization', adminToken())
       .send({ tenantId: TENANT_ID });
@@ -1739,7 +1753,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
   });
 
   it('invalid UUID in :id → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put('/api/admin/onboarding/not-a-valid-uuid/approve')
       .set('Authorization', iamAdminToken())
       .send({ tenantId: TENANT_ID });
@@ -1748,7 +1762,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
   });
 
   it('missing tenantId in body → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
       .set('Authorization', iamAdminToken())
       .send({});
@@ -1758,7 +1772,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
 
   it('request not found (not PENDING) → 404', async () => {
     mockConnection.execute.mockResolvedValueOnce([[]]); // no matching PENDING row
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
       .set('Authorization', iamAdminToken())
       .send({ tenantId: TENANT_ID });
@@ -1769,7 +1783,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
     mockConnection.execute
       .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', name: 'Guest' }]]) // request found
       .mockResolvedValueOnce([[{ id: UUID_1 }]]); // user already provisioned
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
       .set('Authorization', iamAdminToken())
       .send({ tenantId: TENANT_ID });
@@ -1781,7 +1795,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
       .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', name: 'Guest' }]]) // request found
       .mockResolvedValueOnce([[]])  // user not yet in tenant
       .mockResolvedValue([[{ affectedRows: 1 }]]); // INSERT user_tenants, UPDATE onboarding_requests
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
       .set('Authorization', iamAdminToken())
       .send({ tenantId: TENANT_ID }); // roleIds omitted — Joi defaults to []
@@ -1795,7 +1809,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
       .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', name: 'Guest' }]])
       .mockResolvedValueOnce([[]])
       .mockResolvedValue([[{ affectedRows: 1 }]]);
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
       .set('Authorization', iamAdminToken())
       .send({ tenantId: TENANT_ID, roleIds: [UUID_1] });
@@ -1807,14 +1821,14 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
 
 describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
   it('no token → 401', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
       .send({ rejectionReason: 'Not eligible' });
     expect(res.status).toBe(401);
   });
 
   it('no admin:access scope → 403', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
       .set('Authorization', adminToken())
       .send({ rejectionReason: 'Not eligible' });
@@ -1822,7 +1836,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
   });
 
   it('invalid UUID in :id → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put('/api/admin/onboarding/not-a-uuid/reject')
       .set('Authorization', iamAdminToken())
       .send({ rejectionReason: 'Not eligible' });
@@ -1831,7 +1845,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
   });
 
   it('missing rejectionReason → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
       .set('Authorization', iamAdminToken())
       .send({});
@@ -1841,7 +1855,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
 
   it('request not found or already reviewed → 404', async () => {
     mockConnection.execute.mockResolvedValueOnce([[]]); // no PENDING row
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
       .set('Authorization', iamAdminToken())
       .send({ rejectionReason: 'Not eligible' });
@@ -1852,7 +1866,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
     mockConnection.execute
       .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com' }]]) // request found
       .mockResolvedValueOnce([[{ affectedRows: 1 }]]); // UPDATE status
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
       .set('Authorization', iamAdminToken())
       .send({ rejectionReason: 'Not eligible at this time' });
@@ -1863,19 +1877,19 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
 
 describe('Admin IAM — PUT /api/admin/onboarding/:id/reopen', () => {
   it('no token → 401', async () => {
-    const res = await request(app).put(`/api/admin/onboarding/${RECORD_ID}/reopen`);
+    const res = await request(server).put(`/api/admin/onboarding/${RECORD_ID}/reopen`);
     expect(res.status).toBe(401);
   });
 
   it('no admin:access scope → 403', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reopen`)
       .set('Authorization', adminToken());
     expect(res.status).toBe(403);
   });
 
   it('invalid UUID in :id → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .put('/api/admin/onboarding/not-a-uuid/reopen')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(400);
@@ -1884,7 +1898,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reopen', () => {
 
   it('no REJECTED request found → 404', async () => {
     mockConnection.execute.mockResolvedValueOnce([[]]); // no REJECTED row
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reopen`)
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(404);
@@ -1894,7 +1908,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reopen', () => {
     mockConnection.execute
       .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', status: 'REJECTED' }]]) // rejected row found
       .mockResolvedValueOnce([[{ affectedRows: 1 }]]); // UPDATE back to PENDING
-    const res = await request(app)
+    const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reopen`)
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(200);
@@ -1906,7 +1920,7 @@ describe('Admin IAM — onboarding list status filter', () => {
   it('status=ALL returns rows without a status filter (no 400)', async () => {
     mockConnection.execute.mockImplementation(defaultExecuteImpl);
     mockConnection.query.mockImplementation(defaultQueryImpl);
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/onboarding?status=ALL')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(200);
@@ -1916,14 +1930,14 @@ describe('Admin IAM — onboarding list status filter', () => {
   it('status=CANCELLED is accepted (no 400)', async () => {
     mockConnection.execute.mockImplementation(defaultExecuteImpl);
     mockConnection.query.mockImplementation(defaultQueryImpl);
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/onboarding?status=CANCELLED')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(200);
   });
 
   it('unknown status → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/onboarding?status=BOGUS')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(400);
@@ -1932,12 +1946,12 @@ describe('Admin IAM — onboarding list status filter', () => {
 
 describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
   it('no token → 401', async () => {
-    const res = await request(app).get('/api/admin/users/user@test.com/roles');
+    const res = await request(server).get('/api/admin/users/user@test.com/roles');
     expect(res.status).toBe(401);
   });
 
   it('no admin:access scope → 403', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/users/user@test.com/roles')
       .set('Authorization', adminToken());
     expect(res.status).toBe(403);
@@ -1945,7 +1959,7 @@ describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
 
   it('user not found in tenant → 404', async () => {
     mockConnection.execute.mockResolvedValueOnce([[]]); // not in user_tenants
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/users/user@test.com/roles')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(404);
@@ -1955,7 +1969,7 @@ describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
     mockConnection.execute
       .mockResolvedValueOnce([[{ id: UUID_1 }]]) // user exists in tenant
       .mockResolvedValueOnce([[{ ...MOCK_ROW, role_name: 'EDITOR', is_system_role: 0 }]]); // roles
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/users/user@test.com/roles')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(200);
@@ -1967,7 +1981,7 @@ describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
     mockConnection.execute
       .mockResolvedValueOnce([[{ id: UUID_1 }]]) // user exists in tenant
       .mockResolvedValueOnce([[]]); // no roles
-    const res = await request(app)
+    const res = await request(server)
       .get('/api/admin/users/user@test.com/roles')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(200);
@@ -1986,17 +2000,17 @@ describe('POS domain action: POST /api/pos/orders/:id/fire-kot', () => {
   const path = `/api/pos/orders/${RECORD_ID}/fire-kot`;
 
   it('no token → 401', async () => {
-    const res = await request(app).post(path).send({});
+    const res = await request(server).post(path).send({});
     expect(res.status).toBe(401);
   });
 
   it('viewer scope → 403', async () => {
-    const res = await request(app).post(path).set('Authorization', viewerToken()).send({});
+    const res = await request(server).post(path).set('Authorization', viewerToken()).send({});
     expect(res.status).toBe(403);
   });
 
   it('invalid UUID → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/pos/orders/not-a-uuid/fire-kot')
       .set('Authorization', adminToken())
       .send({});
@@ -2004,7 +2018,7 @@ describe('POS domain action: POST /api/pos/orders/:id/fire-kot', () => {
   });
 
   it('admin, valid order → 201 with KOT summary', async () => {
-    const res = await request(app).post(path).set('Authorization', adminToken()).send({ KotNo: 'KOT-1' });
+    const res = await request(server).post(path).set('Authorization', adminToken()).send({ KotNo: 'KOT-1' });
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
     // This codebase returns the payload in `message` (the `data` field carries the text).
@@ -2014,7 +2028,7 @@ describe('POS domain action: POST /api/pos/orders/:id/fire-kot', () => {
   it('order not found → 404', async () => {
     mockConnection.execute.mockImplementation(notFoundExecuteImpl);
     try {
-      const res = await request(app).post(path).set('Authorization', adminToken()).send({});
+      const res = await request(server).post(path).set('Authorization', adminToken()).send({});
       expect(res.status).toBe(404);
     } finally {
       restoreDefaultMocks();
@@ -2026,24 +2040,24 @@ describe('POS domain action: PATCH /api/pos/kots/:id/ready', () => {
   const path = `/api/pos/kots/${RECORD_ID}/ready`;
 
   it('no token → 401', async () => {
-    const res = await request(app).patch(path);
+    const res = await request(server).patch(path);
     expect(res.status).toBe(401);
   });
 
   it('viewer scope → 403', async () => {
-    const res = await request(app).patch(path).set('Authorization', viewerToken());
+    const res = await request(server).patch(path).set('Authorization', viewerToken());
     expect(res.status).toBe(403);
   });
 
   it('invalid UUID → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .patch('/api/pos/kots/not-a-uuid/ready')
       .set('Authorization', adminToken());
     expect(res.status).toBe(400);
   });
 
   it('admin, valid KOT → 200', async () => {
-    const res = await request(app).patch(path).set('Authorization', adminToken());
+    const res = await request(server).patch(path).set('Authorization', adminToken());
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
@@ -2051,7 +2065,7 @@ describe('POS domain action: PATCH /api/pos/kots/:id/ready', () => {
   it('KOT not found → 404', async () => {
     mockConnection.execute.mockImplementation(notFoundExecuteImpl);
     try {
-      const res = await request(app).patch(path).set('Authorization', adminToken());
+      const res = await request(server).patch(path).set('Authorization', adminToken());
       expect(res.status).toBe(404);
     } finally {
       restoreDefaultMocks();
@@ -2064,17 +2078,17 @@ describe('POS domain action: POST /api/pos/bills/:id/settle', () => {
   const validBody = { Payments: [{ mode: 'cash', amount: 100 }], Discount: 0 };
 
   it('no token → 401', async () => {
-    const res = await request(app).post(path).send(validBody);
+    const res = await request(server).post(path).send(validBody);
     expect(res.status).toBe(401);
   });
 
   it('viewer scope → 403', async () => {
-    const res = await request(app).post(path).set('Authorization', viewerToken()).send(validBody);
+    const res = await request(server).post(path).set('Authorization', viewerToken()).send(validBody);
     expect(res.status).toBe(403);
   });
 
   it('invalid UUID → 400', async () => {
-    const res = await request(app)
+    const res = await request(server)
       .post('/api/pos/bills/not-a-uuid/settle')
       .set('Authorization', adminToken())
       .send(validBody);
@@ -2082,12 +2096,12 @@ describe('POS domain action: POST /api/pos/bills/:id/settle', () => {
   });
 
   it('missing Payments → 400', async () => {
-    const res = await request(app).post(path).set('Authorization', adminToken()).send({});
+    const res = await request(server).post(path).set('Authorization', adminToken()).send({});
     expect(res.status).toBe(400);
   });
 
   it('admin, valid settle → 200', async () => {
-    const res = await request(app).post(path).set('Authorization', adminToken()).send(validBody);
+    const res = await request(server).post(path).set('Authorization', adminToken()).send(validBody);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
@@ -2095,7 +2109,7 @@ describe('POS domain action: POST /api/pos/bills/:id/settle', () => {
   it('bill not found → 404', async () => {
     mockConnection.execute.mockImplementation(notFoundExecuteImpl);
     try {
-      const res = await request(app).post(path).set('Authorization', adminToken()).send(validBody);
+      const res = await request(server).post(path).set('Authorization', adminToken()).send(validBody);
       expect(res.status).toBe(404);
     } finally {
       restoreDefaultMocks();

@@ -1859,7 +1859,7 @@ const swaggerSpec = {
       put: {
         tags: ['Admin — Users'],
         summary: 'Activate or suspend a user in any tenant (super admin only)',
-        description: 'Suspending a user sets is_active = 0, which blocks their login (the login query filters is_active = TRUE). Activating restores access. Requires TENANT:SUPER_ADMIN. Suspending a super admin is rejected with 403.',
+        description: 'Suspending a user sets is_active = 0, which blocks their login (the login query filters is_active = TRUE). Activating restores access. Requires TENANT:SUPER_ADMIN.\n\n**Protected operation.** Rejected with 403 when: (a) the target email matches the authenticated caller and status is not ACTIVE — you cannot suspend your own account (self-ACTIVATE is still permitted); or (b) the target is a super admin. Email matching is case-insensitive.',
         security,
         requestBody: {
           required: true,
@@ -1889,7 +1889,10 @@ const swaggerSpec = {
         responses: { ...singleResponse('AdminUser'), ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },
       delete: {
-        tags: ['Admin — Users'], summary: 'Remove user from tenant', security,
+        tags: ['Admin — Users'],
+        summary: 'Remove user from tenant',
+        description: '**Protected operation.** Rejected with 403 when the target email matches the authenticated caller — you cannot remove your own account. Email matching is case-insensitive.',
+        security,
         parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
         responses: { 200: { description: 'Removed' }, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },
@@ -1922,7 +1925,10 @@ const swaggerSpec = {
     },
     '/api/admin/users/{email}/status': {
       put: {
-        tags: ['Admin — Users'], summary: 'Activate or suspend a user', security,
+        tags: ['Admin — Users'],
+        summary: 'Activate or suspend a user',
+        description: '**Protected operation.** Rejected with 403 when the target email matches the authenticated caller and status is not ACTIVE — you cannot suspend your own account. Self-ACTIVATE is still permitted. Email matching is case-insensitive.',
+        security,
         parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/UserStatusUpdate' } } } },
         responses: { 200: { description: 'Status updated' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },

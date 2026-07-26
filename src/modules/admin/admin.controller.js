@@ -169,7 +169,7 @@ const updateUserStatus = [
   validateBody(schemas.updateUserStatusSchema),
   asyncHandler(async (req, res) => {
     const { userEmail: adminEmail, tenantId } = extractUserContext(req);
-    await service.updateUserStatus(req.params.email, tenantId, req.body.status);
+    await service.updateUserStatus(req.params.email, tenantId, req.body.status, adminEmail);
 
     const isSuspend = req.body.status === 'SUSPENDED';
     await captureAudit(req, tenantId, adminEmail,
@@ -189,7 +189,7 @@ const updateUserStatusCrossTenant = [
   asyncHandler(async (req, res) => {
     const { userEmail: adminEmail } = extractUserContext(req);
     const { email, tenantId, status } = req.body;
-    await service.updateUserStatusCrossTenant(email, tenantId, status);
+    await service.updateUserStatusCrossTenant(email, tenantId, status, adminEmail);
 
     const isSuspend = status === 'SUSPENDED';
     await captureAudit(req, tenantId, adminEmail,
@@ -206,7 +206,7 @@ const updateUserStatusCrossTenant = [
 const removeUser = [
   asyncHandler(async (req, res) => {
     const { userEmail: adminEmail, tenantId } = extractUserContext(req);
-    await service.removeUser(req.params.email, tenantId);
+    await service.removeUser(req.params.email, tenantId, adminEmail);
 
     await captureAudit(req, tenantId, adminEmail,
       'REMOVE_USER', STATUSES.DELETED,

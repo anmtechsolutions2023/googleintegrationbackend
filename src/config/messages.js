@@ -59,6 +59,8 @@ module.exports = {
     FEATURE_IN_USE: 'Cannot delete feature: it is assigned to one or more roles.',
     SYSTEM_ROLE_PROTECTED: 'System roles cannot be modified or deleted.',
     USER_ALREADY_EXISTS: 'User is already provisioned in this tenant.',
+    SELF_SUSPEND_FORBIDDEN: 'You cannot suspend or deactivate your own account.',
+    SELF_REMOVE_FORBIDDEN: 'You cannot remove your own account.',
   },
   INFO: {
     SERVER_RUNNING: 'Server is running on port ',

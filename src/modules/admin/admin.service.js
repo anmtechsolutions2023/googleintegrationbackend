@@ -312,8 +312,31 @@ const updateUserRoles = (email, tenantId, roleIds, adminEmail) =>
     }
   });
 
-const updateUserStatus = (email, tenantId, status) =>
-  withConnection(async (conn) => {
+// Emails are compared case-insensitively: the JWT claim and the path/body value
+// can differ in casing for the same account.
+const isSameUser = (a, b) =>
+  !!a && !!b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+// Self-service lockout guards. An admin must not be able to suspend or remove
+// their own account — either would revoke their own access with no way back in.
+// Self-ACTIVATE stays allowed: it is a harmless no-op for an already-active
+// caller. actorEmail is optional so the guard degrades to today's behaviour if
+// a caller does not supply it.
+const assertNotSelfSuspend = (email, actorEmail, status) => {
+  if (status !== 'ACTIVE' && isSameUser(email, actorEmail)) {
+    throw new HttpError(MESSAGES.ERROR.SELF_SUSPEND_FORBIDDEN, 403);
+  }
+};
+
+const assertNotSelfRemove = (email, actorEmail) => {
+  if (isSameUser(email, actorEmail)) {
+    throw new HttpError(MESSAGES.ERROR.SELF_REMOVE_FORBIDDEN, 403);
+  }
+};
+
+const updateUserStatus = async (email, tenantId, status, actorEmail) => {
+  assertNotSelfSuspend(email, actorEmail, status);
+  return withConnection(async (conn) => {
     const isActive = status === 'ACTIVE' ? 1 : 0;
     await conn.execute(QUERIES.ADMIN_USERS.UPDATE_STATUS, [
       isActive,
@@ -322,12 +345,15 @@ const updateUserStatus = (email, tenantId, status) =>
       tenantId,
     ]);
   });
+};
 
 // Super-admin-only: suspend/activate a user in ANY tenant (SUSPENDED blocks
 // login because USER_TENANTS.SELECT filters is_active = TRUE). Guards against
-// disabling a super admin — including yourself — to avoid a system lockout.
-const updateUserStatusCrossTenant = (email, tenantId, status) =>
-  withConnection(async (conn) => {
+// suspending yourself, and against disabling any super admin, to avoid a
+// system lockout.
+const updateUserStatusCrossTenant = async (email, tenantId, status, actorEmail) => {
+  assertNotSelfSuspend(email, actorEmail, status);
+  return withConnection(async (conn) => {
     const [rows] = await conn.execute(
       QUERIES.ADMIN_USERS.SELECT_FLAGS_BY_EMAIL_TENANT,
       [email, tenantId]
@@ -344,12 +370,15 @@ const updateUserStatusCrossTenant = (email, tenantId, status) =>
       tenantId,
     ]);
   });
+};
 
-const removeUser = (email, tenantId) =>
-  withTransaction(async (conn) => {
+const removeUser = async (email, tenantId, actorEmail) => {
+  assertNotSelfRemove(email, actorEmail);
+  return withTransaction(async (conn) => {
     await conn.execute(QUERIES.USER_ROLES.DELETE_ALL_FOR_USER, [email, tenantId]);
     await conn.execute(QUERIES.ADMIN_USERS.DELETE, [email, tenantId]);
   });
+};
 
 // ─── ROLE MANAGEMENT ──────────────────────────────────────────────────────────
 

@@ -74,6 +74,8 @@ jest.mock('../../config/messages', () => ({
     USER_ALREADY_EXISTS: 'User already exists in tenant.',
     SYSTEM_ROLE_PROTECTED: 'Cannot modify system roles.',
     FEATURE_IN_USE: 'Feature is in use by one or more roles.',
+    SELF_SUSPEND_FORBIDDEN: 'You cannot suspend or deactivate your own account.',
+    SELF_REMOVE_FORBIDDEN: 'You cannot remove your own account.',
   },
 }));
 
@@ -349,5 +351,105 @@ describe('updateUserStatusCrossTenant', () => {
     await service.updateUserStatusCrossTenant('user@x.com', 't1', 'ACTIVE');
     const updateCall = mockConn.execute.mock.calls[1];
     expect(updateCall[1]).toEqual([1, 'ACTIVE', 'user@x.com', 't1']);
+  });
+
+  it('throws 403 before any query when a super admin suspends themselves', async () => {
+    await expect(
+      service.updateUserStatusCrossTenant('me@x.com', 't1', 'SUSPENDED', 'me@x.com')
+    ).rejects.toMatchObject({ statusCode: 403 });
+    // Guard runs ahead of the membership lookup — no DB access at all.
+    expect(mockConn.execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects cross-tenant self-suspend regardless of email casing', async () => {
+    await expect(
+      service.updateUserStatusCrossTenant('Me@X.com', 't1', 'SUSPENDED', ' me@x.com ')
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(mockConn.execute).not.toHaveBeenCalled();
+  });
+
+  it('still allows a super admin to activate their own membership', async () => {
+    mockConn.execute
+      .mockResolvedValueOnce([[{ is_super_admin: 0 }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    await service.updateUserStatusCrossTenant('me@x.com', 't1', 'ACTIVE', 'me@x.com');
+    const updateCall = mockConn.execute.mock.calls[1];
+    expect(updateCall[1]).toEqual([1, 'ACTIVE', 'me@x.com', 't1']);
+  });
+});
+
+// ─── updateUserStatus (tenant-scoped suspend/activate) ────────────────────────
+describe('updateUserStatus', () => {
+  it('suspends another user in the tenant (is_active = 0)', async () => {
+    mockConn.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
+    await service.updateUserStatus('user@x.com', 't1', 'SUSPENDED', 'admin@x.com');
+    expect(mockConn.execute.mock.calls[0][1]).toEqual([0, 'SUSPENDED', 'user@x.com', 't1']);
+  });
+
+  it('activates another user in the tenant (is_active = 1)', async () => {
+    mockConn.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
+    await service.updateUserStatus('user@x.com', 't1', 'ACTIVE', 'admin@x.com');
+    expect(mockConn.execute.mock.calls[0][1]).toEqual([1, 'ACTIVE', 'user@x.com', 't1']);
+  });
+
+  it('throws 403 and issues no UPDATE when an admin suspends themselves', async () => {
+    await expect(
+      service.updateUserStatus('admin@x.com', 't1', 'SUSPENDED', 'admin@x.com')
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(mockConn.execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects self-suspend regardless of email casing or surrounding whitespace', async () => {
+    await expect(
+      service.updateUserStatus('Admin@X.com', 't1', 'SUSPENDED', ' admin@x.com ')
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(mockConn.execute).not.toHaveBeenCalled();
+  });
+
+  it('allows an admin to activate their own account (harmless no-op)', async () => {
+    mockConn.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
+    await service.updateUserStatus('admin@x.com', 't1', 'ACTIVE', 'admin@x.com');
+    expect(mockConn.execute.mock.calls[0][1]).toEqual([1, 'ACTIVE', 'admin@x.com', 't1']);
+  });
+
+  it('preserves legacy behaviour when no actor email is supplied', async () => {
+    mockConn.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
+    await service.updateUserStatus('user@x.com', 't1', 'SUSPENDED');
+    expect(mockConn.execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── removeUser (tenant-scoped removal) ───────────────────────────────────────
+describe('removeUser', () => {
+  it('deletes role assignments then the membership for another user', async () => {
+    mockConn.execute
+      .mockResolvedValueOnce([{ affectedRows: 2 }]) // DELETE_ALL_FOR_USER
+      .mockResolvedValueOnce([{ affectedRows: 1 }]); // ADMIN_USERS.DELETE
+    await service.removeUser('user@x.com', 't1', 'admin@x.com');
+    expect(mockConn.execute).toHaveBeenCalledTimes(2);
+    expect(mockConn.execute.mock.calls[0][1]).toEqual(['user@x.com', 't1']);
+    expect(mockConn.execute.mock.calls[1][1]).toEqual(['user@x.com', 't1']);
+  });
+
+  it('throws 403 and opens no transaction when an admin removes themselves', async () => {
+    await expect(
+      service.removeUser('admin@x.com', 't1', 'admin@x.com')
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(mockConn.execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects self-removal regardless of email casing', async () => {
+    await expect(
+      service.removeUser('ADMIN@x.com', 't1', 'admin@X.com')
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(mockConn.execute).not.toHaveBeenCalled();
+  });
+
+  it('preserves legacy behaviour when no actor email is supplied', async () => {
+    mockConn.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    await service.removeUser('user@x.com', 't1');
+    expect(mockConn.execute).toHaveBeenCalledTimes(2);
   });
 });

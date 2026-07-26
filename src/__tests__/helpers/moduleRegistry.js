@@ -343,7 +343,9 @@ const registry = [
     httpPath: '/api/pos/tables',
     exports: POS,
     createData:  { Name: 'Table 1', Active: true },
-    updateData:  { Status: 'occupied' },
+    // Status is a fixed enum (POS_TABLE_STATUSES) — capitalised, matching what
+    // the frontend writes in Billing.js / Tables.js.
+    updateData:  { Status: 'Occupied' },
     existingRow: { Name: 'Table 1', FloorId: null, Capacity: 4, Status: 'free', CurrentOrderId: null, BranchDetailId: null },
   },
   {
