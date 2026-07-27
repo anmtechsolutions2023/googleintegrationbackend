@@ -1,10 +1,27 @@
 // src/modules/batchdetail/batchdetail.service.js
 const BaseCRUDService = require('../../common/BaseCRUDService')
 const { QUERIES } = require('../../config/constants')
+const { attachBreakdown, attachBreakdownToOne } = require('../pricing/pricing.enrich')
+
+// batchdetail is the one non-POS table with BOTH a cost link and a quantity, so
+// its breakdown is scaled to the whole batch rather than left at unit price.
+const PRICING_OPTS = { idField: 'CostInfoId', quantityField: 'Quantity' }
 
 class BatchDetailService extends BaseCRUDService {
   constructor() {
     super('Batch Detail', QUERIES.BATCH_DETAIL)
+  }
+
+  async getAll(tenantId, page, limit, expand) {
+    const result = await super.getAll(tenantId, page, limit, expand)
+    if (!expand) return result
+    return { ...result, data: await attachBreakdown(result.data, tenantId, PRICING_OPTS) }
+  }
+
+  async getById(id, tenantId, expand) {
+    const row = await super.getById(id, tenantId, expand)
+    if (!expand) return row
+    return attachBreakdownToOne(row, tenantId, PRICING_OPTS)
   }
 
   prepareInsertParams(id, data, tenantId, userEmail) {

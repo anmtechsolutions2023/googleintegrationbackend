@@ -23,7 +23,11 @@ const createSchema = Joi.object({
   BranchDetailId: Joi.string().uuid().required(),
   Active: Joi.boolean().optional().default(true),
   // Read-only fields the client may echo back on edit; ignored server-side.
+  // These come from the SELECT joins (costinfo, pos_food_type), so an edit form
+  // populated from a GET response naturally carries them back.
   CostInfoAmount: Joi.any().optional().strip(),
+  FoodTypeName: Joi.any().optional().strip(),
+  FoodTypeIsVeg: Joi.any().optional().strip(),
 });
 
 const updateSchema = Joi.object({
@@ -38,7 +42,11 @@ const updateSchema = Joi.object({
   BranchDetailId: Joi.string().uuid().optional(),
   Active: Joi.boolean().optional(),
   // Read-only fields the client may echo back on edit; ignored server-side.
+  // These come from the SELECT joins (costinfo, pos_food_type), so an edit form
+  // populated from a GET response naturally carries them back.
   CostInfoAmount: Joi.any().optional().strip(),
+  FoodTypeName: Joi.any().optional().strip(),
+  FoodTypeIsVeg: Joi.any().optional().strip(),
 }).min(1);
 
 const paginationSchema = Joi.object({

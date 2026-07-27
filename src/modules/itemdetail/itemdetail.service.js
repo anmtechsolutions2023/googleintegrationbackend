@@ -1,10 +1,27 @@
 // src/modules/itemdetail/itemdetail.service.js
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
+const { attachBreakdown, attachBreakdownToOne } = require('../pricing/pricing.enrich');
+
+const PRICING_OPTS = { idField: 'CostInfoId' };
 
 class ItemDetailService extends BaseCRUDService {
   constructor() {
     super('Item Detail', QUERIES.ITEM_DETAIL);
+  }
+
+  // The item owns its price via CostInfoId; on ?expand=true resolve the tax
+  // chain so the unit price is shown net / tax / gross rather than raw.
+  async getAll(tenantId, page, limit, expand) {
+    const result = await super.getAll(tenantId, page, limit, expand);
+    if (!expand) return result;
+    return { ...result, data: await attachBreakdown(result.data, tenantId, PRICING_OPTS) };
+  }
+
+  async getById(id, tenantId, expand) {
+    const row = await super.getById(id, tenantId, expand);
+    if (!expand) return row;
+    return attachBreakdownToOne(row, tenantId, PRICING_OPTS);
   }
 
   prepareInsertParams(id, data, tenantId, userEmail) {

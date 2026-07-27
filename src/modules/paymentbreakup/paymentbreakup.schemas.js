@@ -6,6 +6,10 @@ const createSchema = Joi.object({
   PaymentDetailId: Joi.string().uuid().required(),
   PaymentModeTransactionDetailId: Joi.string().uuid().required(),
   PaymentReceivedTypeId: Joi.string().uuid().required(),
+  // Amount settled through this payment mode. Several breakups against one
+  // paymentdetail make up a split settlement, and they should sum to its
+  // TotalAmount.
+  Amount: Joi.number().min(0).optional().default(0),
   UserId: Joi.string().uuid().optional().allow(null, ''),
   Timestamp: Joi.alternatives()
     .try(Joi.date().iso(), Joi.string().regex(/^\d{1,2}-\d{1,2}-\d{4}$/))
@@ -18,6 +22,7 @@ const updateSchema = Joi.object({
   PaymentDetailId: Joi.string().uuid().optional(),
   PaymentModeTransactionDetailId: Joi.string().uuid().optional(),
   PaymentReceivedTypeId: Joi.string().uuid().optional(),
+  Amount: Joi.number().min(0).optional(),
   UserId: Joi.string().uuid().optional().allow(null, ''),
   Timestamp: Joi.alternatives()
     .try(Joi.date().iso(), Joi.string().regex(/^\d{1,2}-\d{1,2}-\d{4}$/))

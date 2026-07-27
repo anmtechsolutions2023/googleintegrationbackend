@@ -48,6 +48,15 @@ router.delete(
   ...controller.deleteById
 );
 
+/** POST /transfer — domain action: move items / rounds between tables (keep-as-served). */
+router.post(
+  '/transfer',
+  authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_ORDER_WRITE),
+  auditLogCrud('POS Order Transfer', AUDIT_CATEGORIES.POS),
+  ...controller.transfer,
+);
+
 /** POST /:id/fire-kot — domain action: fire a KOT from this order. */
 router.post(
   '/:id/fire-kot',

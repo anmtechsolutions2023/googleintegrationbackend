@@ -1,10 +1,26 @@
 // src/modules/costinfo/costinfo.service.js
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
+const { attachBreakdown, attachBreakdownToOne } = require('../pricing/pricing.enrich');
 
 class CostInfoService extends BaseCRUDService {
   constructor() {
     super('Cost Info', QUERIES.COST_INFO);
+  }
+
+  // On ?expand=true, resolve the tax chain so callers see what the price is made
+  // of (net / tax / gross + CGST-SGST split) instead of just a TaxGroupId.
+  // The row IS the costinfo, so its own Id is the lookup key.
+  async getAll(tenantId, page, limit, expand) {
+    const result = await super.getAll(tenantId, page, limit, expand);
+    if (!expand) return result;
+    return { ...result, data: await attachBreakdown(result.data, tenantId, { idField: 'Id' }) };
+  }
+
+  async getById(id, tenantId, expand) {
+    const row = await super.getById(id, tenantId, expand);
+    if (!expand) return row;
+    return attachBreakdownToOne(row, tenantId, { idField: 'Id' });
   }
 
   prepareInsertParams(id, data, tenantId, userEmail) {

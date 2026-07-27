@@ -445,7 +445,7 @@ module.exports = {
     ITEM_DETAIL: {
       SELECT_ALL:
         'SELECT * FROM itemdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
-      SELECT_ALL_WITH_DETAILS: `SELECT t.*, cat.Name AS CategoryName, u.UnitName AS UOMName, ci.Amount AS CostAmount FROM itemdetail t LEFT JOIN categorydetail cat ON t.CategoryId = cat.Id AND cat.TenantId = t.TenantId LEFT JOIN UOM u ON t.UOMId = u.Id AND u.TenantId = t.TenantId LEFT JOIN costinfo ci ON t.CostInfoId = ci.Id AND ci.TenantId = t.TenantId WHERE t.TenantId = ?`,
+      SELECT_ALL_WITH_DETAILS: `SELECT t.*, cat.Name AS CategoryName, u.UnitName AS UOMName, ci.Amount AS CostAmount, ci.IsTaxIncluded AS CostIsTaxIncluded, tg.Name AS CostTaxGroupName FROM itemdetail t LEFT JOIN categorydetail cat ON t.CategoryId = cat.Id AND cat.TenantId = t.TenantId LEFT JOIN UOM u ON t.UOMId = u.Id AND u.TenantId = t.TenantId LEFT JOIN costinfo ci ON t.CostInfoId = ci.Id AND ci.TenantId = t.TenantId LEFT JOIN taxgroup tg ON ci.TaxGroupId = tg.Id AND tg.TenantId = t.TenantId WHERE t.TenantId = ?`,
       COUNT: 'SELECT COUNT(*) as total FROM itemdetail WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM itemdetail WHERE Id = ? AND TenantId = ?',
       SELECT_BY_ID_WITH_DETAILS: `
@@ -540,6 +540,10 @@ module.exports = {
 
     // Transaction Item Detail Queries
     TRANSACTION_ITEM_DETAIL: {
+      // Priced line snapshots for one transaction log — used to total a payment
+      // from what was actually invoiced rather than re-pricing it.
+      SELECT_PRICED_BY_LOG:
+        'SELECT Quantity, UnitPrice, NetAmount, TaxAmount, GrossAmount, TaxComponents FROM transactionitemdetail WHERE TransactionDetailLogId = ? AND TenantId = ? AND Active = 1',
       SELECT_ALL:
         'SELECT * FROM transactionitemdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `
@@ -563,9 +567,9 @@ module.exports = {
         LEFT JOIN itemdetail i ON tid.ItemId = i.Id AND i.TenantId = tid.TenantId
         WHERE tid.Id = ? AND tid.TenantId = ?`,
       INSERT:
-        'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, ItemId, Comment, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, ItemId, Quantity, CostInfoId, UnitPrice, NetAmount, TaxAmount, GrossAmount, TaxComponents, Comment, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE transactionitemdetail SET TransactionDetailLogId = ?, ItemId = ?, Comment = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE transactionitemdetail SET TransactionDetailLogId = ?, ItemId = ?, Quantity = ?, CostInfoId = ?, UnitPrice = ?, NetAmount = ?, TaxAmount = ?, GrossAmount = ?, TaxComponents = ?, Comment = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactionitemdetail WHERE Id = ? AND TenantId = ?',
     },
 
@@ -722,9 +726,9 @@ module.exports = {
         LEFT JOIN paymentreceivedtype prt ON pb.PaymentReceivedTypeId = prt.Id AND prt.TenantId = pb.TenantId
         WHERE pb.Id = ? AND pb.TenantId = ?`,
       INSERT:
-        'INSERT INTO paymentbreakup (Id, TenantId, AccountTypeBaseId, PaymentDetailId, PaymentModeTransactionDetailId, PaymentReceivedTypeId, UserId, Timestamp, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO paymentbreakup (Id, TenantId, AccountTypeBaseId, PaymentDetailId, PaymentModeTransactionDetailId, PaymentReceivedTypeId, Amount, UserId, Timestamp, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE paymentbreakup SET AccountTypeBaseId = ?, PaymentDetailId = ?, PaymentModeTransactionDetailId = ?, PaymentReceivedTypeId = ?, UserId = ?, Timestamp = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE paymentbreakup SET AccountTypeBaseId = ?, PaymentDetailId = ?, PaymentModeTransactionDetailId = ?, PaymentReceivedTypeId = ?, Amount = ?, UserId = ?, Timestamp = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentbreakup WHERE Id = ? AND TenantId = ?',
     },
 
@@ -823,11 +827,32 @@ module.exports = {
       INSERT: 'INSERT INTO pos_item_meta (Id, TenantId, ItemDetailId, FoodTypeId, CostInfoId, Channels, Prices, Variants, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE: 'UPDATE pos_item_meta SET ItemDetailId = ?, FoodTypeId = ?, CostInfoId = ?, Channels = ?, Prices = ?, Variants = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_item_meta WHERE Id = ? AND TenantId = ?',
+      // Order lines reference a menu row; pricing needs the cost record it
+      // points at. Batched so an order costs one lookup, not one per line.
+      SELECT_COSTINFO_BY_IDS:
+        'SELECT Id, CostInfoId FROM pos_item_meta WHERE TenantId = ? AND Id IN (:ids)',
+      // Selected variants are a flat surcharge on the item price. Resolved
+      // server-side so a client cannot dictate what a variant costs.
+      SELECT_VARIANT_PRICES_BY_IDS:
+        'SELECT Id, Name, Code, Price FROM pos_variant WHERE TenantId = ? AND Active = 1 AND Id IN (:ids)',
       // Join-table sync helpers (channels + variants)
       DELETE_CHANNEL_LINKS: 'DELETE FROM pos_item_meta_channel WHERE ItemMetaId = ? AND TenantId = ?',
       INSERT_CHANNEL_LINK: 'INSERT INTO pos_item_meta_channel (Id, ItemMetaId, ChannelId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
       DELETE_VARIANT_LINKS: 'DELETE FROM pos_item_meta_variant WHERE ItemMetaId = ? AND TenantId = ?',
       INSERT_VARIANT_LINK: 'INSERT INTO pos_item_meta_variant (Id, ItemMetaId, VariantId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
+    },
+
+    // Which orders (rounds) a bill covers. pos_bill.OrderId only ever held the
+    // first round, so the join table is the truth for recomputing a bill.
+    POS_BILL_ORDER: {
+      INSERT:
+        'INSERT INTO pos_bill_order (Id, BillId, OrderId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
+      DELETE_BY_BILL: 'DELETE FROM pos_bill_order WHERE BillId = ? AND TenantId = ?',
+      SELECT_ORDER_IDS:
+        'SELECT OrderId FROM pos_bill_order WHERE BillId = ? AND TenantId = ? ORDER BY CreatedOn ASC',
+      // The priced line snapshots of every round on the bill, in one query.
+      SELECT_ORDER_ITEMS:
+        'SELECT Id, Items FROM pos_order WHERE TenantId = ? AND Id IN (:ids)',
     },
 
     POS_CUSTOMER: {
@@ -870,6 +895,10 @@ module.exports = {
       DELETE: 'DELETE FROM pos_bill WHERE Id = ? AND TenantId = ?',
       // Domain action: settle a bill (record payments, mark paid)
       SETTLE: 'UPDATE pos_bill SET Payments = ?, Discount = ?, Total = ?, Status = ?, SettledAt = NOW(), UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      // Settle re-prices the bill (discount before tax), so SubTotal/TaxAmount
+      // move too — SETTLE alone only carries the payable Total.
+      UPDATE_TOTALS:
+        'UPDATE pos_bill SET SubTotal = ?, TaxAmount = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
     },
 
     POS_ONLINE_ORDER: {
@@ -1066,6 +1095,34 @@ module.exports = {
         'SELECT setting_key, setting_value FROM app_settings WHERE setting_key = ?',
       UPSERT:
         'INSERT INTO app_settings (setting_key, setting_value, updated_by, updated_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = NOW()',
+    },
+
+    // Tax & pricing chain: costinfo → taxgroup → taxgrouptaxtypemapper → TaxTypes.
+    // Every join is tenant-scoped AND Active-filtered, so deactivating a tax type
+    // silently drops it out of its group — the intended way to retire a component.
+    // One row per (costinfo × tax type); the service groups them.
+    PRICING: {
+      SELECT_CHAIN_BY_COSTINFO_IDS: `
+        SELECT ci.Id AS CostInfoId, ci.Amount, ci.IsTaxIncluded,
+               tg.Id AS TaxGroupId, tg.Name AS TaxGroupName,
+               tt.Id AS TaxTypeId, tt.Name AS TaxTypeName, tt.Value AS TaxTypeValue
+        FROM costinfo ci
+        LEFT JOIN taxgroup tg
+               ON tg.Id = ci.TaxGroupId AND tg.TenantId = ci.TenantId AND tg.Active = 1
+        LEFT JOIN taxgrouptaxtypemapper tgm
+               ON tgm.TaxGroupId = tg.Id AND tgm.TenantId = ci.TenantId AND tgm.Active = 1
+        LEFT JOIN TaxTypes tt
+               ON tt.Id = tgm.TaxTypeId AND tt.TenantId = ci.TenantId AND tt.Active = 1
+        WHERE ci.TenantId = ? AND ci.Id IN (:ids)`,
+      SELECT_CHAIN_BY_GROUP_ID: `
+        SELECT tg.Id AS TaxGroupId, tg.Name AS TaxGroupName,
+               tt.Id AS TaxTypeId, tt.Name AS TaxTypeName, tt.Value AS TaxTypeValue
+        FROM taxgroup tg
+        LEFT JOIN taxgrouptaxtypemapper tgm
+               ON tgm.TaxGroupId = tg.Id AND tgm.TenantId = tg.TenantId AND tgm.Active = 1
+        LEFT JOIN TaxTypes tt
+               ON tt.Id = tgm.TaxTypeId AND tt.TenantId = tg.TenantId AND tt.Active = 1
+        WHERE tg.TenantId = ? AND tg.Id = ? AND tg.Active = 1`,
     },
 
     // First-time master-data setup state, one row per tenant. A missing row is

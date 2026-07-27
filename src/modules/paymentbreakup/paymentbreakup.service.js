@@ -32,6 +32,9 @@ class PaymentBreakupService extends BaseCRUDService {
       data.PaymentDetailId,
       data.PaymentModeTransactionDetailId,
       data.PaymentReceivedTypeId,
+      // How much of the bill this payment mode covered. Without it a split
+      // settlement (part cash, part card) could not be recorded at all.
+      data.Amount !== undefined ? data.Amount : 0,
       data.UserId || null,
       normalizeDate(data.Timestamp),
       data.Active !== undefined ? data.Active : true,
@@ -63,6 +66,7 @@ class PaymentBreakupService extends BaseCRUDService {
       data.PaymentDetailId !== undefined ? data.PaymentDetailId : existing.PaymentDetailId,
       data.PaymentModeTransactionDetailId !== undefined ? data.PaymentModeTransactionDetailId : existing.PaymentModeTransactionDetailId,
       data.PaymentReceivedTypeId !== undefined ? data.PaymentReceivedTypeId : existing.PaymentReceivedTypeId,
+      data.Amount !== undefined ? data.Amount : existing.Amount,
       data.UserId !== undefined ? (data.UserId || null) : existing.UserId,
       normalizeDate(data.Timestamp !== undefined ? data.Timestamp : existing.Timestamp),
       data.Active !== undefined ? data.Active : existing.Active,

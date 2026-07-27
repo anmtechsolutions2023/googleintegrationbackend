@@ -35,6 +35,7 @@ const branchusergroupmapperRoutes = require('../modules/branchusergroupmapper/br
 const batchdetailRoutes = require('../modules/batchdetail/batchdetail.routes');
 const itemdetailRoutes = require('../modules/itemdetail/itemdetail.routes');
 const mastersetupRoutes = require('../modules/mastersetup/mastersetup.routes');
+const pricingRoutes = require('../modules/pricing/pricing.routes');
 const transactiontypebaseconversionRoutes = require('../modules/transactiontypebaseconversion/transactiontypebaseconversion.routes');
 const transactiondetaillogRoutes = require('../modules/transactiondetaillog/transactiondetaillog.routes');
 const transactionitemdetailRoutes = require('../modules/transactionitemdetail/transactionitemdetail.routes');
@@ -121,6 +122,10 @@ const registerRoutes = (app) => {
 
   // Master-data setup — first-time transactional bootstrap (org + branch + item)
   app.use('/api/master-data', mastersetupRoutes);
+
+  // Pricing — stateless tax/price calculation over the costinfo → taxgroup →
+  // mapper → TaxTypes chain. Shared by master data, POS and billing.
+  app.use('/api/pricing', pricingRoutes);
 
   // UOM Factor module
   app.use('/api/uomfactors', uomfactorRoutes);
@@ -250,6 +255,7 @@ const registerRoutes = (app) => {
         { name: 'categories', path: '/api/categories' },
         { name: 'transactiontypeconfigs', path: '/api/transactiontypeconfigs' },
         { name: 'organizations', path: '/api/organizations' },
+        { name: 'pricing', path: '/api/pricing' },
         { name: 'uomfactors', path: '/api/uomfactors' },
         { name: 'accounttypes', path: '/api/accounttypes' },
         {

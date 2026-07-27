@@ -301,6 +301,153 @@ describe('positemmeta join-table sync', () => {
   });
 });
 
+// ── positemmeta price derivation ────────────────────────────────────────────
+// Price belongs to the master item (itemdetail.CostInfoId → costinfo); the menu
+// entry only mirrors it. The Menu Items screen therefore stopped sending
+// CostInfoId, and the service reads it off the selected item instead.
+describe('positemmeta CostInfoId derivation', () => {
+  const svc = require('../../modules/positemmeta/positemmeta.service');
+  const ITEM_A = 'cccccccc-0000-0000-0000-00000000000a';
+  const ITEM_B = 'cccccccc-0000-0000-0000-00000000000b';
+  const COST_A = 'dddddddd-0000-0000-0000-00000000000a';
+  const COST_B = 'dddddddd-0000-0000-0000-00000000000b';
+  const EXPLICIT_COST = 'eeeeeeee-0000-0000-0000-00000000000e';
+
+  // Answers the itemdetail lookup with a per-item CostInfoId; everything else
+  // behaves like the standard insert/read mock.
+  const withItemPrices = (prices, existingRow = null) => {
+    mockConnection.execute.mockImplementation((sql, params) => {
+      if (/FROM itemdetail/i.test(sql)) {
+        const id = params[0];
+        return Promise.resolve([
+          Object.prototype.hasOwnProperty.call(prices, id)
+            ? [{ Id: id, CostInfoId: prices[id] }]
+            : [],
+        ]);
+      }
+      if (/SELECT/i.test(sql)) {
+        return Promise.resolve([existingRow ? [existingRow] : []]);
+      }
+      return Promise.resolve([{ affectedRows: 1 }]);
+    });
+  };
+
+  // CostInfoId is the 5th INSERT param (Id, TenantId, ItemDetailId, FoodTypeId, CostInfoId, …)
+  const insertedCostInfoId = () => {
+    const call = mockConnection.execute.mock.calls.find(
+      ([sql]) => /INSERT INTO pos_item_meta\s/i.test(sql)
+    );
+    return call[1][4];
+  };
+
+  // CostInfoId is the 3rd UPDATE param (ItemDetailId, FoodTypeId, CostInfoId, …)
+  const updatedCostInfoId = () => {
+    const call = mockConnection.execute.mock.calls.find(
+      ([sql]) => /UPDATE pos_item_meta SET/i.test(sql)
+    );
+    return call[1][2];
+  };
+
+  it('takes the price from the selected item when CostInfoId is omitted', async () => {
+    withItemPrices({ [ITEM_A]: COST_A });
+    await svc.create(
+      { ItemDetailId: ITEM_A, FoodTypeId: RECORD_ID, BranchDetailId: RECORD_ID },
+      TENANT_ID,
+      USER_EMAIL,
+    );
+    expect(insertedCostInfoId()).toBe(COST_A);
+  });
+
+  it('reports the derived CostInfoId back in the create response', async () => {
+    withItemPrices({ [ITEM_A]: COST_A });
+    const result = await svc.create(
+      { ItemDetailId: ITEM_A, FoodTypeId: RECORD_ID, BranchDetailId: RECORD_ID },
+      TENANT_ID,
+      USER_EMAIL,
+    );
+    expect(result.CostInfoId).toBe(COST_A);
+  });
+
+  it('honours an explicit CostInfoId — existing API clients are unaffected', async () => {
+    withItemPrices({ [ITEM_A]: COST_A });
+    await svc.create(
+      {
+        ItemDetailId: ITEM_A,
+        FoodTypeId: RECORD_ID,
+        BranchDetailId: RECORD_ID,
+        CostInfoId: EXPLICIT_COST,
+      },
+      TENANT_ID,
+      USER_EMAIL,
+    );
+    // The caller's value wins over the item's own price.
+    expect(insertedCostInfoId()).toBe(EXPLICIT_COST);
+  });
+
+  it('honours an explicit null CostInfoId', async () => {
+    withItemPrices({ [ITEM_A]: COST_A });
+    await svc.create(
+      {
+        ItemDetailId: ITEM_A,
+        FoodTypeId: RECORD_ID,
+        BranchDetailId: RECORD_ID,
+        CostInfoId: null,
+      },
+      TENANT_ID,
+      USER_EMAIL,
+    );
+    expect(insertedCostInfoId()).toBeNull();
+  });
+
+  it('stores null when the selected item has no price configured', async () => {
+    withItemPrices({ [ITEM_A]: null });
+    await svc.create(
+      { ItemDetailId: ITEM_A, FoodTypeId: RECORD_ID, BranchDetailId: RECORD_ID },
+      TENANT_ID,
+      USER_EMAIL,
+    );
+    expect(insertedCostInfoId()).toBeNull();
+  });
+
+  it('stores null when the item id does not resolve', async () => {
+    withItemPrices({});
+    await svc.create(
+      { ItemDetailId: ITEM_A, FoodTypeId: RECORD_ID, BranchDetailId: RECORD_ID },
+      TENANT_ID,
+      USER_EMAIL,
+    );
+    expect(insertedCostInfoId()).toBeNull();
+  });
+
+  it('moves the price with the item when the item is switched on update', async () => {
+    const existing = buildExistingRow({ ItemDetailId: ITEM_A, CostInfoId: COST_A });
+    withItemPrices({ [ITEM_A]: COST_A, [ITEM_B]: COST_B }, existing);
+
+    await svc.update(RECORD_ID, { ItemDetailId: ITEM_B }, TENANT_ID, USER_EMAIL);
+
+    // The whole point of deriving on update — the stale COST_A must not stick.
+    expect(updatedCostInfoId()).toBe(COST_B);
+  });
+
+  it('re-derives from the unchanged item when other fields are updated', async () => {
+    const existing = buildExistingRow({ ItemDetailId: ITEM_A, CostInfoId: COST_A });
+    withItemPrices({ [ITEM_A]: COST_A }, existing);
+
+    await svc.update(RECORD_ID, { Active: false }, TENANT_ID, USER_EMAIL);
+
+    expect(updatedCostInfoId()).toBe(COST_A);
+  });
+
+  it('keeps the existing price when the row has no item to derive from', async () => {
+    const existing = buildExistingRow({ ItemDetailId: null, CostInfoId: COST_A });
+    withItemPrices({}, existing);
+
+    await svc.update(RECORD_ID, { Active: false }, TENANT_ID, USER_EMAIL);
+
+    expect(updatedCostInfoId()).toBe(COST_A);
+  });
+});
+
 // ── Explicit rules for added/updated schemas ───────────────────────────────
 describe('POS updated schema rules', () => {
   it('posfeedback: Rating is required on create', () => {

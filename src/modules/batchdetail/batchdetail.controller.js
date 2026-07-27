@@ -28,11 +28,14 @@ const getAll = asyncHandler(async (req, res) => {
     req.query.limit,
     expand,
   )
+  // Signature is (res, data, pagination, message) — this used to pass the
+  // message first, so the list returned the message string as `data` and the
+  // rows as `pagination`.
   paginatedResponse(
     res,
-    'Batch details retrieved successfully',
     result.data,
     result.pagination,
+    'Batch details retrieved successfully',
   )
 })
 

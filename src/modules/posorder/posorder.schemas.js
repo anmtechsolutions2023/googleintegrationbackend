@@ -40,4 +40,33 @@ const uuidParamSchema = Joi.object({
   id: Joi.string().uuid().required(),
 });
 
-module.exports = { createSchema, updateSchema, paginationSchema, uuidParamSchema };
+// Table transfer — one of three shapes keyed by `scope`:
+//   orders : reassign whole rounds        → { orderIds[], toTableId }
+//   items  : split lines off one round     → { sourceOrderId, items[], toTableId }
+//   merge  : fold one round into another   → { sourceOrderId, targetOrderId }  (reversal)
+const transferItemSchema = Joi.object({
+  index: Joi.number().integer().min(0).required(),
+  qty: Joi.number().positive().required(),
+});
+
+const transferSchema = Joi.object({
+  scope: Joi.string().valid('orders', 'items', 'merge').required(),
+  toTableId: Joi.string().uuid().when('scope', {
+    is: 'merge', then: Joi.optional().allow(null), otherwise: Joi.required(),
+  }),
+  orderIds: Joi.array().items(Joi.string().uuid()).min(1).when('scope', {
+    is: 'orders', then: Joi.required(), otherwise: Joi.forbidden(),
+  }),
+  sourceOrderId: Joi.string().uuid().when('scope', {
+    is: Joi.valid('items', 'merge'), then: Joi.required(), otherwise: Joi.forbidden(),
+  }),
+  targetOrderId: Joi.string().uuid().when('scope', {
+    is: 'merge', then: Joi.required(), otherwise: Joi.forbidden(),
+  }),
+  items: Joi.array().items(transferItemSchema).min(1).when('scope', {
+    is: 'items', then: Joi.required(), otherwise: Joi.forbidden(),
+  }),
+  destOrderNo: Joi.string().max(50).optional().allow(null, ''),
+});
+
+module.exports = { createSchema, updateSchema, paginationSchema, uuidParamSchema, transferSchema };

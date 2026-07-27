@@ -530,7 +530,14 @@ const swaggerSpec = {
       },
       CostInfo: {
         type: 'object',
-        properties: { ...auditFields, Amount: { type: 'string' }, TaxGroupId: { type: 'string' }, IsTaxIncluded: { type: 'integer' } },
+        properties: {
+          ...auditFields,
+          Amount: { type: 'string' },
+          TaxGroupId: { type: 'string' },
+          TaxGroupName: { type: 'string', nullable: true, description: 'Joined on ?expand=true.' },
+          IsTaxIncluded: { type: 'integer' },
+          TaxBreakdown: { $ref: '#/components/schemas/TaxBreakdown' },
+        },
       },
 
       // ─── BranchDetail ──────────────────────────────────────────────────────
@@ -621,7 +628,15 @@ const swaggerSpec = {
       },
       BatchDetail: {
         type: 'object',
-        properties: { ...auditFields, BatchNo: { type: 'string' }, Barcode: { type: 'string', nullable: true }, Quantity: { type: 'string', nullable: true }, IsNonReturnable: { type: 'integer' } },
+        properties: {
+          ...auditFields,
+          BatchNo: { type: 'string' }, Barcode: { type: 'string', nullable: true },
+          Quantity: { type: 'string', nullable: true }, IsNonReturnable: { type: 'integer' },
+          CostInfoId: { type: 'string', format: 'uuid', nullable: true },
+          // Scaled to Quantity — batchdetail is the one non-POS table with both
+          // a cost link and a quantity.
+          TaxBreakdown: { $ref: '#/components/schemas/TaxBreakdown' },
+        },
       },
 
       // ─── ItemDetail ────────────────────────────────────────────────────────
@@ -652,7 +667,16 @@ const swaggerSpec = {
       },
       ItemDetail: {
         type: 'object',
-        properties: { ...auditFields, Name: { type: 'string' }, Code: { type: 'string', nullable: true }, SKU: { type: 'string', nullable: true }, Barcode: { type: 'string', nullable: true } },
+        properties: {
+          ...auditFields,
+          Name: { type: 'string' }, Code: { type: 'string', nullable: true },
+          SKU: { type: 'string', nullable: true }, Barcode: { type: 'string', nullable: true },
+          CostInfoId: { type: 'string', format: 'uuid', nullable: true },
+          CostAmount: { type: 'string', nullable: true, description: 'Joined from costinfo on ?expand=true.' },
+          CostTaxGroupName: { type: 'string', nullable: true },
+          CostIsTaxIncluded: { type: 'integer', nullable: true },
+          TaxBreakdown: { $ref: '#/components/schemas/TaxBreakdown' },
+        },
       },
 
       // ─── TransactionTypeBaseConversion ─────────────────────────────────────
@@ -714,25 +738,50 @@ const swaggerSpec = {
       // ─── TransactionItemDetail ─────────────────────────────────────────────
       TransactionItemDetailCreate: {
         type: 'object', required: ['TransactionDetailLogId', 'ItemId'],
+        description:
+          'Send a Quantity; the server resolves the price and tax from the item\'s cost record (itemdetail.CostInfoId → costinfo → taxgroup → mapper → TaxTypes) and stores a SNAPSHOT. UnitPrice/NetAmount/TaxAmount/GrossAmount/TaxComponents are computed server-side — they may be echoed back from a GET but are always ignored and overwritten.',
         properties: {
           TransactionDetailLogId: { type: 'string', format: 'uuid' },
           ItemId:                 { type: 'string', format: 'uuid' },
+          Quantity:               { type: 'number', minimum: 0, default: 1, description: 'Line quantity. The only pricing input a caller supplies.' },
+          CostInfoId:             { type: 'string', format: 'uuid', nullable: true, description: 'Optional override; defaults to the item\'s own CostInfoId.' },
           Comment:                { type: 'string', maxLength: 100, nullable: true },
           Active:                 { type: 'boolean', default: true },
         },
       },
       TransactionItemDetailUpdate: {
         type: 'object', minProperties: 1,
+        description:
+          'The line is re-priced only when ItemId, Quantity or CostInfoId changes — editing a comment must not restate a historical line at today\'s rates.',
         properties: {
           TransactionDetailLogId: { type: 'string', format: 'uuid' },
           ItemId:                 { type: 'string', format: 'uuid' },
+          Quantity:               { type: 'number', minimum: 0, default: 1, description: 'Line quantity. The only pricing input a caller supplies.' },
+          CostInfoId:             { type: 'string', format: 'uuid', nullable: true, description: 'Optional override; defaults to the item\'s own CostInfoId.' },
           Comment:                { type: 'string', maxLength: 100, nullable: true },
           Active:                 { type: 'boolean' },
         },
       },
       TransactionItemDetail: {
         type: 'object',
-        properties: { ...auditFields, TransactionDetailLogId: { type: 'string' }, ItemId: { type: 'string' }, Comment: { type: 'string', nullable: true } },
+        properties: { ...auditFields,
+          TransactionDetailLogId: { type: 'string' },
+          ItemId: { type: 'string' },
+          Quantity: { type: 'number' },
+          // Snapshot taken at write time — never recomputed on read, so an
+          // invoice keeps the rate it was raised under.
+          CostInfoId: { type: 'string', format: 'uuid', nullable: true },
+          UnitPrice: { type: 'number', nullable: true },
+          NetAmount: { type: 'number', nullable: true },
+          TaxAmount: { type: 'number', nullable: true },
+          GrossAmount: { type: 'number', nullable: true },
+          TaxComponents: {
+            type: 'array', nullable: true,
+            description: 'CGST/SGST split as charged. Null on lines written before pricing shipped.',
+            items: { $ref: '#/components/schemas/PricingComponent' },
+          },
+          Comment: { type: 'string', nullable: true },
+        },
       },
 
       // ─── TransactionTypeConversionMapper ───────────────────────────────────
@@ -847,7 +896,7 @@ const swaggerSpec = {
       },
       PaymentDetail: {
         type: 'object',
-        properties: { ...auditFields, AccountTypeBaseId: { type: 'string' }, TransactionDetailLogId: { type: 'string' }, TotalAmount: { type: 'string' }, GrossAmount: { type: 'string' }, DiscountAmount: { type: 'string', nullable: true } },
+        properties: { ...auditFields, AccountTypeBaseId: { type: 'string' }, TransactionDetailLogId: { type: 'string' }, TotalAmount: { type: 'string', description: 'Payable (net + tax). Computed from the log\'s priced lines when they exist.' }, TaxesAmount: { type: 'string', nullable: true, description: 'Tax total, computed from the log\'s priced line snapshots.' }, GrossAmount: { type: 'string', description: 'Taxable base after discount.' }, DiscountAmount: { type: 'string', nullable: true, description: 'Applied BEFORE tax.' } },
       },
 
       // ─── PaymentBreakup ────────────────────────────────────────────────────
@@ -858,6 +907,7 @@ const swaggerSpec = {
           PaymentDetailId:               { type: 'string', format: 'uuid' },
           PaymentModeTransactionDetailId: { type: 'string', format: 'uuid' },
           PaymentReceivedTypeId:         { type: 'string', format: 'uuid' },
+          Amount:                        { type: 'number', minimum: 0, default: 0, description: 'Amount settled through this payment mode. Several breakups against one paymentdetail form a split settlement and should sum to its TotalAmount.' },
           UserId:                        { type: 'string', format: 'uuid', nullable: true },
           Timestamp:                     { type: 'string', example: '2026-05-31T10:00:00.000Z', description: 'ISO datetime or DD-MM-YYYY' },
           Active:                        { type: 'boolean', default: true },
@@ -870,6 +920,7 @@ const swaggerSpec = {
           PaymentDetailId:               { type: 'string', format: 'uuid' },
           PaymentModeTransactionDetailId: { type: 'string', format: 'uuid' },
           PaymentReceivedTypeId:         { type: 'string', format: 'uuid' },
+          Amount:                        { type: 'number', minimum: 0, default: 0, description: 'Amount settled through this payment mode. Several breakups against one paymentdetail form a split settlement and should sum to its TotalAmount.' },
           UserId:                        { type: 'string', format: 'uuid', nullable: true },
           Timestamp:                     { type: 'string', description: 'ISO datetime or DD-MM-YYYY' },
           Active:                        { type: 'boolean' },
@@ -877,7 +928,7 @@ const swaggerSpec = {
       },
       PaymentBreakup: {
         type: 'object',
-        properties: { ...auditFields, AccountTypeBaseId: { type: 'string' }, PaymentDetailId: { type: 'string' }, PaymentModeTransactionDetailId: { type: 'string' }, PaymentReceivedTypeId: { type: 'string' }, UserId: { type: 'string', nullable: true }, Timestamp: { type: 'string' } },
+        properties: { ...auditFields, AccountTypeBaseId: { type: 'string' }, PaymentDetailId: { type: 'string' }, PaymentModeTransactionDetailId: { type: 'string' }, PaymentReceivedTypeId: { type: 'string' }, Amount: { type: 'number', description: 'Amount settled through this mode.' }, UserId: { type: 'string', nullable: true }, Timestamp: { type: 'string' } },
       },
 
       // ─── IAM — Onboarding ──────────────────────────────────────────────────
@@ -1121,10 +1172,16 @@ const swaggerSpec = {
       },
       PosItemMetaCreate: {
         type: 'object', required: ["ItemDetailId", "FoodTypeId", "BranchDetailId"],
+        description:
+          'Price is owned by the master item (itemdetail.CostInfoId → costinfo); a menu entry only mirrors it. OMIT CostInfoId and the server derives it from ItemDetailId — this is what the Menu Items screen does. Send it explicitly only to override.',
         properties: {
           ItemDetailId: {"type":"string","format":"uuid"},
           FoodTypeId: {"type":"string","format":"uuid"},
-          CostInfoId: {"type":"string","format":"uuid","nullable":true},
+          CostInfoId: {
+            type: 'string', format: 'uuid', nullable: true,
+            description:
+              'Optional. When omitted, derived from the selected item\'s CostInfoId. An explicit value (including null) always wins, so existing clients are unaffected.',
+          },
           ChannelIds: {"type":"array","items":{"type":"string","format":"uuid"}},
           VariantIds: {"type":"array","items":{"type":"string","format":"uuid"}},
           Channels: {"type":"object"},
@@ -1136,10 +1193,16 @@ const swaggerSpec = {
       },
       PosItemMetaUpdate: {
         type: 'object',
+        description:
+          'Same price rule as create: omit CostInfoId and the server re-derives it from the effective ItemDetailId, so switching the item also moves the price. An explicit value still wins.',
         properties: {
           ItemDetailId: {"type":"string","format":"uuid"},
           FoodTypeId: {"type":"string","format":"uuid"},
-          CostInfoId: {"type":"string","format":"uuid","nullable":true},
+          CostInfoId: {
+            type: 'string', format: 'uuid', nullable: true,
+            description:
+              'Optional. When omitted, re-derived from the selected item on every update.',
+          },
           ChannelIds: {"type":"array","items":{"type":"string","format":"uuid"}},
           VariantIds: {"type":"array","items":{"type":"string","format":"uuid"}},
           Channels: {"type":"object"},
@@ -1156,8 +1219,15 @@ const swaggerSpec = {
           FoodTypeId: {"type":"string","format":"uuid"},
           FoodTypeName: {"type":"string","nullable":true},
           FoodTypeIsVeg: {"type":"boolean","nullable":true},
-          CostInfoId: {"type":"string","format":"uuid","nullable":true},
-          CostInfoAmount: {"type":"number","nullable":true},
+          CostInfoId: {
+            type: 'string', format: 'uuid', nullable: true,
+            description: 'Resolved from the selected item unless explicitly overridden.',
+          },
+          CostInfoAmount: {
+            type: 'number', nullable: true,
+            description: 'Joined from costinfo.Amount — the price shown read-only on the Menu Items form.',
+          },
+          TaxBreakdown: { $ref: '#/components/schemas/TaxBreakdown' },
           ChannelIds: {"type":"array","items":{"type":"string","format":"uuid"}},
           VariantIds: {"type":"array","items":{"type":"string","format":"uuid"}},
           Channels: {"type":"object"},
@@ -1235,6 +1305,123 @@ const swaggerSpec = {
               },
             },
           },
+        },
+      },
+      // ── Pricing / tax engine ────────────────────────────────────────────
+      PricingDiscount: {
+        type: 'object', required: ['type', 'value'],
+        description: 'Applied BEFORE tax.',
+        properties: {
+          type: { type: 'string', enum: ['percent', 'amount'] },
+          value: { type: 'number', minimum: 0 },
+        },
+      },
+      PricingQuoteRequest: {
+        type: 'object', required: ['lines'],
+        properties: {
+          lines: {
+            type: 'array', minItems: 1, maxItems: 200,
+            items: {
+              type: 'object', required: ['costInfoId'],
+              properties: {
+                costInfoId: { type: 'string', format: 'uuid' },
+                quantity: { type: 'number', minimum: 0, default: 1 },
+                variantIds: {
+                  type: 'array', maxItems: 20,
+                  items: { type: 'string', format: 'uuid' },
+                  description: 'Selected variants. Prices are read from the pos_variant master (never from the request) and added to the unit price BEFORE tax. They are a surcharge, not separately taxed lines, so they inherit the item\'s tax group and its inclusive/exclusive convention.',
+                },
+                discount: { $ref: '#/components/schemas/PricingDiscount' },
+                ref: { type: 'string', maxLength: 100, description: 'Client correlation key, echoed back untouched.' },
+              },
+            },
+          },
+          discount: {
+            allOf: [{ $ref: '#/components/schemas/PricingDiscount' }],
+            description: 'Document-level discount, apportioned across lines before tax.',
+          },
+        },
+      },
+      PricingComponent: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid', nullable: true },
+          name: { type: 'string', nullable: true, example: 'CGST' },
+          rate: { type: 'number', example: 9 },
+          amount: { type: 'number', example: 7.63 },
+        },
+      },
+      PricingLine: {
+        type: 'object',
+        properties: {
+          costInfoId: { type: 'string', format: 'uuid', nullable: true },
+          found: { type: 'boolean', description: 'false when the costinfo could not be resolved; the line prices as zero.' },
+          taxGroupId: { type: 'string', format: 'uuid', nullable: true },
+          taxGroupName: { type: 'string', nullable: true },
+          quantity: { type: 'number' },
+          unitAmount: { type: 'number', description: 'EFFECTIVE per-unit amount actually taxed — baseAmount + addOnAmount.' },
+          baseAmount: { type: 'number', description: 'Per-unit amount as stored on costinfo, before variants.' },
+          addOnAmount: { type: 'number', description: 'Per-unit variant surcharge folded into the taxed price.' },
+          variants: {
+            type: 'array',
+            description: 'Selected variants resolved from the master, so a caller can render "Large +₹30" without a second lookup.',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                name: { type: 'string' },
+                code: { type: 'string' },
+                price: { type: 'number' },
+              },
+            },
+          },
+          lineAmount: { type: 'number', description: 'unitAmount × quantity, before discount.' },
+          discountAmount: { type: 'number', description: 'Line discount + apportioned share of any document discount.' },
+          netAmount: { type: 'number', description: 'Taxable base, after discount.' },
+          taxAmount: { type: 'number' },
+          grossAmount: { type: 'number', description: 'netAmount + taxAmount.' },
+          effectiveRate: { type: 'number', example: 18 },
+          isTaxIncluded: { type: 'boolean' },
+          components: { type: 'array', items: { $ref: '#/components/schemas/PricingComponent' } },
+        },
+      },
+      PricingTotals: {
+        type: 'object',
+        properties: {
+          netAmount: { type: 'number' },
+          taxAmount: { type: 'number' },
+          grossAmount: { type: 'number' },
+          discountAmount: { type: 'number' },
+          taxByComponent: {
+            type: 'array',
+            description: 'Invoice footer — components aggregated across all lines. Sums exactly to taxAmount.',
+            items: { $ref: '#/components/schemas/PricingComponent' },
+          },
+        },
+      },
+      PricingQuoteResult: {
+        type: 'object',
+        properties: {
+          lines: { type: 'array', items: { $ref: '#/components/schemas/PricingLine' } },
+          totals: { $ref: '#/components/schemas/PricingTotals' },
+        },
+      },
+      TaxBreakdown: {
+        allOf: [{ $ref: '#/components/schemas/PricingLine' }],
+        nullable: true,
+        description:
+          'Live tax breakdown resolved from `costinfo → taxgroup → mapper → TaxTypes`, returned on `?expand=true` by costinfo, itemdetail, pos item-meta and batchdetail.\n\n' +
+          '`null` when the record has no cost link, or the cost record cannot be resolved — an item without a price yet is normal, not an error.\n\n' +
+          'On **batchdetail** the breakdown is scaled to the row\'s `Quantity`; elsewhere it is the unit price. A null/blank Quantity means "not recorded" and falls back to the unit price, whereas a recorded 0 prices the line at zero.\n\n' +
+          '**Read paths only.** Stored documents (orders, bills) carry their own snapshot taken at write time and are never re-priced against current rates.',
+      },
+      TaxGroupRate: {
+        type: 'object',
+        properties: {
+          taxGroupId: { type: 'string', format: 'uuid' },
+          taxGroupName: { type: 'string' },
+          effectiveRate: { type: 'number', example: 18 },
+          components: { type: 'array', items: { $ref: '#/components/schemas/PricingComponent' } },
         },
       },
       TenantSetupStatus: {
@@ -1438,11 +1625,23 @@ const swaggerSpec = {
       },
       PosBillCreate: {
         type: 'object', required: ["BillNo"],
+        description:
+          'A dine-in session is several rounds (orders) billed together. Send **OrderIds** and the server recomputes SubTotal/TaxAmount/Total from every listed order\'s priced line snapshots — client-supplied totals are ignored.\n\n' +
+          '**Discount is applied BEFORE tax**: it is spread across the lines and tax is charged on what remains, so it reduces the taxable base rather than being knocked off an already-taxed total.\n\n' +
+          'Pricing uses each order\'s stored snapshot, never the live tax chain, so editing a tax group mid-session cannot restate a bill being settled.',
         properties: {
           BillNo: {"type":"string"},
-          OrderId: {"type":"string","format":"uuid"},
-          SubTotal: {"type":"number"},
-          TaxAmount: {"type":"number"},
+          OrderId: {
+            type: 'string', format: 'uuid',
+            description: 'Primary/first round. Kept for single-order callers; OrderIds is preferred.',
+          },
+          OrderIds: {
+            type: 'array', minItems: 1, maxItems: 100,
+            items: { type: 'string', format: 'uuid' },
+            description: 'Every round this bill covers. Recorded in pos_bill_order and used to recompute the bill.',
+          },
+          SubTotal: {"type":"number","description":"Server-computed (net, after discount). Ignored on input when OrderIds/OrderId resolve to priced lines."},
+          TaxAmount: {"type":"number","description":"Server-computed. Ignored on input."},
           Discount: {"type":"number"},
           Total: {"type":"number"},
           Payments: {"type":"object"},
@@ -1479,6 +1678,15 @@ const swaggerSpec = {
       PosBill: {
         type: 'object',
         properties: { ...auditFields,
+          OrderIds: {
+            type: 'array', items: { type: 'string', format: 'uuid' },
+            description: 'Every round this bill covers (from pos_bill_order).',
+          },
+          TaxByComponent: {
+            type: 'array',
+            description: 'Invoice footer — CGST/SGST split across all rounds. Sums exactly to TaxAmount. Empty for bills raised before server-side pricing.',
+            items: { $ref: '#/components/schemas/PricingComponent' },
+          },
           BillNo: {"type":"string"},
           OrderId: {"type":"string","format":"uuid"},
           SubTotal: {"type":"number"},
@@ -1684,6 +1892,69 @@ const swaggerSpec = {
           ...responses.unauthorized,
           ...responses.forbidden,
           409: { description: 'Conflict — either this tenant has already completed setup, or a unique constraint (e.g. Code/Name) was violated; nothing was saved' },
+        },
+      },
+    },
+    '/api/pricing/quote': {
+      post: {
+        tags: ['Pricing'],
+        summary: 'Calculate price + tax for a set of lines (stateless)',
+        description:
+          'Prices lines over the master-data chain `costinfo → taxgroup → taxgrouptaxtypemapper → TaxTypes`, honouring each cost record\'s `IsTaxIncluded` flag.\n\n' +
+          '**Stateless — stores nothing.** Safe to call repeatedly from a cart UI.\n\n' +
+          'Policy applied here (identical everywhere in the project):\n' +
+          '- Discounts are applied **before** tax. A document-level discount is apportioned across lines in proportion to their value.\n' +
+          '- Tax is rounded **per line**, then summed, so printed lines always add up to the printed total.\n' +
+          '- Tax components (e.g. CGST + SGST) are allocated by largest remainder so they sum **exactly** to the line tax.\n\n' +
+          'A tax group with no active tax types is a valid 0% ("Exempt") group, not an error. Inactive tax types are excluded automatically.',
+        security,
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/PricingQuoteRequest' } } },
+        },
+        responses: {
+          200: {
+            description: 'Priced lines and document totals',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: {
+                success: { type: 'boolean', example: true },
+                message: { type: 'string' },
+                data: { $ref: '#/components/schemas/PricingQuoteResult' },
+              },
+            }}},
+          },
+          ...responses.validation,
+          ...responses.unauthorized,
+          ...responses.forbidden,
+        },
+      },
+    },
+    '/api/pricing/tax-groups/{taxGroupId}/rate': {
+      get: {
+        tags: ['Pricing'],
+        summary: 'Effective rate and components for a tax group',
+        description:
+          'Returns the group\'s active tax types and their summed effective rate — e.g. GST18 → CGST 9% + SGST 9% = 18%. For UI display; no amount is involved.',
+        security,
+        parameters: [
+          { name: 'taxGroupId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: {
+            description: 'Tax group rate',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: {
+                success: { type: 'boolean', example: true },
+                message: { type: 'string' },
+                data: { $ref: '#/components/schemas/TaxGroupRate' },
+              },
+            }}},
+          },
+          ...responses.notFound,
+          ...responses.unauthorized,
+          ...responses.forbidden,
         },
       },
     },

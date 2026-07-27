@@ -719,13 +719,27 @@ CREATE TABLE transactiondetaillog (
 );
 
 -- 3.25 transactionitemdetail
+-- Quantity + priced snapshot columns make the transaction ledger priceable.
+-- Before these, the table was only a link (log ↔ item) with no way to express
+-- "2 × item at price X", so tax could not be computed for it at all.
+--
+-- UnitPrice and the three amount columns are a SNAPSHOT taken when the line is
+-- written. They are never recomputed on read: an invoice raised at 12% GST must
+-- still read 12% after the rate changes.
 CREATE TABLE transactionitemdetail (
-    Id                     VARCHAR(50)   NOT NULL,
-    TransactionDetailLogId VARCHAR(50)   NOT NULL,
-    ItemId                 VARCHAR(50)   NOT NULL,
+    Id                     VARCHAR(50)    NOT NULL,
+    TransactionDetailLogId VARCHAR(50)    NOT NULL,
+    ItemId                 VARCHAR(50)    NOT NULL,
+    Quantity               DECIMAL(18,4)  NOT NULL DEFAULT 1,
+    CostInfoId             VARCHAR(50)    NULL COMMENT 'Cost record this line was priced from',
+    UnitPrice              DECIMAL(18,4)  NULL COMMENT 'Snapshot of costinfo.Amount at write time',
+    NetAmount              DECIMAL(18,4)  NULL COMMENT 'Taxable base after discount',
+    TaxAmount              DECIMAL(18,4)  NULL,
+    GrossAmount            DECIMAL(18,4)  NULL COMMENT 'NetAmount + TaxAmount',
+    TaxComponents          JSON           NULL COMMENT 'Per-component split, e.g. [{name:CGST,rate:9,amount:...}]',
     Comment                VARCHAR(100),
-    TenantId               VARCHAR(50)   NOT NULL,
-    Active                 TINYINT(1)    NOT NULL,
+    TenantId               VARCHAR(50)    NOT NULL,
+    Active                 TINYINT(1)     NOT NULL,
     CreatedOn              DATETIME,
     CreatedBy              VARCHAR(50),
     UpdatedOn              DATETIME,
@@ -733,7 +747,8 @@ CREATE TABLE transactionitemdetail (
     PRIMARY KEY (Id),
     UNIQUE (TransactionDetailLogId, ItemId, TenantId),
     FOREIGN KEY (TransactionDetailLogId) REFERENCES transactiondetaillog(Id),
-    FOREIGN KEY (ItemId)                 REFERENCES itemdetail(Id)
+    FOREIGN KEY (ItemId)                 REFERENCES itemdetail(Id),
+    FOREIGN KEY (CostInfoId)             REFERENCES costinfo(Id)
 );
 
 -- 3.26 transactiontypeconversionmapper
@@ -836,6 +851,10 @@ CREATE TABLE paymentbreakup (
     PaymentDetailId                VARCHAR(50)   NOT NULL,
     PaymentModeTransactionDetailId VARCHAR(100)  NOT NULL,
     PaymentReceivedTypeId          VARCHAR(50)   NOT NULL,
+    -- Without this a split settlement could not be recorded at all: the table
+    -- linked payment modes but had nowhere to store how much went to each, so
+    -- "₹500 cash + ₹300 card" was inexpressible.
+    Amount                         DECIMAL(18,4) NOT NULL DEFAULT 0,
     UserId                         VARCHAR(50)   NULL,
     Timestamp                      DATETIME      NOT NULL,
     TenantId                       VARCHAR(50)   NOT NULL,
@@ -863,6 +882,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS pos_bill_order;
 DROP TABLE IF EXISTS pos_bill;
 DROP TABLE IF EXISTS pos_kot;
 DROP TABLE IF EXISTS pos_order;
@@ -1138,6 +1158,25 @@ CREATE TABLE pos_bill (
     UpdatedBy       VARCHAR(50),
     PRIMARY KEY (Id),
     UNIQUE (BillNo, TenantId),
+    FOREIGN KEY (OrderId) REFERENCES pos_order(Id)
+);
+
+-- 4.12b pos_bill_order — which orders (rounds) a bill covers
+-- A dine-in session is billed as ONE bill spanning several rounds, each round
+-- being its own pos_order. pos_bill.OrderId only ever held the FIRST round, so
+-- a bill could not be recomputed from its own key. This join table is the truth;
+-- pos_bill.OrderId is kept as the primary/first order for backward compatibility.
+CREATE TABLE pos_bill_order (
+    Id         VARCHAR(50)  NOT NULL,
+    BillId     VARCHAR(50)  NOT NULL,
+    OrderId    VARCHAR(50)  NOT NULL,
+    TenantId   VARCHAR(50)  NOT NULL,
+    Active     TINYINT(1)   NOT NULL DEFAULT 1,
+    CreatedOn  DATETIME,
+    CreatedBy  VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (BillId, OrderId, TenantId),
+    FOREIGN KEY (BillId)  REFERENCES pos_bill(Id) ON DELETE CASCADE,
     FOREIGN KEY (OrderId) REFERENCES pos_order(Id)
 );
 

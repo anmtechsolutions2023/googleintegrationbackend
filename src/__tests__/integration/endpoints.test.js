@@ -1307,6 +1307,199 @@ describe('Master-data bootstrap — POST /api/master-data/bootstrap', () => {
   });
 });
 
+describe('Pricing — POST /api/pricing/quote', () => {
+  const CI = 'f1f1f1f1-0000-0000-0000-0000000000c1';
+
+  // Answers the pricing chain query with a GST18 (CGST 9 + SGST 9) cost record.
+  const chainImpl = ({ amount = '100', included = 0 } = {}) => (sql, params) => {
+    if ((sql || '').includes('FROM costinfo ci')) {
+      return Promise.resolve([[
+        { CostInfoId: params[1], Amount: amount, IsTaxIncluded: included, TaxGroupId: 'tg1', TaxGroupName: 'GST18', TaxTypeId: 'c1', TaxTypeName: 'CGST', TaxTypeValue: '9' },
+        { CostInfoId: params[1], Amount: amount, IsTaxIncluded: included, TaxGroupId: 'tg1', TaxGroupName: 'GST18', TaxTypeId: 's1', TaxTypeName: 'SGST', TaxTypeValue: '9' },
+      ]]);
+    }
+    return defaultExecuteImpl(sql);
+  };
+
+  it('no token → 401', async () => {
+    const res = await request(server)
+      .post('/api/pricing/quote')
+      .send({ lines: [{ costInfoId: CI }] });
+    expect(res.status).toBe(401);
+  });
+
+  it('empty lines → 400', async () => {
+    const res = await request(server)
+      .post('/api/pricing/quote')
+      .set('Authorization', adminToken())
+      .send({ lines: [] });
+    expect(res.status).toBe(400);
+  });
+
+  it('non-uuid costInfoId → 400', async () => {
+    const res = await request(server)
+      .post('/api/pricing/quote')
+      .set('Authorization', adminToken())
+      .send({ lines: [{ costInfoId: 'not-a-uuid' }] });
+    expect(res.status).toBe(400);
+  });
+
+  it('prices an exclusive line end to end', async () => {
+    mockConnection.execute.mockImplementation(chainImpl());
+    const res = await request(server)
+      .post('/api/pricing/quote')
+      .set('Authorization', adminToken())
+      .send({ lines: [{ costInfoId: CI, quantity: 2 }] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.totals).toMatchObject({
+      netAmount: 200, taxAmount: 36, grossAmount: 236,
+    });
+    expect(res.body.data.lines[0].taxGroupName).toBe('GST18');
+  });
+
+  it('returns a component footer that sums to the tax', async () => {
+    mockConnection.execute.mockImplementation(chainImpl({ amount: '100', included: 1 }));
+    const res = await request(server)
+      .post('/api/pricing/quote')
+      .set('Authorization', adminToken())
+      .send({ lines: [{ costInfoId: CI, quantity: 1 }] });
+
+    expect(res.status).toBe(200);
+    const { totals } = res.body.data;
+    expect(totals.taxAmount).toBe(15.25);
+    const sum = totals.taxByComponent.reduce((s, c) => s + c.amount, 0);
+    expect(Number(sum.toFixed(2))).toBe(15.25);
+  });
+
+  it('applies a document discount before tax', async () => {
+    mockConnection.execute.mockImplementation(chainImpl());
+    const res = await request(server)
+      .post('/api/pricing/quote')
+      .set('Authorization', adminToken())
+      .send({ lines: [{ costInfoId: CI, quantity: 1 }], discount: { type: 'percent', value: 10 } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.totals).toMatchObject({
+      discountAmount: 10, netAmount: 90, taxAmount: 16.2,
+    });
+  });
+
+  it('is reachable with a POS billing scope (cart quoting)', async () => {
+    mockConnection.execute.mockImplementation(chainImpl());
+    const posToken = 'Bearer ' + jwt.sign(
+      { tid: TENANT_ID, email: 'cashier@test.com', scopes: ['POS_BILLING:READ'] },
+      TEST_SECRET,
+    );
+    const res = await request(server)
+      .post('/api/pricing/quote')
+      .set('Authorization', posToken)
+      .send({ lines: [{ costInfoId: CI, quantity: 1 }] });
+    expect(res.status).toBe(200);
+  });
+});
+
+// Phase 2: ?expand=true read paths carry a live tax breakdown.
+describe('Pricing — TaxBreakdown on expand', () => {
+  // MOCK_ROW supplies CostInfoId; answer the chain query with GST18.
+  const withChain = () => {
+    mockConnection.execute.mockImplementation((sql) => {
+      if ((sql || '').includes('FROM costinfo ci')) {
+        return Promise.resolve([[
+          { CostInfoId: RECORD_ID, Amount: '100', IsTaxIncluded: 0, TaxGroupId: 'tg1', TaxGroupName: 'GST18', TaxTypeId: 'c1', TaxTypeName: 'CGST', TaxTypeValue: '9' },
+          { CostInfoId: RECORD_ID, Amount: '100', IsTaxIncluded: 0, TaxGroupId: 'tg1', TaxGroupName: 'GST18', TaxTypeId: 's1', TaxTypeName: 'SGST', TaxTypeValue: '9' },
+        ]]);
+      }
+      return defaultExecuteImpl(sql);
+    });
+    mockConnection.query.mockImplementation(() => Promise.resolve([[
+      { ...MOCK_ROW, CostInfoId: RECORD_ID },
+    ]]));
+  };
+
+  it.each([
+    ['/api/itemdetails?expand=true'],
+    ['/api/batchdetails?expand=true'],
+    // Menu rows always carry the breakdown — the price they show is what a
+    // customer pays, so it is not gated behind expand.
+    ['/api/pos/item-meta'],
+  ])('%s returns a TaxBreakdown', async (path) => {
+    withChain();
+    const res = await request(server).get(path).set('Authorization', adminToken());
+
+    expect(res.status).toBe(200);
+    const row = res.body.data[0];
+    expect(row.TaxBreakdown).toBeTruthy();
+    expect(row.TaxBreakdown.taxAmount).toBe(18);
+    expect(row.TaxBreakdown.grossAmount).toBe(118);
+    expect(row.TaxBreakdown.taxGroupName).toBe('GST18');
+  });
+
+  it('batchdetails list returns rows under `data` (not the message)', async () => {
+    withChain();
+    const res = await request(server)
+      .get('/api/batchdetails?expand=true')
+      .set('Authorization', adminToken());
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(typeof res.body.message).toBe('string');
+  });
+
+  it('omits the breakdown without expand=true', async () => {
+    withChain();
+    const res = await request(server).get('/api/itemdetails').set('Authorization', adminToken());
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].TaxBreakdown).toBeUndefined();
+  });
+
+  it('returns null rather than erroring when a row has no cost link', async () => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    mockConnection.query.mockImplementation(() => Promise.resolve([[
+      { ...MOCK_ROW, CostInfoId: null },
+    ]]));
+    const res = await request(server)
+      .get('/api/itemdetails?expand=true')
+      .set('Authorization', adminToken());
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].TaxBreakdown).toBeNull();
+  });
+});
+
+describe('Pricing — GET /api/pricing/tax-groups/:id/rate', () => {
+  const TG = 'f1f1f1f1-0000-0000-0000-0000000000t1'.replace('t1', '11');
+
+  it('returns the effective rate and components', async () => {
+    mockConnection.execute.mockImplementation((sql) => {
+      if ((sql || '').includes('FROM taxgroup tg')) {
+        return Promise.resolve([[
+          { TaxGroupId: TG, TaxGroupName: 'GST18', TaxTypeId: 'c1', TaxTypeName: 'CGST', TaxTypeValue: '9' },
+          { TaxGroupId: TG, TaxGroupName: 'GST18', TaxTypeId: 's1', TaxTypeName: 'SGST', TaxTypeValue: '9' },
+        ]]);
+      }
+      return defaultExecuteImpl(sql);
+    });
+
+    const res = await request(server)
+      .get(`/api/pricing/tax-groups/${TG}/rate`)
+      .set('Authorization', adminToken());
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.effectiveRate).toBe(18);
+    expect(res.body.data.components).toHaveLength(2);
+  });
+
+  it('unknown group → 404', async () => {
+    mockConnection.execute.mockImplementation((sql) => {
+      if ((sql || '').includes('FROM taxgroup tg')) return Promise.resolve([[]]);
+      return defaultExecuteImpl(sql);
+    });
+    const res = await request(server)
+      .get(`/api/pricing/tax-groups/${TG}/rate`)
+      .set('Authorization', adminToken());
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('Tenancy setup status — GET /api/master-data/status', () => {
   it('no token → 401', async () => {
     const res = await request(server).get('/api/master-data/status');

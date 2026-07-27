@@ -6,6 +6,10 @@ const Joi = require('joi');
 const createSchema = Joi.object({
   BillNo: Joi.string().required().max(50).allow(null).trim(),
   OrderId: Joi.string().uuid().optional().allow(null),
+  // A dine-in session is several rounds billed together. When present the server
+  // recomputes SubTotal/TaxAmount/Total from every listed order's priced lines,
+  // applying Discount BEFORE tax. OrderId alone still works for single-order bills.
+  OrderIds: Joi.array().items(Joi.string().uuid()).min(1).max(100).optional(),
   SubTotal: Joi.number().optional().default(0).allow(null),
   TaxAmount: Joi.number().optional().default(0).allow(null),
   Discount: Joi.number().optional().default(0).allow(null),

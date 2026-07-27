@@ -11,6 +11,9 @@ const { QUERIES } = require('../../config/constants');
 const { withTransaction } = require('../../utils/dbHelper');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
+const { attachBreakdown, attachBreakdownToOne } = require('../pricing/pricing.enrich');
+
+const PRICING_OPTS = { idField: 'CostInfoId' };
 
 // Serialize object/array values for JSON columns; pass through strings and null.
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
@@ -33,6 +36,40 @@ const toIdArray = (v) => {
 class PosItemMetaService extends BaseCRUDService {
   constructor() {
     super('POS Item Meta', QUERIES.POS_ITEM_META);
+  }
+
+  /**
+   * Resolves which costinfo row this menu item should point at.
+   *
+   * Price belongs to the master item (itemdetail.CostInfoId → costinfo), not to
+   * the POS menu entry — the menu entry only mirrors it. So when the caller does
+   * not supply a CostInfoId we read it off the selected item, which keeps the
+   * two in step even when the item is switched on edit.
+   *
+   * An EXPLICIT CostInfoId always wins, including an explicit null. That keeps
+   * every existing API client working exactly as before; only callers that omit
+   * the field (as the Menu Items screen now does) get the derived value.
+   *
+   * @param {Object} connection - Open transaction connection.
+   * @param {Object} data - Incoming create/update payload.
+   * @param {Object|null} existing - Current row on update, null on create.
+   * @param {string} tenantId - Tenant ID.
+   * @returns {Promise<string|null>} CostInfoId to persist.
+   */
+  async resolveCostInfoId(connection, data, existing, tenantId) {
+    if (data.CostInfoId !== undefined) return data.CostInfoId;
+
+    const itemDetailId = data.ItemDetailId ?? existing?.ItemDetailId ?? null;
+    if (!itemDetailId) return existing?.CostInfoId ?? null;
+
+    const [rows] = await connection.execute(
+      QUERIES.ITEM_DETAIL.SELECT_BY_ID,
+      [itemDetailId, tenantId],
+    );
+    // Unknown item, or an item with no price configured — fall back to whatever
+    // the row already had rather than inventing a value.
+    if (!rows || rows.length === 0) return existing?.CostInfoId ?? null;
+    return rows[0].CostInfoId ?? null;
   }
 
   prepareInsertParams(id, data, tenantId, userEmail) {
@@ -92,12 +129,18 @@ class PosItemMetaService extends BaseCRUDService {
   async create(data, tenantId, userEmail) {
     return withTransaction(async (connection) => {
       const id = uuidv4();
-      const params = this.prepareInsertParams(id, data, tenantId, userEmail);
+      const resolved = {
+        ...data,
+        CostInfoId: await this.resolveCostInfoId(connection, data, null, tenantId),
+      };
+      const params = this.prepareInsertParams(id, resolved, tenantId, userEmail);
       await connection.execute(this.queries.INSERT, params);
       await this.syncLinks(
         connection, id, tenantId, userEmail, data.ChannelIds, data.VariantIds,
       );
-      return { id, ...data };
+      // `resolved`, not `data`, so the response reports the CostInfoId that was
+      // actually stored rather than the (absent) one the client sent.
+      return { id, ...resolved };
     });
   }
 
@@ -109,7 +152,12 @@ class PosItemMetaService extends BaseCRUDService {
         throw new HttpError('POS Item Meta not found', MESSAGES.HTTP_STATUS.NOT_FOUND);
       }
       const existing = existingRows[0];
-      const params = this.prepareUpdateParams(data, existing, userEmail, id, tenantId)
+      // Re-derived on every update so switching the item also moves the price.
+      const resolved = {
+        ...data,
+        CostInfoId: await this.resolveCostInfoId(connection, data, existing, tenantId),
+      };
+      const params = this.prepareUpdateParams(resolved, existing, userEmail, id, tenantId)
         .map((p) => (p === undefined ? null : p));
       await connection.execute(this.queries.UPDATE, params);
       await this.syncLinks(
@@ -125,14 +173,18 @@ class PosItemMetaService extends BaseCRUDService {
     return { ...row, ChannelIds: toIdArray(row.ChannelIds), VariantIds: toIdArray(row.VariantIds) };
   }
 
+  // Menu rows always carry the tax breakdown — the price they show is the one a
+  // customer pays, so net/tax/gross is more useful here than a raw amount. The
+  // SELECTs already join costinfo, so this adds one batched chain query, not N.
   async getAll(tenantId, page, limit, expand) {
     const result = await super.getAll(tenantId, page, limit, expand);
-    return { ...result, data: (result.data || []).map((r) => this.normalizeRow(r)) };
+    const rows = (result.data || []).map((r) => this.normalizeRow(r));
+    return { ...result, data: await attachBreakdown(rows, tenantId, PRICING_OPTS) };
   }
 
   async getById(id, tenantId, expand) {
-    const row = await super.getById(id, tenantId, expand);
-    return this.normalizeRow(row);
+    const row = this.normalizeRow(await super.getById(id, tenantId, expand));
+    return attachBreakdownToOne(row, tenantId, PRICING_OPTS);
   }
 }
 

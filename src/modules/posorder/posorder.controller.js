@@ -19,6 +19,7 @@ const {
   updateSchema,
   paginationSchema,
   uuidParamSchema,
+  transferSchema,
 } = require('./posorder.schemas');
 const { logger } = require('../../utils/logger');
 
@@ -55,10 +56,18 @@ const update = asyncHandler(async (req, res) => {
 
 const deleteById = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId } = req.user;
+  const { tid: tenantId, email } = req.user;
   logger.info('PosOrder.deleteById called', { id, tenantId });
-  await service.remove(id, tenantId);
+  await service.remove(id, tenantId, email);
   noContentResponse(res, 'POS Order deleted successfully');
+});
+
+// Domain action: transfer items / rounds between tables (keep-as-served).
+const transfer = asyncHandler(async (req, res) => {
+  const { tid: tenantId, email } = req.user;
+  logger.info('PosOrder.transfer called', { tenantId, email, scope: req.body.scope });
+  const result = await service.transfer(req.body, tenantId, email);
+  successResponse(res, result, 'Order transferred successfully');
 });
 
 // Domain action: fire a KOT from this order.
@@ -77,4 +86,5 @@ module.exports = {
   update: [validateParams(uuidParamSchema), validateBody(updateSchema), update],
   deleteById: [validateParams(uuidParamSchema), deleteById],
   fireKot: [validateParams(uuidParamSchema), fireKot],
+  transfer: [validateBody(transferSchema), transfer],
 };
