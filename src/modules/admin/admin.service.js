@@ -27,8 +27,11 @@ const listOnboardingRequests = (status = 'PENDING', page = 1, limit = 20) =>
     );
 
     const dataParams = status !== 'ALL' ? [status] : [];
+    // Newest first: an approvals queue should surface the most recent requests
+    // (incl. just auto-approved ones) on page 1 rather than truncating them off
+    // the end under the default page size.
     const [rows] = await conn.query(
-      `${QUERIES.ONBOARDING_REQUESTS.SELECT_ALL}${whereClause} ORDER BY requested_at ASC LIMIT ${limitNum} OFFSET ${offset}`,
+      `${QUERIES.ONBOARDING_REQUESTS.SELECT_ALL}${whereClause} ORDER BY requested_at DESC LIMIT ${limitNum} OFFSET ${offset}`,
       dataParams
     );
 
