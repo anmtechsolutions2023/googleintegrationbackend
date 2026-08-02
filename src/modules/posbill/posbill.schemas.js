@@ -36,11 +36,25 @@ const updateSchema = Joi.object({
 }).min(1);
 
 // Domain action: settle a bill. Payments is required (at least one payment line).
+// One entry per way the customer paid. Each becomes a paymentbreakup row with
+// its own instrument (mode + reference), which is what makes a split settlement
+// reconcilable. RefNo is enforced server-side for card/UPI/wallet.
+const tenderSchema = Joi.object({
+  paymentModeId: Joi.string().uuid().required(),
+  amount: Joi.number().min(0).required(),
+  refNo: Joi.string().max(50).optional().allow(null, ''),
+  comment: Joi.string().max(100).optional().allow(null, ''),
+});
+
 const settleSchema = Joi.object({
-  Payments: Joi.alternatives(Joi.object(), Joi.array()).required(),
+  // Preferred input.
+  Tenders: Joi.array().items(tenderSchema).min(1).max(20).optional(),
+  // Legacy blob — still accepted so existing callers keep settling; mapped to a
+  // single tender. One of Payments/Tenders must be present.
+  Payments: Joi.alternatives(Joi.object(), Joi.array()).optional(),
   Discount: Joi.number().optional().allow(null),
   Total: Joi.number().optional().allow(null),
-});
+}).or('Tenders', 'Payments');
 
 const paginationSchema = Joi.object({
   page: Joi.number().integer().min(1).optional().default(1),

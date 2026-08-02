@@ -1,6 +1,7 @@
 // src/modules/transactiondetaillog/transactiondetaillog.service.js
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
+const { assertMutable } = require('../ledger/ledger.guard');
 
 class TransactionDetailLogService extends BaseCRUDService {
   constructor() {
@@ -74,13 +75,22 @@ class TransactionDetailLogService extends BaseCRUDService {
 }
 
 const service = new TransactionDetailLogService();
+
+// A settled document is immutable — corrections go through a refund, not an edit.
+const guardedUpdate = async (id, data, tenantId, userEmail) => {
+  await assertMutable(id, tenantId);
+  return service.update(id, data, tenantId, userEmail);
+};
+const guardedDelete = async (id, tenantId) => {
+  await assertMutable(id, tenantId);
+  return service.delete(id, tenantId);
+};
 module.exports = {
   getAll: (tenantId, page, limit, expand) =>
     service.getAll(tenantId, page, limit, expand),
   getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),
   create: (data, tenantId, userEmail) =>
     service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) =>
-    service.update(id, data, tenantId, userEmail),
-  delete: (id, tenantId) => service.delete(id, tenantId),
+  update: guardedUpdate,
+  delete: guardedDelete,
 };

@@ -91,4 +91,75 @@ const getOrderLinesTx = async (conn, orderIds, tenantId) => {
   return lines;
 };
 
-module.exports = { setBillOrdersTx, getBillOrderIdsTx, getOrderLinesTx, asArray };
+/**
+ * The bill's lines shaped for the ledger.
+ *
+ * Ledger lines reference the MASTER item (`itemdetail`), not the POS menu row,
+ * so each line's `pos_item_meta.Id` is resolved to its `ItemDetailId`. Everything
+ * else is the snapshot the order already stored — this never re-prices.
+ *
+ * @param {Object} conn
+ * @param {string[]} orderIds
+ * @param {string} tenantId
+ * @returns {Promise<Array<Object>>}
+ */
+const getLedgerLinesTx = async (conn, orderIds, tenantId) => {
+  const lines = await getOrderLinesTx(conn, orderIds, tenantId);
+  if (lines.length === 0) return [];
+
+  const metaIds = [...new Set(lines.map((l) => l.id).filter(Boolean))];
+  let itemByMeta = new Map();
+  if (metaIds.length > 0) {
+    const placeholders = new Array(metaIds.length).fill('?').join(', ');
+    const [rows] = await conn.execute(
+      `SELECT Id, ItemDetailId FROM pos_item_meta WHERE TenantId = ? AND Id IN (${placeholders})`,
+      [tenantId, ...metaIds],
+    );
+    itemByMeta = new Map(rows.map((r) => [r.Id, r.ItemDetailId]));
+  }
+
+  return lines.map((l) => ({
+    itemDetailId: itemByMeta.get(l.id) || null,
+    costInfoId: l.costInfoId,
+    name: l.name,
+    quantity: l.quantity,
+    unitAmount: l.unitAmount,
+    basePrice: l.basePrice,
+    variantAmount: l.variantAmount,
+    variants: l.variants,
+    netAmount: l.netAmount,
+    taxAmount: l.taxAmount,
+    grossAmount: l.grossAmount,
+    taxComponents: l.components,
+  }));
+};
+
+/**
+ * The customer attached to a table session, if any.
+ * Rounds belong to one session, so the first order carrying a customer wins.
+ * @param {Object} conn
+ * @param {string[]} orderIds
+ * @param {string} tenantId
+ * @returns {Promise<string|null>}
+ */
+const getSessionCustomerIdTx = async (conn, orderIds, tenantId) => {
+  const ids = [...new Set((orderIds || []).filter(Boolean))];
+  if (ids.length === 0) return null;
+  const placeholders = new Array(ids.length).fill('?').join(', ');
+  const [rows] = await conn.execute(
+    `SELECT CustomerId FROM pos_order
+      WHERE TenantId = ? AND Id IN (${placeholders}) AND CustomerId IS NOT NULL
+      ORDER BY CreatedOn ASC LIMIT 1`,
+    [tenantId, ...ids],
+  );
+  return rows && rows.length > 0 ? rows[0].CustomerId : null;
+};
+
+module.exports = {
+  setBillOrdersTx,
+  getBillOrderIdsTx,
+  getOrderLinesTx,
+  getLedgerLinesTx,
+  getSessionCustomerIdTx,
+  asArray,
+};

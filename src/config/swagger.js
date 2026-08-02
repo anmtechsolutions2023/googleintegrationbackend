@@ -1307,6 +1307,75 @@ const swaggerSpec = {
           },
         },
       },
+      // ── Accounting ledger ───────────────────────────────────────────────
+      LedgerDocumentSummary: {
+        type: 'object',
+        properties: {
+          Id: { type: 'string', format: 'uuid' },
+          TransactionNo: { type: 'string', example: 'INV-0042', description: 'Gap-free sequence, unique per tenant.' },
+          TransactionDate: { type: 'string', format: 'date' },
+          TypeName: { type: 'string', example: 'POS Sale' },
+          StatusName: { type: 'string', example: 'SETTLED' },
+          NetAmount: { type: 'number' },
+          TaxAmount: { type: 'number' },
+          GrossAmount: { type: 'number', description: 'Payable after discount and round-off.' },
+          CustomerName: { type: 'string', nullable: true, description: 'Snapshot as at the sale.' },
+          CustomerMobile: { type: 'string', nullable: true },
+          SettledAt: { type: 'string', format: 'date-time', nullable: true },
+        },
+      },
+      LedgerLine: {
+        type: 'object',
+        properties: {
+          LineNo: { type: 'integer', description: 'Unique within the document — this is what lets one item appear twice with different options.' },
+          ItemId: { type: 'string', format: 'uuid' },
+          ItemName: { type: 'string', nullable: true },
+          Quantity: { type: 'number' },
+          BasePrice: { type: 'number', nullable: true, description: 'Item price before variants.' },
+          VariantAmount: { type: 'number', description: 'Per-unit variant surcharge, taxed as part of the unit price.' },
+          UnitPrice: { type: 'number', nullable: true, description: 'Effective unit price charged.' },
+          NetAmount: { type: 'number', nullable: true },
+          TaxAmount: { type: 'number', nullable: true },
+          GrossAmount: { type: 'number', nullable: true },
+          TaxComponents: { type: 'array', items: { $ref: '#/components/schemas/PricingComponent' } },
+          Variants: {
+            type: 'array',
+            description: 'Options as sold. Names are snapshotted, so renaming a variant cannot rewrite an issued invoice.',
+            items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, price: { type: 'number' } } },
+          },
+        },
+      },
+      LedgerTender: {
+        type: 'object',
+        description: 'One paymentbreakup row — a single way the customer paid.',
+        properties: {
+          Amount: { type: 'number', description: 'Negative on a refund reversal.' },
+          PaymentMode: { type: 'string', example: 'Card' },
+          RefNo: { type: 'string', nullable: true, description: 'Required for card/UPI/wallet — reconciliation depends on it.' },
+          ReceivedType: { type: 'string', example: 'Full' },
+          AccountName: { type: 'string' },
+          Timestamp: { type: 'string', format: 'date-time' },
+        },
+      },
+      LedgerDocument: {
+        allOf: [{ $ref: '#/components/schemas/LedgerDocumentSummary' }],
+        type: 'object',
+        properties: {
+          DiscountAmount: { type: 'number', description: 'Applied BEFORE tax.' },
+          RoundOff: { type: 'number', description: 'Automatic, to the nearest rupee.' },
+          TaxByComponent: { type: 'array', items: { $ref: '#/components/schemas/PricingComponent' } },
+          ContactDetailId: { type: 'string', format: 'uuid', nullable: true, description: 'Master contact — null for walk-ins and for customers with no phone on file.' },
+          Lines: { type: 'array', items: { $ref: '#/components/schemas/LedgerLine' } },
+          Tenders: { type: 'array', items: { $ref: '#/components/schemas/LedgerTender' } },
+          History: {
+            type: 'array',
+            description: 'Every status change, each recorded against a permitted transition.',
+            items: { type: 'object', properties: { StatusName: { type: 'string' }, Tag: { type: 'string' }, CreatedBy: { type: 'string' }, CreatedOn: { type: 'string', format: 'date-time' } } },
+          },
+          IsImmutable: { type: 'boolean', description: 'True once posted — the UI should offer Refund, not Edit.' },
+        },
+      },
+
       // ── Pricing / tax engine ────────────────────────────────────────────
       PricingDiscount: {
         type: 'object', required: ['type', 'value'],
@@ -1623,6 +1692,28 @@ const swaggerSpec = {
           Active: {"type":"boolean"},
         },
       },
+      PosBillSettle: {
+        type: 'object',
+        description:
+          'Settling posts the bill to the accounting ledger: a numbered Sale document with lines, tax, customer and a tender-by-tender settlement.\n\nDiscount is applied BEFORE tax; round-off to the nearest rupee is automatic. Tendering less than the payable leaves the bill PARTIALLY_PAID rather than failing.',
+        properties: {
+          Tenders: {
+            type: 'array', minItems: 1, maxItems: 20,
+            description: 'One entry per way the customer paid. Each becomes a paymentbreakup row with its own instrument.',
+            items: {
+              type: 'object', required: ['paymentModeId', 'amount'],
+              properties: {
+                paymentModeId: { type: 'string', format: 'uuid' },
+                amount: { type: 'number', minimum: 0 },
+                refNo: { type: 'string', maxLength: 50, nullable: true, description: 'Required for Card/UPI/Wallet.' },
+                comment: { type: 'string', maxLength: 100, nullable: true },
+              },
+            },
+          },
+          Payments: { type: 'array', description: 'Legacy blob — still accepted and mapped to a single tender.', items: { type: 'object' } },
+          Discount: { type: 'number', description: 'Applied before tax.' },
+        },
+      },
       PosBillCreate: {
         type: 'object', required: ["BillNo"],
         description:
@@ -1667,17 +1758,16 @@ const swaggerSpec = {
           Active: {"type":"boolean"},
         },
       },
-      PosBillSettle: {
-        type: 'object', required: ['Payments'],
-        properties: {
-          Payments: { type: 'array', items: { type: 'object' } },
-          Discount: { type: 'number' },
-          Total: { type: 'number' },
-        },
-      },
       PosBill: {
         type: 'object',
         properties: { ...auditFields,
+          TransactionDetailLogId: {
+            type: 'string', format: 'uuid', nullable: true,
+            description: 'The ledger document this bill was posted as. Null means not yet in the ledger, and doubles as the idempotency guard — settling a posted bill returns 409.',
+          },
+          TransactionNo: { type: 'string', nullable: true, example: 'INV-0042', description: 'Invoice number, present once posted.' },
+          BalanceDue: { type: 'number', nullable: true, description: 'Greater than zero when only part-tendered.' },
+          RoundOff: { type: 'number', nullable: true, description: 'Automatic, to the nearest rupee.' },
           OrderIds: {
             type: 'array', items: { type: 'string', format: 'uuid' },
             description: 'Every round this bill covers (from pos_bill_order).',
@@ -1892,6 +1982,54 @@ const swaggerSpec = {
           ...responses.unauthorized,
           ...responses.forbidden,
           409: { description: 'Conflict — either this tenant has already completed setup, or a unique constraint (e.g. Code/Name) was violated; nothing was saved' },
+        },
+      },
+    },
+    '/api/ledger/documents': {
+      get: {
+        tags: ['Ledger'],
+        summary: 'List accounting documents',
+        description:
+          'Settled POS bills posted as numbered Sale documents. Read-only: a settled document is corrected by refund, never by editing.\n\nGated on TRANSACTIONS:READ/WRITE — a ledger document IS the transaction record.',
+        security,
+        parameters: [
+          ...paginationParams,
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['DRAFT', 'PARTIALLY_PAID', 'SETTLED', 'CANCELLED', 'REFUNDED'] } },
+          { name: 'fromDate', in: 'query', schema: { type: 'string', format: 'date' } },
+          { name: 'toDate', in: 'query', schema: { type: 'string', format: 'date' } },
+          { name: 'contactDetailId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Everything this customer bought.' },
+          { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Matches invoice number, customer name or mobile.' },
+        ],
+        responses: { ...paginatedResponse('LedgerDocumentSummary'), ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/ledger/documents/{id}': {
+      get: {
+        tags: ['Ledger'],
+        summary: 'One document in full',
+        description:
+          'Header, lines (with variants and per-line tax), tenders, and the transition history proving how it reached its current status.',
+        security,
+        parameters: [idParam],
+        responses: { ...singleResponse('LedgerDocument'), ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/ledger/documents/{id}/refund': {
+      post: {
+        tags: ['Ledger'],
+        summary: 'Reverse a settled document (whole document)',
+        description:
+          'Moves SETTLED → REFUNDED and writes a negative tender back to the mode each payment came in on.\n\n**Nothing is deleted or overwritten** — the original document stands and the reversal sits beside it. Only a SETTLED document can be refunded; the transition whitelist has no SETTLED → CANCELLED. Requires TRANSACTIONS:WRITE.',
+        security,
+        parameters: [idParam],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: { type: 'object', properties: { Reason: { type: 'string', maxLength: 100 } } } } },
+        },
+        responses: {
+          200: { description: 'Refunded', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, message: { type: 'string' }, data: { type: 'object', properties: { transactionDetailLogId: { type: 'string' }, status: { type: 'string', example: 'REFUNDED' } } } } } } } },
+          409: { description: 'Not settled, so not refundable' },
+          ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
         },
       },
     },

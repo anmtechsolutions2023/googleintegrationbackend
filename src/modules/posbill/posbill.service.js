@@ -6,7 +6,32 @@ const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
 const { withTransaction } = require('../../utils/dbHelper');
 const pricingService = require('../pricing/pricing.service');
+const ledgerService = require('../ledger/ledger.service');
 const repository = require('./posbill.repository');
+
+/**
+ * Normalizes tenders for the ledger.
+ *
+ * `Tenders[]` is the real input — one entry per way the customer paid. The older
+ * `Payments` JSON blob is still accepted and mapped to a single tender so
+ * existing callers keep settling, they just get one Cash line instead of a split.
+ *
+ * @param {Object} data - Settle payload.
+ * @param {number} fallbackTotal - Used when a legacy payment carries no amount.
+ * @returns {Array<{paymentModeId:string, amount:number, refNo?:string}>}
+ */
+const normalizeTenders = (data, fallbackTotal) => {
+  if (Array.isArray(data.Tenders) && data.Tenders.length > 0) return data.Tenders;
+
+  const legacy = Array.isArray(data.Payments) ? data.Payments : [];
+  return legacy
+    .filter((p) => p && p.paymentModeId)
+    .map((p) => ({
+      paymentModeId: p.paymentModeId,
+      amount: p.amount ?? fallbackTotal,
+      refNo: p.refNo ?? null,
+    }));
+};
 
 // Serialize object/array values for JSON columns; pass through strings and null.
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
@@ -87,16 +112,41 @@ class PosBillService extends BaseCRUDService {
         ]);
       }
 
+      // ── Post to the accounting ledger ──────────────────────────────────
+      // Only when the bill can be recomputed from its rounds: a bill with no
+      // linked orders has no lines to post, and inventing them would be worse
+      // than leaving it out of the ledger.
+      let posted = null;
+      if (recomputed) {
+        const lines = await repository.getLedgerLinesTx(connection, orderIds, tenantId);
+        posted = await ledgerService.postSaleFromBill(
+          connection,
+          {
+            billId: id,
+            totals: recomputed,
+            lines,
+            tenders: normalizeTenders(data, total),
+            posCustomerId: await repository.getSessionCustomerIdTx(connection, orderIds, tenantId),
+            branchId: existing.BranchDetailId,
+          },
+          tenantId,
+          userEmail,
+        );
+      }
+
       await connection.execute(this.queries.SETTLE, [
-        toJson(data.Payments),
+        toJson(data.Payments ?? data.Tenders),
         discount,
-        total,
-        'paid',
+        posted ? posted.payable : total,
+        // A part-tendered bill stays open — "paid" would be a lie.
+        posted && posted.balanceDue > 0 ? 'partially_paid' : 'paid',
         userEmail,
         id,
         tenantId,
       ]);
-      return this.getById(id, tenantId);
+
+      const bill = await this.getById(id, tenantId);
+      return posted ? { ...bill, ...posted } : bill;
     });
   }
 

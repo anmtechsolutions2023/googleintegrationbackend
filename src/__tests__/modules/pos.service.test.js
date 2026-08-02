@@ -127,6 +127,25 @@ POS_MODULES.forEach(({ name, servicePath, exports: ex, createData, updateData, e
     describe('delete', () => {
       it('resolves when the record exists', async () => {
         setupReadWriteMock(mockConnection, row);
+        // posorder.delete refuses to remove a round the kitchen has started, and
+        // the shared row's Status is not a KOT status. Answer the KOT lookup
+        // with a pending ticket so this exercises the happy path; the guard
+        // itself is covered in its own describe block.
+        if (name === 'posorder') {
+          mockConnection.execute.mockImplementation((sql) => {
+            const upper = (sql || '').toUpperCase();
+            if (upper.includes('FROM POS_KOT')) return Promise.resolve([[{ Status: 'pending' }]]);
+            if (upper.includes('COUNT(')) return Promise.resolve([[{ total: 1 }]]);
+            if (upper.includes('SELECT')) return Promise.resolve([[row]]);
+            return Promise.resolve([[{ affectedRows: 1 }]]);
+          });
+          // posorder.delete is a domain action (deleteRound) that also pulls the
+          // KOT and frees the table, so it returns a payload rather than the
+          // plain CRUD `undefined`.
+          await expect(svc[ex.delete](RECORD_ID, TENANT_ID, USER_EMAIL))
+            .resolves.toMatchObject({ deletedOrderId: RECORD_ID });
+          return;
+        }
         await expect(svc[ex.delete](RECORD_ID, TENANT_ID)).resolves.toBeUndefined();
       });
 

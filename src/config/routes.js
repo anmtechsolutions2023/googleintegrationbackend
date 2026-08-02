@@ -36,6 +36,7 @@ const batchdetailRoutes = require('../modules/batchdetail/batchdetail.routes');
 const itemdetailRoutes = require('../modules/itemdetail/itemdetail.routes');
 const mastersetupRoutes = require('../modules/mastersetup/mastersetup.routes');
 const pricingRoutes = require('../modules/pricing/pricing.routes');
+const ledgerRoutes = require('../modules/ledger/ledger.routes');
 const transactiontypebaseconversionRoutes = require('../modules/transactiontypebaseconversion/transactiontypebaseconversion.routes');
 const transactiondetaillogRoutes = require('../modules/transactiondetaillog/transactiondetaillog.routes');
 const transactionitemdetailRoutes = require('../modules/transactionitemdetail/transactionitemdetail.routes');
@@ -126,6 +127,9 @@ const registerRoutes = (app) => {
   // Pricing — stateless tax/price calculation over the costinfo → taxgroup →
   // mapper → TaxTypes chain. Shared by master data, POS and billing.
   app.use('/api/pricing', pricingRoutes);
+
+  // Accounting ledger — settled sales as numbered, immutable documents.
+  app.use('/api/ledger', ledgerRoutes);
 
   // UOM Factor module
   app.use('/api/uomfactors', uomfactorRoutes);
@@ -256,6 +260,7 @@ const registerRoutes = (app) => {
         { name: 'transactiontypeconfigs', path: '/api/transactiontypeconfigs' },
         { name: 'organizations', path: '/api/organizations' },
         { name: 'pricing', path: '/api/pricing' },
+        { name: 'ledger', path: '/api/ledger' },
         { name: 'uomfactors', path: '/api/uomfactors' },
         { name: 'accounttypes', path: '/api/accounttypes' },
         {

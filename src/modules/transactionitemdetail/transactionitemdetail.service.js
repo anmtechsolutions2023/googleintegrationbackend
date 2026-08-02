@@ -3,6 +3,7 @@ const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
 const { withConnection } = require('../../utils/dbHelper');
 const pricingService = require('../pricing/pricing.service');
+const { assertMutable } = require('../ledger/ledger.guard');
 
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
 
@@ -56,12 +57,42 @@ class TransactionItemDetailService extends BaseCRUDService {
     };
   }
 
+  /**
+   * Next free line number for a document.
+   *
+   * Line numbers are unique per document (uk_tid_log_line), so a CRUD insert
+   * cannot simply take the column default — the second line of a document would
+   * collide with the first.
+   * @param {string} logId
+   * @param {string} tenantId
+   * @returns {Promise<number>}
+   */
+  async nextLineNo(logId, tenantId) {
+    if (!logId) return 1;
+    return withConnection(async (conn) => {
+      const [rows] = await conn.execute(QUERIES.LEDGER.SELECT_NEXT_LINE_NO, [logId, tenantId]);
+      return rows && rows.length > 0 ? Number(rows[0].NextLineNo) || 1 : 1;
+    });
+  }
+
   async create(data, tenantId, userEmail) {
+    // Lines cannot be added to a settled document.
+    await assertMutable(data.TransactionDetailLogId, tenantId);
     const priced = await this.priceLine(data, null, tenantId);
-    return super.create(priced ? { ...data, ...priced } : data, tenantId, userEmail);
+    const lineNo = data.LineNo !== undefined
+      ? data.LineNo
+      : await this.nextLineNo(data.TransactionDetailLogId, tenantId);
+    return super.create(
+      { ...data, ...(priced || {}), LineNo: lineNo },
+      tenantId,
+      userEmail,
+    );
   }
 
   async update(id, data, tenantId, userEmail) {
+    // Lines of a settled document cannot be edited.
+    const current = await this.getById(id, tenantId);
+    await assertMutable(current.TransactionDetailLogId, tenantId);
     // Re-price only when something that affects the amount changed; a comment
     // edit must not silently restate a historical line at today's rates.
     const affectsPrice =
@@ -80,14 +111,18 @@ class TransactionItemDetailService extends BaseCRUDService {
       id,
       tenantId,
       data.TransactionDetailLogId,
+      data.LineNo !== undefined ? data.LineNo : 1,
       data.ItemId,
       data.Quantity !== undefined ? data.Quantity : 1,
       data.CostInfoId ?? null,
       data.UnitPrice ?? null,
+      data.BasePrice ?? null,
+      data.VariantAmount !== undefined ? data.VariantAmount : 0,
       data.NetAmount ?? null,
       data.TaxAmount ?? null,
       data.GrossAmount ?? null,
       toJson(data.TaxComponents),
+      toJson(data.Variants),
       data.Comment || null,
       data.Active !== undefined ? data.Active : true,
       userEmail,
@@ -99,14 +134,18 @@ class TransactionItemDetailService extends BaseCRUDService {
     const pick = (key) => (data[key] !== undefined ? data[key] : existing[key]);
     return [
       pick('TransactionDetailLogId'),
+      pick('LineNo') ?? 1,
       pick('ItemId'),
       pick('Quantity') ?? 1,
       pick('CostInfoId') ?? null,
       pick('UnitPrice') ?? null,
+      pick('BasePrice') ?? null,
+      pick('VariantAmount') ?? 0,
       pick('NetAmount') ?? null,
       pick('TaxAmount') ?? null,
       pick('GrossAmount') ?? null,
       toJson(pick('TaxComponents')),
+      toJson(pick('Variants')),
       pick('Comment') ?? null,
       pick('Active'),
       userEmail,

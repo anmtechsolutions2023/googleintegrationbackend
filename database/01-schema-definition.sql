@@ -303,6 +303,11 @@ CREATE TABLE categorydetail (
 CREATE TABLE transactiontypeconfig (
     Id              VARCHAR(50)   NOT NULL,
     StartCounterNo  VARCHAR(50)   NOT NULL,
+    -- Last number ISSUED for this config. StartCounterNo is where the sequence
+    -- begins; this is where it has got to. Incremented under SELECT ... FOR
+    -- UPDATE inside the issuing transaction so two tills cannot take the same
+    -- number, with UNIQUE(TransactionNo, TenantId) on the log as the backstop.
+    CurrentCounterNo BIGINT       NOT NULL DEFAULT 0,
     Prefix          VARCHAR(50)   NOT NULL,
     Format          VARCHAR(100)  NOT NULL,
     TagName         VARCHAR(100)  NULL,
@@ -703,9 +708,27 @@ CREATE TABLE transactiondetaillog (
     TenantId                 VARCHAR(50)   NOT NULL,
     TransactionNo            VARCHAR(50)   NOT NULL,
     TransactionTypeConfigId  VARCHAR(50)   NOT NULL,
+    -- Which KIND of document this is (Sale / Purchase / Return). Previously only
+    -- the numbering config was linked, so the header could not say what it was.
+    TransactionTypeId        VARCHAR(50)   NULL,
     TransactionTypeStatusId  VARCHAR(50)   NULL,
     BranchId                 VARCHAR(50)   NULL,
     TransactionDate          DATE          NOT NULL,
+    -- Document totals: what was INVOICED. Deliberately separate from what was
+    -- collected (paymentdetail), which is what makes partial payment
+    -- expressible — an unpaid invoice still has a value.
+    NetAmount                DECIMAL(18,4) NOT NULL DEFAULT 0,
+    TaxAmount                DECIMAL(18,4) NOT NULL DEFAULT 0,
+    DiscountAmount           DECIMAL(18,4) NOT NULL DEFAULT 0,
+    RoundOff                 DECIMAL(18,4) NOT NULL DEFAULT 0,
+    GrossAmount              DECIMAL(18,4) NOT NULL DEFAULT 0,
+    TaxByComponent           JSON          NULL COMMENT 'Invoice footer, e.g. [{name:CGST,amount:75.00}]',
+    -- Customer: FK for analytics ("everything this person bought"), snapshot for
+    -- faithful reprints ("what this invoice said when issued").
+    ContactDetailId          VARCHAR(50)   NULL,
+    CustomerName             VARCHAR(150)  NULL,
+    CustomerMobile           VARCHAR(50)   NULL,
+    SettledAt                DATETIME      NULL,
     Remarks                  VARCHAR(500)  NULL,
     Active                   TINYINT(1)    NOT NULL,
     CreatedOn                DATETIME,
@@ -713,8 +736,12 @@ CREATE TABLE transactiondetaillog (
     UpdatedOn                DATETIME,
     UpdatedBy                VARCHAR(50),
     PRIMARY KEY (Id),
+    -- A ledger must not be able to issue the same document number twice.
+    UNIQUE KEY uk_tdl_txnno_tenant (TransactionNo, TenantId),
     FOREIGN KEY (TransactionTypeConfigId) REFERENCES transactiontypeconfig(Id),
+    FOREIGN KEY (TransactionTypeId)       REFERENCES transactiontype(Id),
     FOREIGN KEY (TransactionTypeStatusId) REFERENCES transactiontypestatus(Id),
+    FOREIGN KEY (ContactDetailId)         REFERENCES contactdetail(Id),
     FOREIGN KEY (BranchId)                REFERENCES branchdetail(Id)
 );
 
@@ -729,14 +756,23 @@ CREATE TABLE transactiondetaillog (
 CREATE TABLE transactionitemdetail (
     Id                     VARCHAR(50)    NOT NULL,
     TransactionDetailLogId VARCHAR(50)    NOT NULL,
+    -- A document is an ORDERED LIST OF LINES, not a set of items: the same item
+    -- may legitimately appear twice with different variants (Dosa Large, Dosa
+    -- plain). LineNo is what makes those distinct, and gives print order.
+    LineNo                 INT            NOT NULL DEFAULT 1,
     ItemId                 VARCHAR(50)    NOT NULL,
     Quantity               DECIMAL(18,4)  NOT NULL DEFAULT 1,
     CostInfoId             VARCHAR(50)    NULL COMMENT 'Cost record this line was priced from',
-    UnitPrice              DECIMAL(18,4)  NULL COMMENT 'Snapshot of costinfo.Amount at write time',
+    UnitPrice              DECIMAL(18,4)  NULL COMMENT 'Effective unit price charged (BasePrice + VariantAmount)',
+    BasePrice              DECIMAL(18,4)  NULL COMMENT 'Item price before variant surcharge',
+    VariantAmount          DECIMAL(18,4)  NOT NULL DEFAULT 0 COMMENT 'Per-unit variant surcharge',
     NetAmount              DECIMAL(18,4)  NULL COMMENT 'Taxable base after discount',
     TaxAmount              DECIMAL(18,4)  NULL,
     GrossAmount            DECIMAL(18,4)  NULL COMMENT 'NetAmount + TaxAmount',
     TaxComponents          JSON           NULL COMMENT 'Per-component split, e.g. [{name:CGST,rate:9,amount:...}]',
+    -- Options as sold: [{id,name,price}]. Names are snapshotted, so renaming a
+    -- variant later cannot rewrite an invoice already issued.
+    Variants               JSON           NULL,
     Comment                VARCHAR(100),
     TenantId               VARCHAR(50)    NOT NULL,
     Active                 TINYINT(1)     NOT NULL,
@@ -745,7 +781,10 @@ CREATE TABLE transactionitemdetail (
     UpdatedOn              DATETIME,
     UpdatedBy              VARCHAR(50),
     PRIMARY KEY (Id),
-    UNIQUE (TransactionDetailLogId, ItemId, TenantId),
+    -- Line numbers are unique within a document. This REPLACES a former
+    -- UNIQUE(LogId, ItemId, TenantId), which allowed an item only once per
+    -- document and so could not represent the same dish with different options.
+    UNIQUE KEY uk_tid_log_line (TransactionDetailLogId, LineNo, TenantId),
     FOREIGN KEY (TransactionDetailLogId) REFERENCES transactiondetaillog(Id),
     FOREIGN KEY (ItemId)                 REFERENCES itemdetail(Id),
     FOREIGN KEY (CostInfoId)             REFERENCES costinfo(Id)
@@ -826,11 +865,12 @@ CREATE TABLE paymentdetail (
     Id                      VARCHAR(50)   NOT NULL,
     AccountTypeBaseId       VARCHAR(50)   NOT NULL,
     TransactionDetailLogId  VARCHAR(50)   NOT NULL,
-    DiscountAmount          VARCHAR(100),
-    RoundOff                VARCHAR(50),
-    TotalAmount             VARCHAR(50)   NOT NULL,
-    TaxesAmount             VARCHAR(50),
-    GrossAmount             VARCHAR(50)   NOT NULL,
+    -- Money as money. These were VARCHAR, which is indefensible in a ledger.
+    DiscountAmount          DECIMAL(18,4) NULL,
+    RoundOff                DECIMAL(18,4) NULL,
+    TotalAmount             DECIMAL(18,4) NOT NULL COMMENT 'Payable settled by this payment',
+    TaxesAmount             DECIMAL(18,4) NULL,
+    GrossAmount             DECIMAL(18,4) NOT NULL COMMENT 'Taxable base after discount',
     UserId                  VARCHAR(50)   NULL,
     TenantId                VARCHAR(50)   NOT NULL,
     Active                  TINYINT(1)    NOT NULL,
@@ -1062,6 +1102,11 @@ CREATE TABLE pos_customer (
     Visits          INT             NOT NULL DEFAULT 0,
     TotalSpent      DECIMAL(12,2)   NOT NULL DEFAULT 0,
     LoyaltyPoints   INT             NOT NULL DEFAULT 0,
+    -- The same human as a master contactdetail. pos_customer is the POS-facing
+    -- CRM projection (visits, loyalty, spend); contactdetail is the identity the
+    -- ledger records. NULL for walk-ins, and only ever set when a phone number
+    -- exists — see contactResolver.
+    ContactDetailId VARCHAR(50)     NULL,
     BranchDetailId  VARCHAR(50)     NULL,
     TenantId        VARCHAR(50)     NOT NULL,
     Active          TINYINT(1)      NOT NULL,
@@ -1070,7 +1115,8 @@ CREATE TABLE pos_customer (
     UpdatedOn       DATETIME,
     UpdatedBy       VARCHAR(50),
     PRIMARY KEY (Id),
-    UNIQUE (Phone, TenantId)
+    UNIQUE (Phone, TenantId),
+    FOREIGN KEY (ContactDetailId) REFERENCES contactdetail(Id)
 );
 
 -- 4.9 pos_feedback — customer feedback / ratings
@@ -1149,6 +1195,10 @@ CREATE TABLE pos_bill (
     Payments        JSON           NULL,
     Status          VARCHAR(20)    NOT NULL DEFAULT 'unpaid',
     SettledAt       DATETIME       NULL,
+    -- The accounting document this bill was posted as. NULL means "not yet in
+    -- the ledger", which also serves as the idempotency guard: a second settle
+    -- on a posted bill is rejected rather than issuing a second invoice.
+    TransactionDetailLogId VARCHAR(50) NULL,
     BranchDetailId  VARCHAR(50)    NULL,
     TenantId        VARCHAR(50)    NOT NULL,
     Active          TINYINT(1)     NOT NULL,
@@ -1158,7 +1208,8 @@ CREATE TABLE pos_bill (
     UpdatedBy       VARCHAR(50),
     PRIMARY KEY (Id),
     UNIQUE (BillNo, TenantId),
-    FOREIGN KEY (OrderId) REFERENCES pos_order(Id)
+    FOREIGN KEY (OrderId) REFERENCES pos_order(Id),
+    FOREIGN KEY (TransactionDetailLogId) REFERENCES transactiondetaillog(Id)
 );
 
 -- 4.12b pos_bill_order — which orders (rounds) a bill covers

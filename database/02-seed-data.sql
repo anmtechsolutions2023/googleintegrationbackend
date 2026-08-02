@@ -564,6 +564,92 @@ INSERT IGNORE INTO app_settings (setting_key, setting_value, updated_by)
 VALUES ('onboarding.auto_approve.enabled', 'false', 'system-seed');
 
 -- =============================================================================
+-- PART 11 — Accounting ledger masters
+-- =============================================================================
+-- Without these the ledger cannot function: accounttypebase is NOT NULL on both
+-- payment tables, and no status transition is legal until the whitelist below
+-- exists. Idempotent (INSERT IGNORE + fixed UUIDs).
+--
+-- Model: settling a POS bill posts a Sale document
+--   transactiondetaillog  →  transactionitemdetail (lines)
+--                         →  paymentdetail → paymentbreakup (one per tender)
+-- and every status change is recorded against a permitted transition.
+
+-- 11a) Document statuses
+INSERT IGNORE INTO transactiontypestatus (Id, Name, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('s0000001-ldgr-0000-0000-000000000001', 'DRAFT',          1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('s0000001-ldgr-0000-0000-000000000002', 'PARTIALLY_PAID', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('s0000001-ldgr-0000-0000-000000000003', 'SETTLED',        1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('s0000001-ldgr-0000-0000-000000000004', 'CANCELLED',      1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('s0000001-ldgr-0000-0000-000000000005', 'REFUNDED',       1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
+
+-- 11b) Document type — POS sales use the 'Onboarding' numbering config seeded in PART 9b.
+INSERT IGNORE INTO transactiontype (Id, Name, TransactionTypeConfigId, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy)
+SELECT 'y0000001-ldgr-0000-0000-000000000001', 'POS Sale', ttc.Id, 1, ttc.TenantId, NOW(), 'system-seed', 'system-seed'
+FROM transactiontypeconfig ttc
+WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
+LIMIT 1;
+
+-- 11c) Permitted status transitions.
+-- NOTE: SETTLED → CANCELLED is deliberately ABSENT. A settled sale is reversed by
+-- REFUNDED, never voided — that distinction is the whole point of the whitelist.
+INSERT IGNORE INTO transactiontypebaseconversion
+    (Id, TenantId, TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, Tag, Active, CreatedOn, CreatedBy, UpdatedBy)
+SELECT * FROM (
+    SELECT 'v0000001-ldgr-0000-0000-000000000001' AS Id, ttc.TenantId AS TenantId, ttc.Id AS Cfg,
+           's0000001-ldgr-0000-0000-000000000001' AS Frm, 's0000001-ldgr-0000-0000-000000000003' AS Too,
+           'POS_SALE_SETTLE' AS Tag, 1 AS Act, NOW() AS C, 'system-seed' AS CB, 'system-seed' AS UB
+      FROM transactiontypeconfig ttc
+     WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
+    UNION ALL
+    SELECT 'v0000001-ldgr-0000-0000-000000000002', ttc.TenantId, ttc.Id,
+           's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000002',
+           'POS_SALE_PART_PAY', 1, NOW(), 'system-seed', 'system-seed'
+      FROM transactiontypeconfig ttc
+     WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
+    UNION ALL
+    SELECT 'v0000001-ldgr-0000-0000-000000000003', ttc.TenantId, ttc.Id,
+           's0000001-ldgr-0000-0000-000000000002', 's0000001-ldgr-0000-0000-000000000003',
+           'POS_SALE_SETTLE_REMAINDER', 1, NOW(), 'system-seed', 'system-seed'
+      FROM transactiontypeconfig ttc
+     WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
+    UNION ALL
+    SELECT 'v0000001-ldgr-0000-0000-000000000004', ttc.TenantId, ttc.Id,
+           's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000004',
+           'POS_SALE_VOID', 1, NOW(), 'system-seed', 'system-seed'
+      FROM transactiontypeconfig ttc
+     WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
+    UNION ALL
+    SELECT 'v0000001-ldgr-0000-0000-000000000005', ttc.TenantId, ttc.Id,
+           's0000001-ldgr-0000-0000-000000000003', 's0000001-ldgr-0000-0000-000000000005',
+           'POS_SALE_REFUND', 1, NOW(), 'system-seed', 'system-seed'
+      FROM transactiontypeconfig ttc
+     WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
+) AS t;
+
+-- 11d) Ledger accounts. NOT NULL on paymentdetail and paymentbreakup, so at
+-- minimum 'Sales' (revenue) and one asset account must exist.
+INSERT IGNORE INTO accounttypebase (Id, Name, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('b0000001-ldgr-0000-0000-000000000001', 'Sales',  1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('b0000001-ldgr-0000-0000-000000000002', 'Cash',   1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('b0000001-ldgr-0000-0000-000000000003', 'Bank',   1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('b0000001-ldgr-0000-0000-000000000004', 'Wallet', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
+
+-- 11e) Tender types
+INSERT IGNORE INTO paymentmode (Id, Type, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('m0000001-ldgr-0000-0000-000000000001', 'Cash',   'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000002', 'Card',   'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000003', 'UPI',    'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000004', 'Wallet', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
+-- 11f) How a receipt is classified
+INSERT IGNORE INTO paymentreceivedtype (Id, Type, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('r0000001-ldgr-0000-0000-000000000001', 'Full',    'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('r0000001-ldgr-0000-0000-000000000002', 'Partial', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('r0000001-ldgr-0000-0000-000000000003', 'Advance', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('r0000001-ldgr-0000-0000-000000000004', 'Refund',  'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
+-- =============================================================================
 -- TENANT SETUP STATE (first-time setup wizard gate)
 -- =============================================================================
 -- Marks a tenant COMPLETED when it ALREADY has both an organizationdetail and a

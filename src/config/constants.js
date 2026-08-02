@@ -567,9 +567,9 @@ module.exports = {
         LEFT JOIN itemdetail i ON tid.ItemId = i.Id AND i.TenantId = tid.TenantId
         WHERE tid.Id = ? AND tid.TenantId = ?`,
       INSERT:
-        'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, ItemId, Quantity, CostInfoId, UnitPrice, NetAmount, TaxAmount, GrossAmount, TaxComponents, Comment, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, LineNo, ItemId, Quantity, CostInfoId, UnitPrice, BasePrice, VariantAmount, NetAmount, TaxAmount, GrossAmount, TaxComponents, Variants, Comment, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE transactionitemdetail SET TransactionDetailLogId = ?, ItemId = ?, Quantity = ?, CostInfoId = ?, UnitPrice = ?, NetAmount = ?, TaxAmount = ?, GrossAmount = ?, TaxComponents = ?, Comment = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE transactionitemdetail SET TransactionDetailLogId = ?, LineNo = ?, ItemId = ?, Quantity = ?, CostInfoId = ?, UnitPrice = ?, BasePrice = ?, VariantAmount = ?, NetAmount = ?, TaxAmount = ?, GrossAmount = ?, TaxComponents = ?, Variants = ?, Comment = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactionitemdetail WHERE Id = ? AND TenantId = ?',
     },
 
@@ -1097,6 +1097,130 @@ module.exports = {
         'INSERT INTO app_settings (setting_key, setting_value, updated_by, updated_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = NOW()',
     },
 
+    // ── Accounting ledger ────────────────────────────────────────────────
+    // Settling a POS bill posts a Sale document:
+    //   transactiondetaillog → transactionitemdetail (lines)
+    //                        → paymentdetail → paymentbreakup (one per tender)
+    // with every status change recorded against a permitted transition.
+    LEDGER: {
+      // Numbering. The row lock is what stops two tills taking the same number;
+      // UNIQUE(TransactionNo, TenantId) on the log is the backstop.
+      SELECT_CONFIG_FOR_UPDATE:
+        'SELECT Id, StartCounterNo, CurrentCounterNo, Prefix, Format FROM transactiontypeconfig WHERE Id = ? AND TenantId = ? FOR UPDATE',
+      UPDATE_COUNTER:
+        'UPDATE transactiontypeconfig SET CurrentCounterNo = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      SELECT_CONFIG_BY_TAG:
+        'SELECT Id FROM transactiontypeconfig WHERE TagName = ? AND TenantId = ? AND Active = 1 LIMIT 1',
+
+      // Master lookups by name — the ledger addresses masters by meaning, not id.
+      SELECT_STATUS_BY_NAME:
+        'SELECT Id, Name FROM transactiontypestatus WHERE Name = ? AND TenantId = ? AND Active = 1 LIMIT 1',
+      SELECT_TYPE_BY_NAME:
+        'SELECT Id, TransactionTypeConfigId FROM transactiontype WHERE Name = ? AND TenantId = ? AND Active = 1 LIMIT 1',
+      SELECT_ACCOUNT_BY_NAME:
+        'SELECT Id FROM accounttypebase WHERE Name = ? AND TenantId = ? AND Active = 1 LIMIT 1',
+      SELECT_RECEIVED_TYPE_BY_NAME:
+        'SELECT Id FROM paymentreceivedtype WHERE Type = ? AND TenantId = ? AND Active = 1 LIMIT 1',
+      SELECT_PAYMENT_MODE:
+        'SELECT Id, Type FROM paymentmode WHERE Id = ? AND TenantId = ? AND Active = 1 LIMIT 1',
+
+      // Status machine: a move is legal only if the whitelist permits it, and
+      // every move taken is recorded.
+      SELECT_TRANSITION: `
+        SELECT Id FROM transactiontypebaseconversion
+         WHERE TransactionTypeConfigId = ? AND FromTransactionTypeStatusId = ?
+           AND ToTransactionTypeStatusId = ? AND TenantId = ? AND Active = 1 LIMIT 1`,
+      INSERT_CONVERSION_MAPPER:
+        'INSERT INTO transactiontypeconversionmapper (Id, TenantId, TransactionTypeBaseCoversionId, TransactionDetailLogId, TransactionTypeStatusId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, 1, NOW(), ?, ?)',
+      SELECT_TRANSITION_HISTORY: `
+        SELECT m.Id, m.CreatedOn, m.CreatedBy, s.Name AS StatusName, bc.Tag
+          FROM transactiontypeconversionmapper m
+          LEFT JOIN transactiontypestatus s ON s.Id = m.TransactionTypeStatusId
+          LEFT JOIN transactiontypebaseconversion bc ON bc.Id = m.TransactionTypeBaseCoversionId
+         WHERE m.TransactionDetailLogId = ? AND m.TenantId = ?
+         ORDER BY m.CreatedOn ASC`,
+
+      // Document
+      INSERT_LOG: `
+        INSERT INTO transactiondetaillog
+          (Id, TenantId, TransactionNo, TransactionTypeConfigId, TransactionTypeId,
+           TransactionTypeStatusId, BranchId, TransactionDate,
+           NetAmount, TaxAmount, DiscountAmount, RoundOff, GrossAmount, TaxByComponent,
+           ContactDetailId, CustomerName, CustomerMobile, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+      UPDATE_LOG_STATUS:
+        'UPDATE transactiondetaillog SET TransactionTypeStatusId = ?, SettledAt = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      SELECT_LOG_FULL: `
+        SELECT l.*, s.Name AS StatusName, t.Name AS TypeName, b.BranchName
+          FROM transactiondetaillog l
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+          LEFT JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+          LEFT JOIN branchdetail b          ON b.Id = l.BranchId
+         WHERE l.Id = ? AND l.TenantId = ?`,
+      SELECT_LOG_LIST: `
+        SELECT l.Id, l.TransactionNo, l.TransactionDate, l.GrossAmount, l.NetAmount,
+               l.TaxAmount, l.CustomerName, l.CustomerMobile, l.SettledAt,
+               s.Name AS StatusName, t.Name AS TypeName
+          FROM transactiondetaillog l
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+          LEFT JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+         WHERE l.TenantId = ?`,
+      COUNT_LOGS: 'SELECT COUNT(*) as total FROM transactiondetaillog WHERE TenantId = ?',
+
+      // Lines
+      INSERT_LINE: `
+        INSERT INTO transactionitemdetail
+          (Id, TenantId, TransactionDetailLogId, LineNo, ItemId, Quantity, CostInfoId,
+           UnitPrice, BasePrice, VariantAmount, NetAmount, TaxAmount, GrossAmount,
+           TaxComponents, Variants, Comment, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+      SELECT_LINES_BY_LOG: `
+        SELECT t.*, i.Name AS ItemName
+          FROM transactionitemdetail t
+          LEFT JOIN itemdetail i ON i.Id = t.ItemId
+         WHERE t.TransactionDetailLogId = ? AND t.TenantId = ?
+         ORDER BY t.LineNo ASC`,
+      // Line numbers are unique per document, so a plain CRUD insert needs the
+      // next free slot rather than defaulting everything to 1.
+      SELECT_NEXT_LINE_NO:
+        'SELECT COALESCE(MAX(LineNo), 0) + 1 AS NextLineNo FROM transactionitemdetail WHERE TransactionDetailLogId = ? AND TenantId = ?',
+
+      // Settlement
+      INSERT_PAYMENT_DETAIL: `
+        INSERT INTO paymentdetail
+          (Id, TenantId, AccountTypeBaseId, TransactionDetailLogId, DiscountAmount,
+           RoundOff, TotalAmount, TaxesAmount, GrossAmount, UserId, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+      INSERT_PMTD: `
+        INSERT INTO paymentmodetransactiondetail
+          (Id, TenantId, PaymentModeId, RefNo, Comment, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+      INSERT_BREAKUP: `
+        INSERT INTO paymentbreakup
+          (Id, TenantId, AccountTypeBaseId, PaymentDetailId, PaymentModeTransactionDetailId,
+           PaymentReceivedTypeId, Amount, UserId, Timestamp, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1, NOW(), ?, ?)`,
+      SELECT_TENDERS_BY_LOG: `
+        SELECT b.Id, b.Amount, b.Timestamp, pm.Type AS PaymentMode, pmtd.RefNo,
+               prt.Type AS ReceivedType, a.Name AS AccountName
+          FROM paymentdetail pd
+          JOIN paymentbreakup b ON b.PaymentDetailId = pd.Id AND b.TenantId = pd.TenantId
+          LEFT JOIN paymentmodetransactiondetail pmtd ON pmtd.Id = b.PaymentModeTransactionDetailId
+          LEFT JOIN paymentmode pm  ON pm.Id = pmtd.PaymentModeId
+          LEFT JOIN paymentreceivedtype prt ON prt.Id = b.PaymentReceivedTypeId
+          LEFT JOIN accounttypebase a ON a.Id = b.AccountTypeBaseId
+         WHERE pd.TransactionDetailLogId = ? AND pd.TenantId = ?
+         ORDER BY b.Timestamp ASC`,
+      SELECT_PAYMENT_DETAIL_BY_LOG:
+        'SELECT * FROM paymentdetail WHERE TransactionDetailLogId = ? AND TenantId = ? ORDER BY CreatedOn ASC',
+
+      // POS bill link (posting + idempotency guard)
+      SELECT_BILL_LEDGER_LINK:
+        'SELECT TransactionDetailLogId FROM pos_bill WHERE Id = ? AND TenantId = ?',
+      UPDATE_BILL_LEDGER_LINK:
+        'UPDATE pos_bill SET TransactionDetailLogId = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+    },
+
     // Tax & pricing chain: costinfo → taxgroup → taxgrouptaxtypemapper → TaxTypes.
     // Every join is tenant-scoped AND Active-filtered, so deactivating a tax type
     // silently drops it out of its group — the intended way to retire a component.
@@ -1268,6 +1392,26 @@ module.exports = {
     AUTO_APPROVE_ROLE: 'TENANT_ADMIN',
     AUTO_REVIEWER: 'system-auto',
   },
+  // Accounting ledger master names. The ledger addresses masters by MEANING,
+  // not by id, so seeds can be re-issued without breaking code. Values must
+  // match database/02-seed-data.sql PART 11.
+  LEDGER: {
+    TYPE_POS_SALE:        'POS Sale',
+    STATUS_DRAFT:         'DRAFT',
+    STATUS_PARTIALLY_PAID:'PARTIALLY_PAID',
+    STATUS_SETTLED:       'SETTLED',
+    STATUS_CANCELLED:     'CANCELLED',
+    STATUS_REFUNDED:      'REFUNDED',
+    ACCOUNT_SALES:        'Sales',
+    RECEIVED_FULL:        'Full',
+    RECEIVED_PARTIAL:     'Partial',
+    RECEIVED_REFUND:      'Refund',
+    // A settled document is never edited — corrections happen by reversal.
+    IMMUTABLE_STATUSES:   ['SETTLED', 'PARTIALLY_PAID', 'REFUNDED', 'CANCELLED'],
+    // Modes that must carry a reference number for reconciliation.
+    REF_REQUIRED_MODES:   ['Card', 'UPI', 'Wallet'],
+  },
+
   // First-time tenancy (master-data) setup gate.
   TENANT_SETUP: {
     STATUS_PENDING: 'PENDING',

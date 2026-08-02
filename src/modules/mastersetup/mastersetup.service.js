@@ -27,6 +27,7 @@ const costInfo = require('../costinfo/costinfo.service');
 const category = require('../category/category.service');
 const uom = require('../uom/uom.service');
 const itemDetail = require('../itemdetail/itemdetail.service');
+const { provisionPosMasters } = require('./posMasters.provision');
 
 /**
  * Create the full master-data tree atomically.
@@ -126,6 +127,12 @@ const bootstrap = async (payload, tenantId, userEmail) => {
       transactionTypeConfig: ttc.id,
       branch: branch.id,
     });
+
+    // 2e) Standard POS + ledger masters (payment modes, statuses, 'POS Sale'
+    // type, permitted transitions, accounts, received types). Seeded here so a
+    // brand-new tenant can settle bills and post to the ledger immediately —
+    // no per-tenant seed script. Idempotent + atomic with the rest of setup.
+    await provisionPosMasters(conn, { tenantId, configId: ttc.id }, userEmail);
 
     // 3) Item subtree (optional) ---------------------------------------------
     if (payload.item) {

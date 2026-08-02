@@ -37,8 +37,14 @@ jest.mock('../../modules/mastersetup/mastersetup.repository', () => ({
   markCompletedTx: jest.fn(async () => undefined),
   getStatus: jest.fn(),
 }));
+// The POS/ledger master provisioner runs raw SQL on the connection; it has its
+// own unit test, so here it is mocked to keep this a pure orchestrator test.
+jest.mock('../../modules/mastersetup/posMasters.provision', () => ({
+  provisionPosMasters: jest.fn(async () => undefined),
+}));
 
 const service = require('../../modules/mastersetup/mastersetup.service');
+const { provisionPosMasters } = require('../../modules/mastersetup/posMasters.provision');
 const setupRepository = require('../../modules/mastersetup/mastersetup.repository');
 const organization = require('../../modules/organization/organization.service');
 const mapProvider = require('../../modules/mapprovider/mapprovider.service');
@@ -130,6 +136,13 @@ describe('mastersetup.service — bootstrap orchestrator', () => {
   it('runs entirely inside a single transaction', async () => {
     await service.bootstrap(payload(), TENANT, USER);
     expect(dbHelper.withTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('seeds the POS/ledger masters for the tenant using its numbering config', async () => {
+    await service.bootstrap(payload(), TENANT, USER);
+    expect(provisionPosMasters).toHaveBeenCalledWith(
+      FAKE_CONN, { tenantId: TENANT, configId: 'ttc-id' }, USER,
+    );
   });
 
   it('skips the item subtree when item is omitted', async () => {

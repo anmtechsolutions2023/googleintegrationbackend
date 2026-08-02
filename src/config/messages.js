@@ -41,6 +41,21 @@ module.exports = {
     TENANT_SWITCH_FAILED: 'Tenant switch failed',
     FORBIDDEN_NO_SCOPES: 'Forbidden. No active permissions found for tenant ',
     FORBIDDEN_MISSING_SCOPE: 'Forbidden. Access requires one of these scopes: ',
+    // Accounting ledger
+    LEDGER_MASTER_MISSING:
+      'Ledger master data is missing. Run the seed script. Missing: ',
+    LEDGER_CONFIG_MISSING:
+      'No transaction numbering config found for this document type.',
+    LEDGER_TRANSITION_NOT_ALLOWED:
+      'That status change is not permitted for this document type.',
+    LEDGER_ALREADY_POSTED:
+      'This bill has already been posted to the ledger.',
+    LEDGER_PAYMENT_MODE_UNKNOWN:
+      'Unknown or inactive payment mode.',
+    LEDGER_IMMUTABLE:
+      'This document is settled and cannot be modified. Raise a refund instead.',
+    LEDGER_REF_REQUIRED:
+      'A reference number is required for card, UPI and wallet payments.',
     // First-time tenancy setup gate
     TENANT_SETUP_REQUIRED:
       'Tenancy setup is not complete. Finish the first-time setup wizard before using this feature.',
