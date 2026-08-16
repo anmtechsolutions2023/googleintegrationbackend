@@ -2,11 +2,16 @@
 // Joi validation schemas for POS Token operations.
 
 const Joi = require('joi');
+const { POS_TOKEN_STATUSES } = require('../../config/constants');
+
+// Canonical lowercase enum, normalized on write. Status was free text, so
+// 'Waiting' and 'waiting' could both be stored and every reader had to guess.
+const statusField = Joi.string().lowercase().valid(...POS_TOKEN_STATUSES);
 
 const createSchema = Joi.object({
   TokenNumber: Joi.number().integer().required().allow(null),
   OrderId: Joi.string().uuid().optional().allow(null),
-  Status: Joi.string().optional().max(20).allow(null, '').trim(),
+  Status: statusField.optional().allow(null, '').default('waiting'),
   BranchDetailId: Joi.string().uuid().optional().allow(null),
   Active: Joi.boolean().optional().default(true),
 });
@@ -14,7 +19,7 @@ const createSchema = Joi.object({
 const updateSchema = Joi.object({
   TokenNumber: Joi.number().integer().optional().allow(null),
   OrderId: Joi.string().uuid().optional().allow(null),
-  Status: Joi.string().optional().max(20).allow(null, '').trim(),
+  Status: statusField.optional().allow(null, ''),
   BranchDetailId: Joi.string().uuid().optional().allow(null),
   Active: Joi.boolean().optional(),
 }).min(1);

@@ -21,27 +21,104 @@ const makeConn = (existing) => {
 
 const countBy = (arr, t) => arr.filter((x) => x === t).length;
 
+const paramsOf = (conn, fragment) =>
+  conn.execute.mock.calls.filter(([sql]) => sql.includes(fragment)).map(([, p]) => p);
+
 describe('provisionPosMasters', () => {
   it('seeds the full POS + ledger master set for a fresh tenant', async () => {
     const conn = makeConn(false);
     await provisionPosMasters(conn, { tenantId: 't1', configId: 'cfg1' }, 'u@x');
 
     expect(countBy(conn.inserted, 'paymentmode')).toBe(4);          // Cash/Card/UPI/Wallet
-    expect(countBy(conn.inserted, 'paymentreceivedtype')).toBe(4);  // Full/Partial/Advance/Refund
-    expect(countBy(conn.inserted, 'accounttypebase')).toBe(4);      // Sales/Cash/Bank/Wallet
+    expect(countBy(conn.inserted, 'paymentreceivedtype')).toBe(5);  // + Payment (money out)
+    expect(countBy(conn.inserted, 'accounttypebase')).toBe(5);      // + Expenses
     expect(countBy(conn.inserted, 'transactiontypestatus')).toBe(5);
-    expect(countBy(conn.inserted, 'transactiontype')).toBe(1);      // POS Sale
-    expect(countBy(conn.inserted, 'transactiontypebaseconversion')).toBe(5);
+    expect(countBy(conn.inserted, 'transactiontype')).toBe(2);      // POS Sale + Expense
+    expect(countBy(conn.inserted, 'expense_category')).toBe(7);
+    expect(countBy(conn.inserted, 'asset_category')).toBe(5);
+    expect(countBy(conn.inserted, 'pos_food_type')).toBe(3);        // Veg/Vegan/Non-Veg
+    // One numbering series per document type: sales, expenses, orders, KOTs, bills.
+    expect(countBy(conn.inserted, 'transactiontypeconfig')).toBe(5);
+    // 5 sale transitions + 3 expense transitions.
+    expect(countBy(conn.inserted, 'transactiontypebaseconversion')).toBe(8);
   });
 
-  it('links the POS Sale type to the tenant’s numbering config', async () => {
+  it('gives every document type its OWN numbering series', async () => {
     const conn = makeConn(false);
-    await provisionPosMasters(conn, { tenantId: 't1', configId: 'cfg1' }, 'u@x');
+    await provisionPosMasters(conn, { tenantId: 't1' }, 'u@x');
 
-    const call = conn.execute.mock.calls.find(
-      ([sql]) => sql.includes('INSERT INTO transactiontype (Id, Name, TransactionTypeConfigId'),
-    );
-    expect(call[1]).toEqual(expect.arrayContaining(['POS Sale', 'cfg1', 't1']));
+    const configs = paramsOf(conn, 'INSERT INTO transactiontypeconfig');
+    expect(configs.map((p) => p[4])).toEqual([
+      'POS_SALE', 'EXPENSE', 'POS_ORDER', 'POS_KOT', 'POS_BILL',
+    ]);
+    expect(configs.map((p) => p[3])).toEqual([
+      'INV-{0000}', 'EXP-{0000}', 'ORD-{0000}', 'KOT-{0000}', 'BILL-{0000}',
+    ]);
+  });
+
+  // pos_item_meta.FoodTypeId is NOT NULL, so a tenant with no food types cannot
+  // create a single menu item — this is what makes it a provisioning concern
+  // rather than something the user sets up by hand.
+  it('seeds the food types a menu item cannot be created without', async () => {
+    const conn = makeConn(false);
+    await provisionPosMasters(conn, { tenantId: 't1' }, 'u@x');
+
+    const types = paramsOf(conn, 'INSERT INTO pos_food_type')
+      .map((p) => ({ name: p[1], code: p[2], isVeg: p[4] }));
+
+    expect(types).toEqual([
+      { name: 'Veg', code: 'VEG', isVeg: 1 },
+      { name: 'Vegan', code: 'VEGAN', isVeg: 1 },
+      { name: 'Non-Veg', code: 'NONVEG', isVeg: 0 },
+    ]);
+  });
+
+  // UNIQUE is (Code, TenantId), so get-or-create has to key on Code. Keying on
+  // Name would let a renamed 'Veg' be re-inserted and hit the constraint.
+  it('keys food types on Code, matching UNIQUE (Code, TenantId)', async () => {
+    const conn = makeConn(false);
+    await provisionPosMasters(conn, { tenantId: 't1' }, 'u@x');
+
+    const lookups = conn.execute.mock.calls
+      .map(([sql]) => sql)
+      .filter((sql) => sql.includes('FROM pos_food_type'));
+
+    expect(lookups).toHaveLength(3);
+    lookups.forEach((sql) => expect(sql).toContain('WHERE Code = ?'));
+  });
+
+  it('numbers documents off their own series, not the onboarding config', async () => {
+    const conn = makeConn(false);
+    await provisionPosMasters(conn, { tenantId: 't1', configId: 'cfg-onboarding' }, 'u@x');
+
+    const [posSale] = paramsOf(conn, 'INSERT INTO transactiontype (Id, Name, TransactionTypeConfigId');
+    expect(posSale).toEqual(expect.arrayContaining(['POS Sale', 't1']));
+    // Invoices must not number off onboarding paperwork.
+    expect(posSale).not.toContain('cfg-onboarding');
+  });
+
+  it('maps each tender to the account the money lands in', async () => {
+    const conn = makeConn(false);
+    await provisionPosMasters(conn, { tenantId: 't1' }, 'u@x');
+
+    const modes = paramsOf(conn, 'INSERT INTO paymentmode')
+      .map((p) => ({ type: p[1], account: p[2] }));
+
+    // Every mode must carry an account, or its takings are invisible to cash flow.
+    expect(modes).toHaveLength(4);
+    modes.forEach((m) => expect(m.account).toBeTruthy());
+
+    const byType = Object.fromEntries(modes.map((m) => [m.type, m.account]));
+    expect(byType.Card).toBe(byType.UPI);      // both land in Bank
+    expect(byType.Cash).not.toBe(byType.Card); // cash does not
+  });
+
+  it('gives every account a Kind so cash flow can classify it', async () => {
+    const conn = makeConn(false);
+    await provisionPosMasters(conn, { tenantId: 't1' }, 'u@x');
+
+    const kinds = paramsOf(conn, 'INSERT INTO accounttypebase').map((p) => p[2]);
+    expect(kinds).toEqual(['INCOME', 'ASSET', 'ASSET', 'ASSET', 'EXPENSE']);
   });
 
   it('is idempotent — inserts nothing when the masters already exist', async () => {

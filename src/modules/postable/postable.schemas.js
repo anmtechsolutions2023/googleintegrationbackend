@@ -4,13 +4,15 @@
 const Joi = require('joi');
 const { POS_TABLE_STATUSES } = require('../../config/constants');
 
-// Status is a fixed enum (Available / Occupied / Reserved). It drives the
-// occupancy-view color coding on the frontend, so only these values are valid.
+// Status is a fixed enum (free / occupied / reserved), matching the DDL default.
+// It drives the occupancy-view color coding on the frontend, so only these values
+// are valid. `.lowercase()` normalizes on write so a client still sending the old
+// title-case spelling converges instead of being rejected.
 const createSchema = Joi.object({
   Name: Joi.string().required().max(50).allow(null).trim(),
   FloorId: Joi.string().uuid().optional().allow(null),
   Capacity: Joi.number().integer().optional().allow(null),
-  Status: Joi.string().valid(...POS_TABLE_STATUSES).optional().allow(null, '').default('Available'),
+  Status: Joi.string().lowercase().valid(...POS_TABLE_STATUSES).optional().allow(null, '').default('free'),
   CurrentOrderId: Joi.string().uuid().optional().allow(null),
   BranchDetailId: Joi.string().uuid().optional().allow(null),
   Active: Joi.boolean().optional().default(true),
@@ -20,7 +22,7 @@ const updateSchema = Joi.object({
   Name: Joi.string().optional().max(50).allow(null, '').trim(),
   FloorId: Joi.string().uuid().optional().allow(null),
   Capacity: Joi.number().integer().optional().allow(null),
-  Status: Joi.string().valid(...POS_TABLE_STATUSES).optional().allow(null, ''),
+  Status: Joi.string().lowercase().valid(...POS_TABLE_STATUSES).optional().allow(null, ''),
   CurrentOrderId: Joi.string().uuid().optional().allow(null),
   BranchDetailId: Joi.string().uuid().optional().allow(null),
   Active: Joi.boolean().optional(),

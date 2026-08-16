@@ -245,6 +245,8 @@ DROP TABLE IF EXISTS taxgrouptaxtypemapper;
 DROP TABLE IF EXISTS taxgroup;
 DROP TABLE IF EXISTS contactaddresstype;
 DROP TABLE IF EXISTS transactiontype;
+DROP TABLE IF EXISTS asset_category;
+DROP TABLE IF EXISTS expense_category;
 DROP TABLE IF EXISTS accounttypebase;
 DROP TABLE IF EXISTS transactiontypestatus;
 DROP TABLE IF EXISTS uomfactor;
@@ -365,8 +367,45 @@ CREATE TABLE uomfactor (
 CREATE TABLE accounttypebase (
     Id         VARCHAR(50)  NOT NULL,
     Name       VARCHAR(50)  NOT NULL,
+    -- What KIND of account this is. Cash flow has to classify a movement
+    -- (did money land in an asset? was it earned as income?) and matching on
+    -- the NAME 'Cash' would break the moment a tenant renames it to 'Till'.
+    Kind       ENUM('ASSET','LIABILITY','INCOME','EXPENSE') NOT NULL DEFAULT 'INCOME',
     Active     TINYINT(1)   NOT NULL,
     TenantId   VARCHAR(50)  NOT NULL,
+    CreatedOn  DATETIME,
+    CreatedBy  VARCHAR(50),
+    UpdatedOn  DATETIME,
+    UpdatedBy  VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Name, TenantId)
+);
+
+-- 3.7a expense_category — master for expense analysis
+-- pos_expense.Category was free text, so 'Gas', 'gas' and 'LPG' were three
+-- different categories and no expense report could group reliably.
+CREATE TABLE expense_category (
+    Id         VARCHAR(50)   NOT NULL,
+    Name       VARCHAR(100)  NOT NULL,
+    -- Which account the spend is booked against (Kind = 'EXPENSE').
+    AccountTypeBaseId VARCHAR(50) NULL,
+    Active     TINYINT(1)    NOT NULL,
+    TenantId   VARCHAR(50)   NOT NULL,
+    CreatedOn  DATETIME,
+    CreatedBy  VARCHAR(50),
+    UpdatedOn  DATETIME,
+    UpdatedBy  VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Name, TenantId),
+    FOREIGN KEY (AccountTypeBaseId) REFERENCES accounttypebase(Id)
+);
+
+-- 3.7b asset_category — master for the fixed-asset register
+CREATE TABLE asset_category (
+    Id         VARCHAR(50)   NOT NULL,
+    Name       VARCHAR(100)  NOT NULL,
+    Active     TINYINT(1)    NOT NULL,
+    TenantId   VARCHAR(50)   NOT NULL,
     CreatedOn  DATETIME,
     CreatedBy  VARCHAR(50),
     UpdatedOn  DATETIME,
@@ -767,6 +806,22 @@ CREATE TABLE transactionitemdetail (
     BasePrice              DECIMAL(18,4)  NULL COMMENT 'Item price before variant surcharge',
     VariantAmount          DECIMAL(18,4)  NOT NULL DEFAULT 0 COMMENT 'Per-unit variant surcharge',
     NetAmount              DECIMAL(18,4)  NULL COMMENT 'Taxable base after discount',
+    -- Discount BORNE BY THIS LINE: its own discount plus its apportioned share
+    -- of any document-level discount. The pricing engine already computes this
+    -- to spread a bill discount before tax; persisting it is what makes
+    -- "discount per product" a SUM instead of a fragile derivation from
+    -- UnitPrice x Quantity - NetAmount.
+    -- Invariant: SUM(line.DiscountAmount) = log.DiscountAmount.
+    DiscountAmount         DECIMAL(18,4)  NOT NULL DEFAULT 0,
+    -- Of the above, the part that was given ON THIS DISH specifically, as
+    -- opposed to its apportioned share of a whole-bill discount. "We discounted
+    -- this dish" and "this dish absorbed part of a bill discount" are different
+    -- business facts: the first says what we choose to give away, the second is
+    -- an accounting artefact of how a bill discount is spread. Merged into one
+    -- column they cannot be told apart, and "which products do we discount?"
+    -- becomes unanswerable.
+    -- Invariant: ItemDiscountAmount <= DiscountAmount.
+    ItemDiscountAmount     DECIMAL(18,4)  NOT NULL DEFAULT 0,
     TaxAmount              DECIMAL(18,4)  NULL,
     GrossAmount            DECIMAL(18,4)  NULL COMMENT 'NetAmount + TaxAmount',
     TaxComponents          JSON           NULL COMMENT 'Per-component split, e.g. [{name:CGST,rate:9,amount:...}]',
@@ -829,6 +884,10 @@ CREATE TABLE paymentreceivedtype (
 CREATE TABLE paymentmode (
     Id         VARCHAR(50)  NOT NULL,
     Type       VARCHAR(50)  NOT NULL,
+    -- Where money tendered this way LANDS: Cash → Cash, Card/UPI → Bank.
+    -- Held as data rather than a lookup table in code, so a tenant adding
+    -- 'Meal Voucher' decides its account without a deployment.
+    DefaultAccountTypeBaseId VARCHAR(50) NULL,
     TenantId   VARCHAR(50)  NOT NULL,
     Active     TINYINT(1)   NOT NULL,
     CreatedOn  DATETIME,
@@ -836,7 +895,8 @@ CREATE TABLE paymentmode (
     UpdatedOn  DATETIME,
     UpdatedBy  VARCHAR(50),
     PRIMARY KEY (Id),
-    UNIQUE (Type, TenantId)
+    UNIQUE (Type, TenantId),
+    FOREIGN KEY (DefaultAccountTypeBaseId) REFERENCES accounttypebase(Id)
 );
 
 -- 3.29 paymentmodetransactiondetail
@@ -1150,6 +1210,23 @@ CREATE TABLE pos_order (
     TaxAmount       DECIMAL(12,2)  NOT NULL DEFAULT 0,
     Total           DECIMAL(12,2)  NOT NULL DEFAULT 0,
     BranchDetailId  VARCHAR(50)    NULL,
+    -- WHERE THIS ROUND WAS SERVED, frozen at the moment it was placed.
+    --
+    -- A copy of the floor plan, not a reference to it, and deliberately WITHOUT
+    -- foreign keys. A restaurant's floor plan changes constantly — tables are
+    -- renamed, moved between floors, retired — and resolving these by joining
+    -- pos_table at report time would rewrite history: revenue earned on the
+    -- ground floor would follow the table upstairs. The snapshot answers "where
+    -- was this served?"; pos_table/pos_floor answer "where can I seat someone
+    -- now?". Both are legitimate, and they are not the same question.
+    --
+    -- No FK also means retiring a table can never be blocked by, or destroy,
+    -- the history of what it earned. Same reasoning as the priced line snapshot
+    -- in Items, and as transactiondetaillog.CustomerName beside ContactDetailId.
+    TableName       VARCHAR(50)    NULL,
+    FloorId         VARCHAR(50)    NULL,
+    FloorName       VARCHAR(100)   NULL,
+    TableCapacity   INT            NULL,
     TenantId        VARCHAR(50)    NOT NULL,
     Active          TINYINT(1)     NOT NULL,
     CreatedOn       DATETIME,
@@ -1190,7 +1267,19 @@ CREATE TABLE pos_bill (
     OrderId         VARCHAR(50)    NULL,
     SubTotal        DECIMAL(12,2)  NOT NULL DEFAULT 0,
     TaxAmount       DECIMAL(12,2)  NOT NULL DEFAULT 0,
+    -- Whole-bill discount only. Per-item discounts live in LineDiscounts below;
+    -- the true total reduction is recomputed from both and is what reaches the
+    -- ledger, so this column stays a faithful record of what was taken off the
+    -- bill as a whole rather than a mixed figure.
     Discount        DECIMAL(12,2)  NOT NULL DEFAULT 0,
+    -- Per-item discounts, keyed "<orderId>#<lineIndex>" → {type, value}.
+    --
+    -- Kept on the BILL rather than written back onto pos_order.Items because a
+    -- round records what was ORDERED and is treated as immutable history, while
+    -- a discount is a payment-time decision belonging to the document that
+    -- granted it. Re-settling the same rounds under a different bill therefore
+    -- cannot inherit a discount someone gave once.
+    LineDiscounts   JSON           NULL,
     Total           DECIMAL(12,2)  NOT NULL DEFAULT 0,
     Payments        JSON           NULL,
     Status          VARCHAR(20)    NOT NULL DEFAULT 'unpaid',
@@ -1268,12 +1357,29 @@ CREATE TABLE pos_token (
 );
 
 -- 4.15 pos_expense — petty-cash / operational expenses
+-- Money OUT. Approved expenses post to the same ledger as sales
+-- (transactiondetaillog with TransactionTypeId = 'Expense', and a NEGATIVE
+-- paymentbreakup), which is what makes "cash in minus cash out" one query over
+-- one table instead of a reconciliation between two systems.
+--
+-- Lifecycle: DRAFT --approve--> APPROVED --settle--> SETTLED
+--   Only settling posts to the ledger. A DRAFT expense is a claim, not a cost.
 CREATE TABLE pos_expense (
     Id              VARCHAR(50)    NOT NULL,
-    Category        VARCHAR(100)   NOT NULL,
+    -- Free-text Category replaced by a master: reports group by id, never by
+    -- whatever spelling the cashier used.
+    ExpenseCategoryId VARCHAR(50)  NOT NULL,
     Description     VARCHAR(500)   NULL,
     Amount          DECIMAL(12,2)  NOT NULL DEFAULT 0,
     ExpenseDate     DATETIME       NULL,
+    -- How it was paid. Drives which asset account the money left.
+    PaymentModeId   VARCHAR(50)    NULL,
+    Status          VARCHAR(20)    NOT NULL DEFAULT 'draft',
+    ApprovedBy      VARCHAR(100)   NULL,
+    ApprovedAt      DATETIME       NULL,
+    -- The accounting document, once settled. NULL = not in the ledger, and it
+    -- doubles as the idempotency guard exactly as pos_bill's link does.
+    TransactionDetailLogId VARCHAR(50) NULL,
     BranchDetailId  VARCHAR(50)    NULL,
     TenantId        VARCHAR(50)    NOT NULL,
     Active          TINYINT(1)     NOT NULL,
@@ -1281,7 +1387,11 @@ CREATE TABLE pos_expense (
     CreatedBy       VARCHAR(50),
     UpdatedOn       DATETIME,
     UpdatedBy       VARCHAR(50),
-    PRIMARY KEY (Id)
+    PRIMARY KEY (Id),
+    FOREIGN KEY (ExpenseCategoryId)      REFERENCES expense_category(Id),
+    FOREIGN KEY (PaymentModeId)          REFERENCES paymentmode(Id),
+    FOREIGN KEY (TransactionDetailLogId) REFERENCES transactiondetaillog(Id),
+    FOREIGN KEY (BranchDetailId)         REFERENCES branchdetail(Id)
 );
 
 -- 4.16 pos_staff — front-desk / kitchen staff roster
@@ -1303,6 +1413,125 @@ CREATE TABLE pos_staff (
 );
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- =============================================================================
+-- SECTION 5: Finance & Operations — cash sessions and the asset register
+-- Depends on Section 3 (accounttypebase, branchdetail, contactdetail,
+-- transactiondetaillog) and Section 4 (asset_category).
+-- =============================================================================
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS asset;
+DROP TABLE IF EXISTS pos_cash_session;
+
+-- 5.1 pos_cash_session — a cashier's shift at a till
+--
+-- Granularity is PER SHIFT PER CASHIER, not per day: two people on one till in
+-- one day are two accountabilities, and a single daily row could not say whose
+-- count was short.
+--
+-- Movements are attributed to a session by TIME WINDOW (branch + OpenedAt..
+-- ClosedAt) rather than by stamping every bill with a session id. That keeps
+-- settling a bill independent of whether a session happens to be open — a sale
+-- must never fail because nobody opened the till.
+CREATE TABLE pos_cash_session (
+    Id              VARCHAR(50)    NOT NULL,
+    BranchDetailId  VARCHAR(50)    NOT NULL,
+    -- Who is accountable. Email rather than an FK to pos_staff: the person who
+    -- closes a till is an application user, and the roster is optional.
+    CashierEmail    VARCHAR(100)   NOT NULL,
+    ShiftLabel      VARCHAR(50)    NULL COMMENT 'Morning / Evening / Night',
+    OpeningFloat    DECIMAL(18,4)  NOT NULL DEFAULT 0,
+    OpenedAt        DATETIME       NOT NULL,
+    ClosedAt        DATETIME       NULL,
+    OpenedBy        VARCHAR(100)   NOT NULL,
+    ClosedBy        VARCHAR(100)   NULL,
+    -- Counted is what the drawer HELD; Expected is what the ledger SAYS it
+    -- should have held. Variance is the number a manager has to explain, and
+    -- storing all three keeps the explanation auditable after the fact.
+    CountedCash     DECIMAL(18,4)  NULL,
+    ExpectedCash    DECIMAL(18,4)  NULL,
+    Variance        DECIMAL(18,4)  NULL,
+    Notes           VARCHAR(500)   NULL,
+    Status          VARCHAR(20)    NOT NULL DEFAULT 'open',
+    TenantId        VARCHAR(50)    NOT NULL,
+    Active          TINYINT(1)     NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    FOREIGN KEY (BranchDetailId) REFERENCES branchdetail(Id)
+);
+
+-- One open till per cashier per branch. Enforced in the service rather than by
+-- a UNIQUE key, because MySQL treats every NULL ClosedAt as distinct and so a
+-- partial unique index on "still open" is not expressible here.
+
+-- 5.2 asset — fixed-asset / equipment register, tied to a branch
+CREATE TABLE asset (
+    Id                VARCHAR(50)    NOT NULL,
+    Name              VARCHAR(150)   NOT NULL,
+    AssetCategoryId   VARCHAR(50)    NOT NULL,
+    -- An asset belongs to a branch. That is the whole point of the register:
+    -- "what equipment does this outlet have, and what is it worth".
+    BranchDetailId    VARCHAR(50)    NOT NULL,
+    SerialNo          VARCHAR(100)   NULL,
+    PurchaseDate      DATE           NULL,
+    PurchaseCost      DECIMAL(18,4)  NOT NULL DEFAULT 0,
+    -- Who it was bought from, reusing the party master rather than inventing a
+    -- supplier table.
+    SupplierContactDetailId VARCHAR(50) NULL,
+    -- The purchase document, when the asset was bought through the system.
+    -- Nullable: opening-balance assets predate any document.
+    TransactionDetailLogId  VARCHAR(50) NULL,
+    Status            VARCHAR(20)    NOT NULL DEFAULT 'in_use',
+    Notes             VARCHAR(500)   NULL,
+    TenantId          VARCHAR(50)    NOT NULL,
+    Active            TINYINT(1)     NOT NULL DEFAULT 1,
+    CreatedOn         DATETIME,
+    CreatedBy         VARCHAR(50),
+    UpdatedOn         DATETIME,
+    UpdatedBy         VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE KEY uk_asset_serial_tenant (SerialNo, TenantId),
+    FOREIGN KEY (AssetCategoryId)         REFERENCES asset_category(Id),
+    FOREIGN KEY (BranchDetailId)          REFERENCES branchdetail(Id),
+    FOREIGN KEY (SupplierContactDetailId) REFERENCES contactdetail(Id),
+    FOREIGN KEY (TransactionDetailLogId)  REFERENCES transactiondetaillog(Id)
+);
+-- Depreciation is deliberately out of scope: it needs a schedule table and a
+-- periodic posting job, and nothing in the current requirements asks for it.
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- =============================================================================
+-- SECTION 6: Reporting indexes
+-- =============================================================================
+-- Every report filters TenantId + a date, and until now not one business table
+-- had an index on either — see GAP #4 below, which this section closes for the
+-- tables reporting actually touches. InnoDB already indexes FK columns, so the
+-- join paths (TransactionDetailLogId, PaymentDetailId) need nothing here.
+--
+-- Leading column is always TenantId: every query is tenant-scoped, so a
+-- date-first index would scan other tenants' rows to find this one's.
+
+-- Financial — the sales, product, pending and cash-flow reports.
+CREATE INDEX idx_tdl_tenant_date    ON transactiondetaillog (TenantId, TransactionDate, TransactionTypeStatusId);
+CREATE INDEX idx_tdl_tenant_branch  ON transactiondetaillog (TenantId, BranchId, TransactionDate);
+CREATE INDEX idx_tdl_tenant_type    ON transactiondetaillog (TenantId, TransactionTypeId, TransactionDate);
+CREATE INDEX idx_tid_tenant_item    ON transactionitemdetail (TenantId, ItemId);
+CREATE INDEX idx_pb_tenant_ts       ON paymentbreakup (TenantId, Timestamp);
+
+-- Operational — order/KOT/table dashboards and expense listings.
+CREATE INDEX idx_posorder_tenant    ON pos_order (TenantId, Status, CreatedOn);
+CREATE INDEX idx_posbill_tenant     ON pos_bill (TenantId, Status, SettledAt);
+CREATE INDEX idx_poskot_tenant      ON pos_kot (TenantId, Status);
+CREATE INDEX idx_posexp_tenant_date ON pos_expense (TenantId, ExpenseDate);
+CREATE INDEX idx_posexp_tenant_stat ON pos_expense (TenantId, Status);
+CREATE INDEX idx_cashsess_tenant    ON pos_cash_session (TenantId, BranchDetailId, OpenedAt);
+CREATE INDEX idx_asset_tenant       ON asset (TenantId, BranchDetailId, Status);
 
 -- =============================================================================
 -- GAP ANALYSIS — Issues found during cross-reference of SQL vs. application code
@@ -1331,12 +1560,14 @@ SET FOREIGN_KEY_CHECKS = 1;
 --   ACTION: For multi-tenant deployments, roles must be seeded per tenant,
 --           or the schema needs a NULL-allowed tenant_id for global roles.
 --
--- GAP #4: No TenantId indexes on business domain tables
---   All 31 business tables use TenantId in WHERE clauses for every query but
---   have no index on TenantId. As data grows this will cause full-table scans.
---   ACTION: Add composite indexes e.g.:
---           CREATE INDEX idx_taxtypes_tenant ON TaxTypes (TenantId, Active);
---           (Repeat for all business tables.)
+-- GAP #4: No TenantId indexes on business domain tables — PARTIALLY CLOSED
+--   SECTION 6 above now indexes every table the reporting engine reads
+--   (transactiondetaillog, transactionitemdetail, paymentbreakup, pos_order,
+--   pos_bill, pos_kot, pos_expense, pos_cash_session, asset).
+--   Still uncovered: the pure master-data tables (TaxTypes, UOM, itemdetail,
+--   categorydetail, ...), which are small and read by id or name.
+--   ACTION: Add (TenantId, Active) indexes to masters if any grows past a few
+--           thousand rows per tenant.
 --
 -- GAP #5: tenant_features table usage unclear
 --   The legacy tenant_features table (per-user feature grants) coexists with

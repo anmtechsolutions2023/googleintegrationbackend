@@ -186,7 +186,16 @@ const mockConnection = {
 const defaultExecuteImpl = (sql) => {
   const s = (sql || '').toUpperCase();
   if (s.includes('COUNT(')) return Promise.resolve([[{ total: 1 }]]);
-  if (s.includes('SELECT')) return Promise.resolve([[MOCK_ROW]]);
+  if (s.includes('SELECT')) {
+    // MOCK_ROW carries TransactionDetailLogId for the payment modules, but on a
+    // bill or an expense that column means "already posted to the ledger", and
+    // a posted document is immutable. These CRUD tests exercise the lifecycle
+    // BEFORE posting, so those two tables answer with an unposted row.
+    if (s.includes('FROM POS_BILL') || s.includes('FROM POS_EXPENSE')) {
+      return Promise.resolve([[{ ...MOCK_ROW, TransactionDetailLogId: null, Status: 'unpaid' }]]);
+    }
+    return Promise.resolve([[MOCK_ROW]]);
+  }
   return Promise.resolve([[{ affectedRows: 1 }]]);
 };
 
@@ -442,17 +451,23 @@ const MODULES = [
 
   // ─── POS (Front Desk) modules ───
   { path: '/api/pos/floors', body: { Name: 'Main Dining', Active: true } },
-  { path: '/api/pos/tables', body: { Name: 'Table 1', Active: true }, updateBody: { Status: 'Occupied' } },
+  { path: '/api/pos/tables', body: { Name: 'Table 1', Active: true }, updateBody: { Status: 'occupied' } },
   { path: '/api/pos/food-types', body: { Name: 'Veg', Code: 'veg', IsVeg: true, Active: true }, updateBody: { Name: 'Non-Veg' } },
   { path: '/api/pos/item-meta', body: { ItemDetailId: UUID_1, FoodTypeId: UUID_1, Channels: { dinein: true }, Prices: { dinein: 100 }, Variants: [], BranchDetailId: UUID_1, Active: true }, updateBody: { FoodTypeId: UUID_1 } },
   { path: '/api/pos/customers', body: { Name: 'Rahul Verma', Phone: '9876543210', Active: true } },
-  { path: '/api/pos/orders', body: { OrderNo: 'ORD-1', Active: true }, updateBody: { Status: 'closed' } },
-  { path: '/api/pos/kots', body: { KotNo: 'KOT-1', Active: true }, updateBody: { Status: 'ready' } },
-  { path: '/api/pos/bills', body: { BillNo: 'BILL-1', Active: true }, updateBody: { Status: 'paid' } },
+  // Orders, KOTs and bills have no required create field left: their document
+  // numbers are issued server-side from a numbering series, because the client
+  // used to mint them from Date.now() and collide with the UNIQUE constraint.
+  // An empty create body is therefore valid for these three.
+  { path: '/api/pos/orders', body: { Active: true }, updateBody: { Status: 'closed' }, emptyCreateIsValid: true },
+  { path: '/api/pos/kots', body: { Active: true }, updateBody: { Status: 'ready' }, emptyCreateIsValid: true },
+  { path: '/api/pos/bills', body: { Active: true }, updateBody: { Status: 'paid' }, emptyCreateIsValid: true },
   { path: '/api/pos/online-orders', body: { Platform: 'Swiggy', Active: true }, updateBody: { Status: 'accepted' } },
   { path: '/api/pos/feedback', body: { CustomerName: 'Rahul', Rating: 5, Active: true }, updateBody: { Rating: 4 } },
   { path: '/api/pos/tokens', body: { TokenNumber: 1, Active: true }, updateBody: { Status: 'called' } },
-  { path: '/api/pos/expenses', body: { Category: 'Groceries', Amount: 500, Active: true }, updateBody: { Amount: 600 } },
+  // Category is a master (expense_category), not free text, so spend reports
+  // can group by id instead of by spelling.
+  { path: '/api/pos/expenses', body: { ExpenseCategoryId: UUID_1, Amount: 500, Active: true }, updateBody: { Amount: 600 } },
   { path: '/api/pos/staff', body: { Name: 'Head Chef', Role: 'Kitchen', Active: true }, updateBody: { Role: 'Manager' } },
 ];
 
@@ -518,7 +533,7 @@ function restoreDefaultMocks() {
 // GENERATED INTEGRATION TESTS — one describe block per module (32 modules)
 // ─────────────────────────────────────────────────────────────────────────────
 
-MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
+MODULES.forEach(({ path: basePath, body: createBody, updateBody, emptyCreateIsValid }) => {
   // Default PUT body is { Active: false }; modules with special update validation
   // (e.g. branchdetails requires BranchName or Name) can override via updateBody.
   const putBody = updateBody || { Active: false };
@@ -609,14 +624,28 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody }) => {
       expect(res.body.success).toBe(false);
     });
 
-    it('POST — admin token, empty body → 400', async () => {
-      const res = await request(server)
-        .post(basePath)
-        .set('Authorization', adminToken())
-        .send({});
-      expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
-    });
+    // Most modules have at least one required create field, so an empty body is
+    // a validation error. The few whose every field is optional or server-issued
+    // (see emptyCreateIsValid) must accept it instead — asserting 400 there
+    // would be asserting a required field that no longer exists.
+    if (emptyCreateIsValid) {
+      it('POST — admin token, empty body → 201 (nothing is client-required)', async () => {
+        const res = await request(server)
+          .post(basePath)
+          .set('Authorization', adminToken())
+          .send({});
+        expect(res.status).toBe(201);
+      });
+    } else {
+      it('POST — admin token, empty body → 400', async () => {
+        const res = await request(server)
+          .post(basePath)
+          .set('Authorization', adminToken())
+          .send({});
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+      });
+    }
 
     it('POST — admin token, valid body → 201', async () => {
       const res = await request(server)
@@ -2490,9 +2519,48 @@ describe('POS domain action: POST /api/pos/bills/:id/settle', () => {
   });
 
   it('admin, valid settle → 200', async () => {
-    const res = await request(server).post(path).set('Authorization', adminToken()).send(validBody);
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
+    // Settling posts a full accounting document, so the whole chain has to
+    // answer: bill → rounds → priced items → ledger masters. The generic row
+    // mock cannot express that, and would only prove the bill has no lines.
+    mockConnection.execute.mockImplementation((sql, params = []) => {
+      const q = String(sql);
+      if (/COUNT\(/i.test(q)) return Promise.resolve([[{ total: 1 }]]);
+      if (/FROM pos_bill_order/i.test(q)) return Promise.resolve([[{ OrderId: UUID_1 }]]);
+      if (/FROM pos_bill\b/i.test(q)) {
+        return Promise.resolve([[{ ...MOCK_ROW, TransactionDetailLogId: null, Discount: 0, Status: 'unpaid' }]]);
+      }
+      if (/FROM pos_order/i.test(q)) {
+        return Promise.resolve([[{
+          Id: UUID_1,
+          Items: JSON.stringify([{ id: 'meta-1', name: 'Dosa', price: 100, qty: 1, taxComponents: [] }]),
+          CustomerId: null,
+        }]]);
+      }
+      if (/FROM pos_item_meta/i.test(q)) return Promise.resolve([[{ Id: 'meta-1', ItemDetailId: UUID_1 }]]);
+      if (/FROM transactiontype WHERE Name/i.test(q)) return Promise.resolve([[{ Id: 'type-sale', TransactionTypeConfigId: 'cfg-1' }]]);
+      if (/FROM transactiontypestatus WHERE Name/i.test(q)) return Promise.resolve([[{ Id: `st-${params[0]}`, Name: params[0] }]]);
+      if (/FROM accounttypebase WHERE Name/i.test(q)) return Promise.resolve([[{ Id: 'acct-sales', Kind: 'INCOME' }]]);
+      if (/FROM paymentreceivedtype WHERE Type/i.test(q)) return Promise.resolve([[{ Id: 'rt-full' }]]);
+      if (/FROM paymentmode WHERE Id/i.test(q)) {
+        return Promise.resolve([[{ Id: params[0], Type: 'Cash', DefaultAccountTypeBaseId: 'acct-cash' }]]);
+      }
+      if (/FROM transactiontypeconfig WHERE Id/i.test(q)) {
+        return Promise.resolve([[{ Id: 'cfg-1', StartCounterNo: '1', CurrentCounterNo: 0, Prefix: 'INV', Format: 'INV-{0000}' }]]);
+      }
+      if (/FROM transactiontypebaseconversion/i.test(q)) return Promise.resolve([[{ Id: 'conv-1' }]]);
+      if (/^\s*SELECT/i.test(q)) return Promise.resolve([[]]);
+      return Promise.resolve([[{ affectedRows: 1 }]]);
+    });
+    try {
+      const res = await request(server)
+        .post(path)
+        .set('Authorization', adminToken())
+        .send({ Tenders: [{ paymentModeId: UUID_1, amount: 100 }] });
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    } finally {
+      restoreDefaultMocks();
+    }
   });
 
   it('bill not found → 404', async () => {

@@ -149,6 +149,39 @@ class BaseCRUDService {
   }
 
   /**
+   * Get a single record on a caller-supplied connection.
+   *
+   * Use this instead of `getById` for any read that happens INSIDE a
+   * transaction. `getById` takes its own connection from the pool, which sits
+   * outside the open transaction and therefore cannot see uncommitted writes —
+   * a read-after-write in the same transaction would silently return the old
+   * row, or a 404 for a row that was just inserted.
+   *
+   * @param {Object} connection - Active transaction connection
+   * @param {string} id - Record ID
+   * @param {string} tenantId - Tenant ID
+   * @param {boolean} expand - Whether to include related entity details
+   * @returns {Promise<Object>} Record object
+   */
+  async getByIdTx(connection, id, tenantId, expand = false) {
+    const selectQuery =
+      expand && this.queries.SELECT_BY_ID_WITH_DETAILS
+        ? this.queries.SELECT_BY_ID_WITH_DETAILS
+        : this.queries.SELECT_BY_ID
+
+    const [rows] = await connection.execute(selectQuery, [id, tenantId])
+
+    if (rows.length === 0) {
+      logger.warn(`${this.entityName} not found`, { id, tenantId })
+      throw new HttpError(
+        `${this.entityName} not found`,
+        MESSAGES.HTTP_STATUS.NOT_FOUND,
+      )
+    }
+    return rows[0]
+  }
+
+  /**
    * Create a new record.
    * @param {Object} data - Record data
    * @param {string} tenantId - Tenant ID

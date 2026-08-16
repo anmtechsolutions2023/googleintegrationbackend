@@ -37,6 +37,10 @@ const itemdetailRoutes = require('../modules/itemdetail/itemdetail.routes');
 const mastersetupRoutes = require('../modules/mastersetup/mastersetup.routes');
 const pricingRoutes = require('../modules/pricing/pricing.routes');
 const ledgerRoutes = require('../modules/ledger/ledger.routes');
+const poscashsessionRoutes = require('../modules/poscashsession/poscashsession.routes');
+const assetRoutes = require('../modules/asset/asset.routes');
+const assetcategoryRoutes = require('../modules/assetcategory/assetcategory.routes');
+const expensecategoryRoutes = require('../modules/expensecategory/expensecategory.routes');
 const transactiontypebaseconversionRoutes = require('../modules/transactiontypebaseconversion/transactiontypebaseconversion.routes');
 const transactiondetaillogRoutes = require('../modules/transactiondetaillog/transactiondetaillog.routes');
 const transactionitemdetailRoutes = require('../modules/transactionitemdetail/transactionitemdetail.routes');
@@ -128,8 +132,19 @@ const registerRoutes = (app) => {
   // mapper → TaxTypes chain. Shared by master data, POS and billing.
   app.use('/api/pricing', pricingRoutes);
 
-  // Accounting ledger — settled sales as numbered, immutable documents.
+  // Accounting ledger — settled sales and expenses as numbered, immutable
+  // documents, plus the financial reporting engine (/api/ledger/reports/*).
   app.use('/api/ledger', ledgerRoutes);
+
+  // Cash sessions — a cashier's shift at a till, and the day-close variance.
+  app.use('/api/pos/cash-sessions', poscashsessionRoutes);
+
+  // Fixed-asset register and its category master.
+  app.use('/api/assets', assetRoutes);
+  app.use('/api/asset-categories', assetcategoryRoutes);
+
+  // Expense category master — the analysis axis for spend.
+  app.use('/api/expense-categories', expensecategoryRoutes);
 
   // UOM Factor module
   app.use('/api/uomfactors', uomfactorRoutes);
@@ -261,6 +276,10 @@ const registerRoutes = (app) => {
         { name: 'organizations', path: '/api/organizations' },
         { name: 'pricing', path: '/api/pricing' },
         { name: 'ledger', path: '/api/ledger' },
+        { name: 'cash-sessions', path: '/api/pos/cash-sessions' },
+        { name: 'assets', path: '/api/assets' },
+        { name: 'asset-categories', path: '/api/asset-categories' },
+        { name: 'expense-categories', path: '/api/expense-categories' },
         { name: 'uomfactors', path: '/api/uomfactors' },
         { name: 'accounttypes', path: '/api/accounttypes' },
         {

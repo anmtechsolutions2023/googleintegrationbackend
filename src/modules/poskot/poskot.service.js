@@ -3,7 +3,8 @@
 
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
-const { withConnection } = require('../../utils/dbHelper');
+const { withConnection, withTransaction } = require('../../utils/dbHelper');
+const { issuePosNumber } = require('../posorder/posNumbering');
 
 // Serialize object/array values for JSON columns; pass through strings and null.
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
@@ -11,6 +12,22 @@ const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.strin
 class PosKotService extends BaseCRUDService {
   constructor() {
     super('POS KOT', QUERIES.POS_KOT);
+  }
+
+  /**
+   * Create a KOT directly (rounds fire their own; this is the manual path).
+   *
+   * KotNo comes from the POS_KOT series when the caller omits it. The column is
+   * NOT NULL, and the value clients used to send was the raw epoch in
+   * milliseconds, which is what the kitchen display then showed as the ticket
+   * number.
+   */
+  async create(data, tenantId, userEmail) {
+    if (data.KotNo) return super.create(data, tenantId, userEmail);
+    return withTransaction(async (connection) => {
+      const KotNo = await issuePosNumber(connection, 'POS_KOT', 'KOT', tenantId, userEmail);
+      return this.createTx(connection, { ...data, KotNo }, tenantId, userEmail);
+    });
   }
 
   /**

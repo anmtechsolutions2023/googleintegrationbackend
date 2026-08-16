@@ -12,6 +12,9 @@
 const { v4: uuidv4 } = require('uuid');
 const { QUERIES } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
+const { issuePosNumber } = require('./posNumbering');
+const { writeKot, findLiveKotTx } = require('./posKotWriter');
+const { resolveVenueTx } = require('./posVenue');
 
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
 
@@ -91,18 +94,47 @@ const writeOrder = (conn, o, userEmail, tenantId) =>
   conn.execute(QUERIES.POS_ORDER.UPDATE, [
     o.OrderNo, o.TableId, o.CustomerId ?? null, o.OrderType ?? null, o.Status ?? null,
     toJson(o.Items), o.SubTotal, o.TaxAmount, o.Total, o.BranchDetailId ?? null,
+    o.TableName ?? null, o.FloorId ?? null, o.FloorName ?? null, o.TableCapacity ?? null,
     o.Active != null ? o.Active : 1, userEmail, o.Id, tenantId,
   ]);
 
 const insertOrder = (conn, o, userEmail, tenantId) =>
   conn.execute(QUERIES.POS_ORDER.INSERT, [
-    o.Id, tenantId, o.OrderNo, o.TableId, o.CustomerId ?? null, o.OrderType ?? 'Dine-in',
-    o.Status ?? 'Active', toJson(o.Items), o.SubTotal, o.TaxAmount, o.Total,
-    o.BranchDetailId ?? null, 1, userEmail, userEmail,
+    o.Id, tenantId, o.OrderNo, o.TableId, o.CustomerId ?? null, o.OrderType ?? 'dinein',
+    o.Status ?? 'open', toJson(o.Items), o.SubTotal, o.TaxAmount, o.Total,
+    o.BranchDetailId ?? null,
+    o.TableName ?? null, o.FloorId ?? null, o.FloorName ?? null, o.TableCapacity ?? null,
+    1, userEmail, userEmail,
   ]);
+
+// A moved round was genuinely served at its NEW table, so its venue snapshot is
+// re-taken rather than carried over — otherwise the revenue would keep reporting
+// against the table the guests left.
+const restampVenue = async (conn, o, tenantId) => {
+  Object.assign(o, await resolveVenueTx(conn, o.TableId, tenantId));
+  return o;
+};
 
 const deleteOrder = (conn, id, tenantId) =>
   conn.execute(QUERIES.POS_ORDER.DELETE, [id, tenantId]);
+
+// Keep a round's kitchen ticket pointing at the right table. Without this a
+// transfer left the KOT showing the table the guests walked away from, so the
+// pass delivered to an empty seat.
+const moveKotsToTable = (conn, orderId, tableId, tenantId, userEmail) =>
+  conn.execute(
+    'UPDATE pos_kot SET TableId = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE OrderId = ? AND TenantId = ?',
+    [tableId ?? null, userEmail, orderId, tenantId],
+  );
+
+// Repoint a round's tickets at another round. Required before deleting an order
+// that has any: pos_kot.OrderId is a FOREIGN KEY with no ON DELETE, so the
+// delete would simply fail on any round that had been sent to the kitchen.
+const reassignKots = (conn, fromOrderId, toOrderId, toTableId, tenantId, userEmail) =>
+  conn.execute(
+    'UPDATE pos_kot SET OrderId = ?, TableId = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE OrderId = ? AND TenantId = ?',
+    [toOrderId, toTableId ?? null, userEmail, fromOrderId, tenantId],
+  );
 
 // Re-derive a table's occupancy from its remaining open orders — the source may
 // have emptied and the destination may have just become occupied.
@@ -118,7 +150,7 @@ const refreshTable = async (conn, tableId, tenantId, userEmail) => {
   );
   const occupied = open.length > 0;
   await conn.execute(QUERIES.POS_TABLE.UPDATE, [
-    t.Name, t.FloorId, t.Capacity, occupied ? 'Occupied' : 'Available',
+    t.Name, t.FloorId, t.Capacity, occupied ? 'occupied' : 'free',
     occupied ? open[0].Id : null, t.BranchDetailId, t.Active != null ? t.Active : 1,
     userEmail, tableId, tenantId,
   ]);
@@ -136,7 +168,9 @@ const moveOrders = async (conn, { orderIds, toTableId }, tenantId, userEmail) =>
       fromTables.add(o.TableId);
       o.TableId = toTableId;
       o.BranchDetailId = dest.BranchDetailId ?? o.BranchDetailId;
+      await restampVenue(conn, o, tenantId);
       await writeOrder(conn, o, userEmail, tenantId);
+      await moveKotsToTable(conn, o.Id, toTableId, tenantId, userEmail);
     }
   }
   for (const ft of fromTables) await refreshTable(conn, ft, tenantId, userEmail);
@@ -178,7 +212,9 @@ const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo },
   if (newSource.length === 0) {
     src.TableId = toTableId;
     src.BranchDetailId = dest.BranchDetailId ?? src.BranchDetailId;
+    await restampVenue(conn, src, tenantId);
     await writeOrder(conn, src, userEmail, tenantId);
+    await moveKotsToTable(conn, src.Id, toTableId, tenantId, userEmail);
     await refreshTable(conn, fromTableId, tenantId, userEmail);
     await refreshTable(conn, toTableId, tenantId, userEmail);
     return {
@@ -192,20 +228,31 @@ const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo },
   Object.assign(src, { Items: newSource, ...srcTotals });
   await writeOrder(conn, src, userEmail, tenantId);
 
-  // The moved lines arrive as a fresh round on the destination.
+  // The moved lines arrive as a fresh round on the destination. Whether the
+  // kitchen needs to hear about it depends entirely on whether it already has:
+  // if the source round was sent, this food is already cooking and the split
+  // round inherits a ticket so the pass knows where to deliver it. If the source
+  // was never sent, the split must not conjure one — sending is the cashier's
+  // deliberate act, and inventing a ticket here would put uncooked-but-unordered
+  // food on the pass.
+  const srcWasSent = !!(await findLiveKotTx(conn, sourceOrderId, tenantId));
+
   const destId = uuidv4();
   const destOrder = {
     Id: destId,
-    OrderNo: destOrderNo || `ORD-${Date.now().toString().slice(-6)}`,
+    OrderNo: destOrderNo
+      || (await issuePosNumber(conn, 'POS_ORDER', 'ORD', tenantId, userEmail)),
     TableId: toTableId,
     CustomerId: src.CustomerId ?? null,
-    OrderType: src.OrderType || 'Dine-in',
-    Status: 'Active',
+    OrderType: src.OrderType || 'dinein',
+    Status: srcWasSent ? 'fired' : 'open',
     Items: moved,
     ...sumTotals(moved),
     BranchDetailId: dest.BranchDetailId ?? src.BranchDetailId,
+    ...(await resolveVenueTx(conn, toTableId, tenantId)),
   };
   await insertOrder(conn, destOrder, userEmail, tenantId);
+  if (srcWasSent) await writeKot(conn, destOrder, tenantId, userEmail);
 
   await refreshTable(conn, fromTableId, tenantId, userEmail);
   await refreshTable(conn, toTableId, tenantId, userEmail);
@@ -227,6 +274,10 @@ const mergeOrders = async (conn, { sourceOrderId, targetOrderId }, tenantId, use
   const merged = [...asArray(tgt.Items), ...asArray(src.Items)];
   Object.assign(tgt, { Items: merged, ...sumTotals(merged) });
   await writeOrder(conn, tgt, userEmail, tenantId);
+  // The source's tickets move to the target BEFORE the source row goes: the
+  // food is already cooking, and pos_kot.OrderId is a FOREIGN KEY with no
+  // ON DELETE, so leaving them behind would fail the delete outright.
+  await reassignKots(conn, sourceOrderId, targetOrderId, tgt.TableId, tenantId, userEmail);
   await deleteOrder(conn, sourceOrderId, tenantId);
   await refreshTable(conn, src.TableId, tenantId, userEmail);
   await refreshTable(conn, tgt.TableId, tenantId, userEmail);

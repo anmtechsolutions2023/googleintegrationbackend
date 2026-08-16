@@ -56,6 +56,28 @@ module.exports = {
       'This document is settled and cannot be modified. Raise a refund instead.',
     LEDGER_REF_REQUIRED:
       'A reference number is required for card, UPI and wallet payments.',
+    LEDGER_BILL_NOT_POSTABLE:
+      'This bill has no priced lines and cannot be settled. Add the rounds it covers first.',
+    LEDGER_LINE_UNPOSTABLE:
+      'A line on this bill cannot be posted because its menu item is no longer linked to a catalogue item: ',
+    LEDGER_TOTALS_MISMATCH:
+      'Line totals do not reconcile with the document total. The bill was not posted.',
+    LEDGER_ACCOUNT_UNMAPPED:
+      'This payment mode has no account mapped. Set its default account before taking payments this way: ',
+    // Expenses
+    EXPENSE_NOT_APPROVED:
+      'Only an approved expense can be settled.',
+    EXPENSE_NOT_DRAFT:
+      'Only a draft expense can be approved or edited.',
+    EXPENSE_ALREADY_POSTED:
+      'This expense has already been posted to the ledger.',
+    EXPENSE_MODE_REQUIRED:
+      'A payment mode is required to settle an expense — it decides which account the money left.',
+    // Cash sessions
+    CASH_SESSION_ALREADY_OPEN:
+      'This cashier already has an open till at this branch. Close it before opening another.',
+    CASH_SESSION_NOT_OPEN:
+      'This till session is not open, so it cannot be closed again.',
     // First-time tenancy setup gate
     TENANT_SETUP_REQUIRED:
       'Tenancy setup is not complete. Finish the first-time setup wizard before using this feature.',

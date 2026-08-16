@@ -20,6 +20,10 @@
 --   PART 7 — POS roles (POS_CASHIER, POS_WAITER, POS_KITCHEN_STAFF, POS_MANAGER)
 --   PART 8 — POS role permissions (incl. extending SUPER_ADMIN / TENANT_ADMIN
 --             with all POS features)
+--   PART 9 — Baseline master data for onboarding
+--   PART 10 — Application configuration defaults
+--   PART 11 — Accounting ledger masters + document numbering series
+--   PART 12 — POS food types (Veg / Vegan / Non-Veg)
 --
 -- All INSERT statements use INSERT IGNORE + fixed UUIDs so this file is
 -- safe to re-run on a database that already has seed data.
@@ -583,71 +587,118 @@ INSERT IGNORE INTO transactiontypestatus (Id, Name, Active, TenantId, CreatedOn,
     ('s0000001-ldgr-0000-0000-000000000004', 'CANCELLED',      1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
     ('s0000001-ldgr-0000-0000-000000000005', 'REFUNDED',       1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
 
--- 11b) Document type — POS sales use the 'Onboarding' numbering config seeded in PART 9b.
-INSERT IGNORE INTO transactiontype (Id, Name, TransactionTypeConfigId, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy)
-SELECT 'y0000001-ldgr-0000-0000-000000000001', 'POS Sale', ttc.Id, 1, ttc.TenantId, NOW(), 'system-seed', 'system-seed'
-FROM transactiontypeconfig ttc
-WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
-LIMIT 1;
+-- 11b) Numbering series — one PER DOCUMENT TYPE.
+-- Sales and expenses must not share a counter: an accountant reading INV-0007
+-- and EXP-0003 needs each series to be gap-free in its own right, which a
+-- shared counter cannot give. Prefix differs from the PART 9b 'Onboarding' row
+-- so UNIQUE(StartCounterNo, Prefix, Format, TenantId) is satisfied; the rendered
+-- number comes from Format, so these read as INV-0001 / EXP-0001.
+-- Orders, KOTs and bills have series too. Their numbers used to be minted in the
+-- browser from Date.now(): ORD-<last 6 digits of epoch ms> wrapped every ~16m40s
+-- and collided with UNIQUE (OrderNo, TenantId), failing the sale, and KotNo was
+-- the raw 13-digit epoch the kitchen display then showed as the ticket number.
+-- These are operational counters, so a gap is harmless — uniqueness is not.
+INSERT IGNORE INTO transactiontypeconfig (Id, TenantId, StartCounterNo, Prefix, Format, TagName, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('t0000001-ttc0-0000-0000-000000000002', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'INV',  'INV-{0000}',  'POS_SALE',  1, NOW(), 'system-seed', 'system-seed'),
+    ('t0000001-ttc0-0000-0000-000000000003', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'EXP',  'EXP-{0000}',  'EXPENSE',   1, NOW(), 'system-seed', 'system-seed'),
+    ('t0000001-ttc0-0000-0000-000000000004', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'ORD',  'ORD-{0000}',  'POS_ORDER', 1, NOW(), 'system-seed', 'system-seed'),
+    ('t0000001-ttc0-0000-0000-000000000005', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'KOT',  'KOT-{0000}',  'POS_KOT',   1, NOW(), 'system-seed', 'system-seed'),
+    ('t0000001-ttc0-0000-0000-000000000006', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'BILL', 'BILL-{0000}', 'POS_BILL',  1, NOW(), 'system-seed', 'system-seed');
 
--- 11c) Permitted status transitions.
--- NOTE: SETTLED → CANCELLED is deliberately ABSENT. A settled sale is reversed by
--- REFUNDED, never voided — that distinction is the whole point of the whitelist.
+-- 11c) Document types, each bound to its own series.
+INSERT IGNORE INTO transactiontype (Id, Name, TransactionTypeConfigId, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('y0000001-ldgr-0000-0000-000000000001', 'POS Sale', 't0000001-ttc0-0000-0000-000000000002', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('y0000001-ldgr-0000-0000-000000000002', 'Expense',  't0000001-ttc0-0000-0000-000000000003', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
+
+-- 11d) Permitted status transitions, PER SERIES.
+-- NOTE: SETTLED → CANCELLED is deliberately ABSENT. A settled document is
+-- reversed by REFUNDED, never voided — that distinction is the whole point of
+-- the whitelist. Tags are unique per tenant, so each series names its own.
 INSERT IGNORE INTO transactiontypebaseconversion
-    (Id, TenantId, TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, Tag, Active, CreatedOn, CreatedBy, UpdatedBy)
-SELECT * FROM (
-    SELECT 'v0000001-ldgr-0000-0000-000000000001' AS Id, ttc.TenantId AS TenantId, ttc.Id AS Cfg,
-           's0000001-ldgr-0000-0000-000000000001' AS Frm, 's0000001-ldgr-0000-0000-000000000003' AS Too,
-           'POS_SALE_SETTLE' AS Tag, 1 AS Act, NOW() AS C, 'system-seed' AS CB, 'system-seed' AS UB
-      FROM transactiontypeconfig ttc
-     WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
-    UNION ALL
-    SELECT 'v0000001-ldgr-0000-0000-000000000002', ttc.TenantId, ttc.Id,
-           's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000002',
-           'POS_SALE_PART_PAY', 1, NOW(), 'system-seed', 'system-seed'
-      FROM transactiontypeconfig ttc
-     WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
-    UNION ALL
-    SELECT 'v0000001-ldgr-0000-0000-000000000003', ttc.TenantId, ttc.Id,
-           's0000001-ldgr-0000-0000-000000000002', 's0000001-ldgr-0000-0000-000000000003',
-           'POS_SALE_SETTLE_REMAINDER', 1, NOW(), 'system-seed', 'system-seed'
-      FROM transactiontypeconfig ttc
-     WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
-    UNION ALL
-    SELECT 'v0000001-ldgr-0000-0000-000000000004', ttc.TenantId, ttc.Id,
-           's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000004',
-           'POS_SALE_VOID', 1, NOW(), 'system-seed', 'system-seed'
-      FROM transactiontypeconfig ttc
-     WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
-    UNION ALL
-    SELECT 'v0000001-ldgr-0000-0000-000000000005', ttc.TenantId, ttc.Id,
-           's0000001-ldgr-0000-0000-000000000003', 's0000001-ldgr-0000-0000-000000000005',
-           'POS_SALE_REFUND', 1, NOW(), 'system-seed', 'system-seed'
-      FROM transactiontypeconfig ttc
-     WHERE ttc.TenantId = 'e3845e08-dcc2-11f0-8e78-0242ac110002' AND ttc.TagName = 'Onboarding'
-) AS t;
+    (Id, TenantId, TransactionTypeConfigId, FromTransactionTypeStatusId, ToTransactionTypeStatusId, Tag, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    -- POS Sale: draft → settled / part-paid → settled, void while draft, refund once settled
+    ('v0000001-ldgr-0000-0000-000000000001', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000002',
+     's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000003', 'POS_SALE_SETTLE', 1, NOW(), 'system-seed', 'system-seed'),
+    ('v0000001-ldgr-0000-0000-000000000002', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000002',
+     's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000002', 'POS_SALE_PART_PAY', 1, NOW(), 'system-seed', 'system-seed'),
+    ('v0000001-ldgr-0000-0000-000000000003', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000002',
+     's0000001-ldgr-0000-0000-000000000002', 's0000001-ldgr-0000-0000-000000000003', 'POS_SALE_SETTLE_REMAINDER', 1, NOW(), 'system-seed', 'system-seed'),
+    ('v0000001-ldgr-0000-0000-000000000004', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000002',
+     's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000004', 'POS_SALE_VOID', 1, NOW(), 'system-seed', 'system-seed'),
+    ('v0000001-ldgr-0000-0000-000000000005', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000002',
+     's0000001-ldgr-0000-0000-000000000003', 's0000001-ldgr-0000-0000-000000000005', 'POS_SALE_REFUND', 1, NOW(), 'system-seed', 'system-seed'),
+    -- Expense: the DRAFT → APPROVED step lives on pos_expense, not here. An
+    -- unapproved claim is not yet a financial event, so no document exists for
+    -- it; settling is what posts, and reversal is the only way back out.
+    ('v0000001-ldgr-0000-0000-000000000006', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000003',
+     's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000003', 'EXPENSE_SETTLE', 1, NOW(), 'system-seed', 'system-seed'),
+    ('v0000001-ldgr-0000-0000-000000000007', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000003',
+     's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000004', 'EXPENSE_VOID', 1, NOW(), 'system-seed', 'system-seed'),
+    ('v0000001-ldgr-0000-0000-000000000008', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000003',
+     's0000001-ldgr-0000-0000-000000000003', 's0000001-ldgr-0000-0000-000000000005', 'EXPENSE_REVERSE', 1, NOW(), 'system-seed', 'system-seed');
 
--- 11d) Ledger accounts. NOT NULL on paymentdetail and paymentbreakup, so at
--- minimum 'Sales' (revenue) and one asset account must exist.
-INSERT IGNORE INTO accounttypebase (Id, Name, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
-    ('b0000001-ldgr-0000-0000-000000000001', 'Sales',  1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
-    ('b0000001-ldgr-0000-0000-000000000002', 'Cash',   1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
-    ('b0000001-ldgr-0000-0000-000000000003', 'Bank',   1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
-    ('b0000001-ldgr-0000-0000-000000000004', 'Wallet', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
+-- 11e) Ledger accounts, each with its KIND.
+-- Kind is what lets cash flow classify a movement without matching on a name a
+-- tenant is free to change.
+INSERT IGNORE INTO accounttypebase (Id, Name, Kind, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('b0000001-ldgr-0000-0000-000000000001', 'Sales',    'INCOME',  1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('b0000001-ldgr-0000-0000-000000000002', 'Cash',     'ASSET',   1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('b0000001-ldgr-0000-0000-000000000003', 'Bank',     'ASSET',   1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('b0000001-ldgr-0000-0000-000000000004', 'Wallet',   'ASSET',   1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('b0000001-ldgr-0000-0000-000000000005', 'Expenses', 'EXPENSE', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
 
--- 11e) Tender types
-INSERT IGNORE INTO paymentmode (Id, Type, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
-    ('m0000001-ldgr-0000-0000-000000000001', 'Cash',   'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
-    ('m0000001-ldgr-0000-0000-000000000002', 'Card',   'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
-    ('m0000001-ldgr-0000-0000-000000000003', 'UPI',    'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
-    ('m0000001-ldgr-0000-0000-000000000004', 'Wallet', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+-- 11f) Tender types, each mapped to the account the money LANDS IN.
+-- Without this mapping every tender books to 'Sales' and no account means
+-- anything: cash sales and card sales become indistinguishable.
+INSERT IGNORE INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('m0000001-ldgr-0000-0000-000000000001', 'Cash',   'b0000001-ldgr-0000-0000-000000000002', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000002', 'Card',   'b0000001-ldgr-0000-0000-000000000003', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000003', 'UPI',    'b0000001-ldgr-0000-0000-000000000003', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000004', 'Wallet', 'b0000001-ldgr-0000-0000-000000000004', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
 
--- 11f) How a receipt is classified
+-- 11g) How a receipt is classified
 INSERT IGNORE INTO paymentreceivedtype (Id, Type, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
     ('r0000001-ldgr-0000-0000-000000000001', 'Full',    'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
     ('r0000001-ldgr-0000-0000-000000000002', 'Partial', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
     ('r0000001-ldgr-0000-0000-000000000003', 'Advance', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
-    ('r0000001-ldgr-0000-0000-000000000004', 'Refund',  'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+    ('r0000001-ldgr-0000-0000-000000000004', 'Refund',  'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    -- Money OUT. paymentbreakup.PaymentReceivedTypeId is NOT NULL, so an
+    -- expense payment needs a classification of its own rather than borrowing
+    -- 'Full', which would make expenses look like receipts in every report.
+    ('r0000001-ldgr-0000-0000-000000000005', 'Payment', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
+-- 11h) Expense categories — the analysis axis for spend.
+INSERT IGNORE INTO expense_category (Id, Name, AccountTypeBaseId, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('e0000001-ldgr-0000-0000-000000000001', 'Raw Material', 'b0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('e0000001-ldgr-0000-0000-000000000002', 'Gas',          'b0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('e0000001-ldgr-0000-0000-000000000003', 'Utilities',    'b0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('e0000001-ldgr-0000-0000-000000000004', 'Rent',         'b0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('e0000001-ldgr-0000-0000-000000000005', 'Salary',       'b0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('e0000001-ldgr-0000-0000-000000000006', 'Maintenance',  'b0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('e0000001-ldgr-0000-0000-000000000007', 'Miscellaneous','b0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
+
+-- 11i) Asset categories — the analysis axis for the equipment register.
+INSERT IGNORE INTO asset_category (Id, Name, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('a0000001-ldgr-0000-0000-000000000001', 'Kitchen Equipment', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('a0000001-ldgr-0000-0000-000000000002', 'Furniture',         1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('a0000001-ldgr-0000-0000-000000000003', 'IT Equipment',      1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('a0000001-ldgr-0000-0000-000000000004', 'Fixtures',          1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('a0000001-ldgr-0000-0000-000000000005', 'Vehicle',           1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
+
+-- =============================================================================
+-- PART 12 — POS food types
+-- =============================================================================
+-- pos_item_meta.FoodTypeId is NOT NULL, so without these rows the Menu Items
+-- form cannot be submitted at all — a tenant with no food types cannot create a
+-- single menu item. IsVeg drives the veg/non-veg badge on the Billing menu grid.
+-- Keyed on Code to match UNIQUE (Code, TenantId).
+--
+-- Mirrored per-tenant by FOOD_TYPES in modules/mastersetup/posMasters.provision.js,
+-- which seeds these for every tenant created through first-time setup.
+INSERT IGNORE INTO pos_food_type (Id, Name, Code, Description, SortOrder, IsVeg, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('f0000001-ftyp-0000-0000-000000000001', 'Veg',     'VEG',    'Vegetarian',                        1, 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('f0000001-ftyp-0000-0000-000000000002', 'Vegan',   'VEGAN',  'No animal produce of any kind',     2, 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('f0000001-ftyp-0000-0000-000000000003', 'Non-Veg', 'NONVEG', 'Contains meat, fish or egg',        3, 0, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
 
 -- =============================================================================
 -- TENANT SETUP STATE (first-time setup wizard gate)

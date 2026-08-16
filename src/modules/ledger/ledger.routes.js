@@ -18,6 +18,19 @@ const READ = [
 ];
 const WRITE = [SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.TRANSACTIONS_WRITE];
 
+// ── Reports ──────────────────────────────────────────────────────────────────
+// Declared BEFORE /documents/:id so no report path can be swallowed by the id
+// route. Read-only aggregates over the same documents, gated on the same scopes.
+router.get('/reports/overview', authenticateToken, checkScope(...READ), ...controller.overviewReport);
+router.get('/reports/sales', authenticateToken, checkScope(...READ), ...controller.salesReport);
+router.get('/reports/products', authenticateToken, checkScope(...READ), ...controller.productReport);
+router.get('/reports/pending', authenticateToken, checkScope(...READ), ...controller.pendingReport);
+router.get('/reports/tenders', authenticateToken, checkScope(...READ), ...controller.tenderReport);
+router.get('/reports/cashflow', authenticateToken, checkScope(...READ), ...controller.cashFlowReport);
+router.get('/reports/expenses', authenticateToken, checkScope(...READ), ...controller.expenseReport);
+router.get('/reports/venue', authenticateToken, checkScope(...READ), ...controller.venueReport);
+router.get('/reports/discounts', authenticateToken, checkScope(...READ), ...controller.discountReport);
+
 router.get('/documents', authenticateToken, checkScope(...READ), ...controller.list);
 router.get('/documents/:id', authenticateToken, checkScope(...READ), ...controller.getOne);
 router.post(

@@ -3,10 +3,30 @@
 
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
+const { deleteOrRetire } = require('../../common/retire');
 
 class PosFloorService extends BaseCRUDService {
   constructor() {
     super('POS Floor', QUERIES.POS_FLOOR);
+  }
+
+  /**
+   * Remove a floor from the plan.
+   *
+   * A floor that still has tables — including retired ones — is retired rather
+   * than deleted, so the tables it held keep their parent and the venue reports
+   * keep their grouping.
+   */
+  async retire(id, tenantId, userEmail) {
+    return deleteOrRetire({
+      table: 'pos_floor',
+      entityName: 'POS Floor',
+      references: [{ table: 'pos_table', column: 'FloorId' }],
+      deleteQuery: this.queries.DELETE,
+      id,
+      tenantId,
+      userEmail,
+    });
   }
 
   prepareInsertParams(id, data, tenantId, userEmail) {
@@ -40,5 +60,5 @@ module.exports = {
   getById: (id, tenantId) => service.getById(id, tenantId),
   create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
   update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
-  remove: (id, tenantId) => service.delete(id, tenantId),
+  remove: (id, tenantId, userEmail) => service.retire(id, tenantId, userEmail),
 };

@@ -4,12 +4,24 @@
 const { v4: uuidv4 } = require('uuid');
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
-const { withTransaction } = require('../../utils/dbHelper');
+const { withTransaction, withConnection } = require('../../utils/dbHelper');
+const {
+  calculatePagination,
+  getPaginationMetadata,
+  extractCount,
+} = require('../../utils/paginationHelper');
 
 const pricingService = require('../pricing/pricing.service');
 const itemMetaRepository = require('../positemmeta/positemmeta.repository');
 const { transfer: transferImpl, refreshTable } = require('./posorder.transfer');
+const { issuePosNumber } = require('./posNumbering');
+const { writeKot, findLiveKotTx } = require('./posKotWriter');
+const { resolveVenueTx } = require('./posVenue');
 const { HttpError } = require('../../middleware/errorHandler');
+
+// A round past this point is history: it can be reprinted for the record but not
+// re-cooked, and it no longer counts towards a table's occupancy.
+const CLOSED_STATUSES = new Set(['closed', 'settled', 'cancelled']);
 
 // Serialize object/array values for JSON columns; pass through strings and null.
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
@@ -122,22 +134,81 @@ class PosOrderService extends BaseCRUDService {
     };
   }
 
-  // Server-authoritative on write. Read paths are untouched, so orders placed
-  // before this shipped keep whatever they stored.
+  /**
+   * List rounds, optionally narrowed to one table.
+   *
+   * Falls straight through to the base implementation when no filter is given,
+   * so every existing caller behaves exactly as before. With `tableId` it runs a
+   * filtered, still-paginated query rather than making the client pull the whole
+   * list and filter locally — that approach silently lost rounds the moment an
+   * outlet traded past one page.
+   *
+   * @param {string} tenantId
+   * @param {number} [page]
+   * @param {number} [limit]
+   * @param {Object} [filters] - { tableId, openOnly }
+   */
+  async getAll(tenantId, page = 1, limit = 10, filters = {}) {
+    const { tableId, openOnly } = filters || {};
+    if (!tableId) return super.getAll(tenantId, page, limit);
+
+    const { pageNum, limitNum, offset } = calculatePagination(page, limit);
+    const openClause = openOnly
+      ? ` AND LOWER(COALESCE(Status, '')) NOT IN (${[...CLOSED_STATUSES].map((s) => `'${s}'`).join(', ')})`
+      : '';
+
+    return withConnection(async (connection) => {
+      const [countRows] = await connection.execute(
+        `SELECT COUNT(*) as total FROM pos_order WHERE TenantId = ? AND TableId = ?${openClause}`,
+        [tenantId, tableId],
+      );
+      const [rows] = await connection.execute(
+        `SELECT * FROM pos_order WHERE TenantId = ? AND TableId = ?${openClause}`
+        + ` ORDER BY CreatedOn ASC LIMIT ${limitNum} OFFSET ${offset}`,
+        [tenantId, tableId],
+      );
+
+      return {
+        data: rows,
+        pagination: getPaginationMetadata(extractCount(countRows), pageNum, limitNum),
+      };
+    });
+  }
+
+  /**
+   * Create a round: price it, number it, and stamp where it was served.
+   *
+   * Sending to the kitchen is a SEPARATE, deliberate act (`fireKot`). Placing a
+   * round does not fire it: a counter-served drink never needs a ticket, and the
+   * cashier decides when the order is complete enough to cook. The round is left
+   * `open`; Billing surfaces rounds that have no ticket so one cannot be
+   * forgotten silently.
+   *
+   * OrderNo is issued from the POS_ORDER series rather than minted in the
+   * browser — the client used the last 6 digits of Date.now(), which wraps every
+   * ~16m40s and then collides with UNIQUE (OrderNo, TenantId), failing the sale.
+   * Any OrderNo sent by a client is ignored.
+   *
+   * The venue snapshot (table/floor name, capacity) is resolved and frozen here;
+   * see resolveVenueTx for why it is copied rather than joined at read time.
+   */
   async create(data, tenantId, userEmail) {
     const priced = await this.priceItems(data.Items, tenantId);
-    if (!priced) return super.create(data, tenantId, userEmail);
-    return super.create(
-      {
+    const order = priced
+      ? {
         ...data,
         Items: priced.items,
         SubTotal: priced.totals.netAmount,
         TaxAmount: priced.totals.taxAmount,
         Total: priced.totals.grossAmount,
-      },
-      tenantId,
-      userEmail,
-    );
+      }
+      : { ...data };
+
+    return withTransaction(async (connection) => {
+      order.OrderNo = await issuePosNumber(connection, 'POS_ORDER', 'ORD', tenantId, userEmail);
+      Object.assign(order, await resolveVenueTx(connection, order.TableId, tenantId));
+      return this.createTx(connection, order, tenantId, userEmail);
+    });
   }
 
   async update(id, data, tenantId, userEmail) {
@@ -161,45 +232,52 @@ class PosOrderService extends BaseCRUDService {
   }
 
   /**
-   * Domain action: fire a KOT from an order — snapshots the order's items into a
-   * new pos_kot row and marks the order 'fired'. Atomic (single transaction).
+   * Domain action: send a round to the kitchen. Send-once.
+   *
+   * If this round already has a live ticket, the existing one is returned and
+   * NOTHING is written. Pressing the button twice used to put a second copy of
+   * the same food on the pass, and the kitchen cooked it twice. The guard lives
+   * here rather than in the UI so a double-tap, a retried request or a second
+   * device all converge on one ticket.
+   *
+   * A cancelled ticket does not count as live — that round was pulled, and
+   * sending it again is a legitimate act.
+   *
    * @param {string} id - Order ID
    * @param {Object} data - Optional { KotNo }
    * @param {string} tenantId - Tenant ID
    * @param {string} userEmail - Acting user
-   * @returns {Promise<Object>} The created KOT summary
+   * @returns {Promise<Object>} The ticket, with AlreadySent telling the caller
+   *                            whether this call is what put it there.
    */
   async fireKot(id, data, tenantId, userEmail) {
     return withTransaction(async (connection) => {
-      const order = await this.getById(id, tenantId); // 404 if missing
-      // Fire once per round: a second tap must not duplicate the ticket in the
-      // kitchen. Add items as a new round to send more to the pass.
-      if (String(order.Status || '').toLowerCase() === 'fired') {
-        throw new HttpError('KOT already fired for this round.', 409);
+      const order = await this.getByIdTx(connection, id, tenantId); // 404 if missing
+      if (CLOSED_STATUSES.has(String(order.Status || '').toLowerCase())) {
+        throw new HttpError('Cannot send a closed round to the kitchen.', 409);
       }
-      const kotId = uuidv4();
-      const kotNo = (data && data.KotNo) || `KOT-${Date.now()}`;
-      await connection.execute(QUERIES.POS_KOT.INSERT, [
-        kotId,
-        tenantId,
-        kotNo,
-        order.Id,
-        order.TableId,
-        toJson(order.Items),
-        'pending',
-        new Date(),
-        order.BranchDetailId,
-        1,
-        userEmail,
-        userEmail,
-      ]);
+
+      const existing = await findLiveKotTx(connection, id, tenantId);
+      if (existing) {
+        return {
+          KotId: existing.Id,
+          KotNo: existing.KotNo,
+          OrderId: id,
+          Status: existing.Status,
+          AlreadySent: true,
+        };
+      }
+
+      const kot = await writeKot(
+        connection, order, tenantId, userEmail, data && data.KotNo,
+      );
       await connection.execute(this.queries.SET_STATUS, [
         'fired',
         userEmail,
         id,
         tenantId,
       ]);
-      return { KotId: kotId, KotNo: kotNo, OrderId: order.Id, Status: 'pending' };
+      return { ...kot, AlreadySent: false };
     });
   }
 
@@ -264,13 +342,22 @@ class PosOrderService extends BaseCRUDService {
       data.OrderNo ?? null,
       data.TableId ?? null,
       data.CustomerId ?? null,
-      data.OrderType ?? null,
-      data.Status ?? null,
+      // OrderType and Status are NOT NULL in pos_order. Naming a column in the
+      // INSERT suppresses its column DEFAULT, so an omitted value has to be
+      // defaulted here — passing NULL is rejected outright. Same 'open' default
+      // the transfer path already applies to a newly split round.
+      data.OrderType ?? 'dinein',
+      data.Status ?? 'open',
       toJson(data.Items),
       data.SubTotal !== undefined ? data.SubTotal : 0,
       data.TaxAmount !== undefined ? data.TaxAmount : 0,
       data.Total !== undefined ? data.Total : 0,
       data.BranchDetailId ?? null,
+      // Venue snapshot — see posVenue.js. Copied, never joined at read time.
+      data.TableName ?? null,
+      data.FloorId ?? null,
+      data.FloorName ?? null,
+      data.TableCapacity ?? null,
       data.Active !== undefined ? data.Active : true,
       userEmail,
       userEmail,
@@ -289,6 +376,13 @@ class PosOrderService extends BaseCRUDService {
       data.TaxAmount !== undefined ? data.TaxAmount : existing.TaxAmount,
       data.Total !== undefined ? data.Total : existing.Total,
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
+      // Venue snapshot. Only a transfer supplies these (it re-resolves them for
+      // the destination table); an ordinary update must leave the recorded
+      // history exactly as it was.
+      data.TableName !== undefined ? data.TableName : existing.TableName,
+      data.FloorId !== undefined ? data.FloorId : existing.FloorId,
+      data.FloorName !== undefined ? data.FloorName : existing.FloorName,
+      data.TableCapacity !== undefined ? data.TableCapacity : existing.TableCapacity,
       data.Active !== undefined ? data.Active : existing.Active,
       userEmail,
       id,
@@ -300,7 +394,7 @@ class PosOrderService extends BaseCRUDService {
 const service = new PosOrderService();
 
 module.exports = {
-  getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
+  getAll: (tenantId, page, limit, filters) => service.getAll(tenantId, page, limit, filters),
   getById: (id, tenantId) => service.getById(id, tenantId),
   create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
   update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),

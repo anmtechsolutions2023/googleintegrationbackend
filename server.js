@@ -12,6 +12,7 @@ const { logger } = require('./src/utils/logger');
 const MESSAGES = require('./src/config/messages');
 const { PORT } = require('./src/config/envConfig');
 const { registerRoutes } = require('./src/config/routes');
+const { assertSchemaIsCurrent } = require('./src/config/schemaCheck');
 
 const app = express();
 
@@ -35,4 +36,7 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   logger.info(`${MESSAGES.INFO.SERVER_RUNNING}${PORT}`);
+  // Deliberately after listen and deliberately not awaited: this reports a
+  // stale database, it does not gate the service on one.
+  assertSchemaIsCurrent();
 });

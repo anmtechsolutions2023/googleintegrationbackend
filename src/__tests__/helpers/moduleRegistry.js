@@ -345,7 +345,7 @@ const registry = [
     createData:  { Name: 'Table 1', Active: true },
     // Status is a fixed enum (POS_TABLE_STATUSES) — capitalised, matching what
     // the frontend writes in Billing.js / Tables.js.
-    updateData:  { Status: 'Occupied' },
+    updateData:  { Status: 'occupied' },
     existingRow: { Name: 'Table 1', FloorId: null, Capacity: 4, Status: 'free', CurrentOrderId: null, BranchDetailId: null },
   },
   {
@@ -398,7 +398,9 @@ const registry = [
     servicePath: '../../modules/posorder/posorder.service',
     httpPath: '/api/pos/orders',
     exports: POS,
-    createData:  { OrderNo: 'ORD-1', Active: true },
+    // No OrderNo: it is issued from the POS_ORDER series server-side, and any
+    // value a client sends is ignored.
+    createData:  { Active: true },
     updateData:  { Status: 'closed' },
     existingRow: { OrderNo: 'ORD-1', TableId: null, CustomerId: null, OrderType: 'dinein', Status: 'open', Items: null, SubTotal: 0, TaxAmount: 0, Total: 0, BranchDetailId: null },
   },
@@ -416,7 +418,8 @@ const registry = [
     servicePath: '../../modules/posbill/posbill.service',
     httpPath: '/api/pos/bills',
     exports: POS,
-    createData:  { BillNo: 'BILL-1', Active: true },
+    // No BillNo: issued from the POS_BILL series server-side, like OrderNo.
+    createData:  { Active: true },
     updateData:  { Status: 'paid' },
     existingRow: { BillNo: 'BILL-1', OrderId: null, SubTotal: 0, TaxAmount: 0, Discount: 0, Total: 0, Payments: null, Status: 'unpaid', SettledAt: null, BranchDetailId: null },
   },
@@ -452,9 +455,21 @@ const registry = [
     servicePath: '../../modules/posexpense/posexpense.service',
     httpPath: '/api/pos/expenses',
     exports: POS,
-    createData:  { Category: 'Groceries', Amount: 500, Active: true },
+    // Category is a master now, not free text — reports group by id so that
+    // 'Gas', 'gas' and 'LPG' cannot be three different categories.
+    createData:  { ExpenseCategoryId: '11111111-1111-1111-1111-111111111111', Amount: 500, Active: true },
     updateData:  { Amount: 600 },
-    existingRow: { Category: 'Groceries', Description: null, Amount: 500, ExpenseDate: null, BranchDetailId: null },
+    existingRow: {
+      ExpenseCategoryId: '11111111-1111-1111-1111-111111111111',
+      Description: null,
+      Amount: 500,
+      ExpenseDate: null,
+      PaymentModeId: null,
+      // Draft: a claim is not yet a cost, and only settling posts it.
+      Status: 'draft',
+      TransactionDetailLogId: null,
+      BranchDetailId: null,
+    },
   },
   {
     name: 'posstaff',

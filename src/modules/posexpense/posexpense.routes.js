@@ -7,7 +7,7 @@ const {
   authenticateToken,
   checkScope,
 } = require('../../middleware/authMiddleware');
-const { auditLogCrud } = require('../../middleware/auditLogger');
+const { auditLogCrud, auditLog } = require('../../middleware/auditLogger');
 const { SCOPES, AUDIT_CATEGORIES } = require('../../config/constants');
 const controller = require('./posexpense.controller');
 
@@ -46,6 +46,38 @@ router.delete(
   checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_OPS_WRITE),
   audit,
   ...controller.deleteById
+);
+
+// ── Approval flow ────────────────────────────────────────────────────────────
+// Approve and reject need EXPENSE:APPROVE, deliberately NOT POS_OPS:WRITE: the
+// cashier who raises a claim must not be able to approve their own spending.
+const approveAudit = auditLog(AUDIT_CATEGORIES.PAYMENTS, 'WARN', 'Expense approval action');
+
+/** POST /:id/approve — approve a draft expense. */
+router.post(
+  '/:id/approve',
+  authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.EXPENSE_APPROVE),
+  approveAudit,
+  ...controller.approve
+);
+
+/** POST /:id/reject — reject a draft expense. */
+router.post(
+  '/:id/reject',
+  authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.EXPENSE_APPROVE),
+  approveAudit,
+  ...controller.reject
+);
+
+/** POST /:id/settle — pay an approved expense and post it to the ledger. */
+router.post(
+  '/:id/settle',
+  authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.EXPENSE_APPROVE),
+  auditLog(AUDIT_CATEGORIES.PAYMENTS, 'WARN', 'Expense settled and posted'),
+  ...controller.settle
 );
 
 module.exports = router;

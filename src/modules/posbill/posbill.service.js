@@ -3,10 +3,13 @@
 
 const { v4: uuidv4 } = require('uuid');
 const BaseCRUDService = require('../../common/BaseCRUDService');
-const { QUERIES } = require('../../config/constants');
+const { QUERIES, POS_BILL_STATUS } = require('../../config/constants');
 const { withTransaction } = require('../../utils/dbHelper');
+const { HttpError } = require('../../middleware/errorHandler');
+const MESSAGES = require('../../config/messages');
 const pricingService = require('../pricing/pricing.service');
 const ledgerService = require('../ledger/ledger.service');
+const { issuePosNumber } = require('../posorder/posNumbering');
 const repository = require('./posbill.repository');
 
 /**
@@ -36,6 +39,14 @@ const normalizeTenders = (data, fallbackTotal) => {
 // Serialize object/array values for JSON columns; pass through strings and null.
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
 
+// A JSON column arrives as an object or as a string depending on the driver
+// config, so every read normalizes rather than assuming one shape.
+const asObject = (v) => {
+  if (!v) return null;
+  if (typeof v === 'object') return v;
+  try { const p = JSON.parse(v); return p && typeof p === 'object' ? p : null; } catch { return null; }
+};
+
 /** Normalizes a discount amount into the shape the pricing engine expects. */
 const asDiscount = (value) => {
   const amount = Number(value);
@@ -60,19 +71,27 @@ class PosBillService extends BaseCRUDService {
    *    from the live tax chain, so editing a tax group cannot retrospectively
    *    change a session that is being settled.
    *
+   * Two kinds of discount meet here and are deliberately kept apart: a per-item
+   * discount attaches to its own line, while the whole-bill discount is spread
+   * across every line by value. Both reduce the taxable base before tax; only
+   * their attribution differs, and that attribution is what makes "which
+   * products do we discount?" answerable later.
+   *
    * @param {Object} conn - Open transaction connection.
    * @param {string[]} orderIds
-   * @param {number} discount
+   * @param {number} discount - Whole-bill discount.
    * @param {string} tenantId
+   * @param {Object} [lineDiscounts] - Per-item, keyed "<orderId>#<lineIndex>".
    * @returns {Promise<Object|null>} { SubTotal, TaxAmount, Discount, Total, TaxByComponent } or null.
    */
-  async recomputeTotals(conn, orderIds, discount, tenantId) {
-    const lines = await repository.getOrderLinesTx(conn, orderIds, tenantId);
+  async recomputeTotals(conn, orderIds, discount, tenantId, lineDiscounts) {
+    const lines = await repository.getOrderLinesTx(conn, orderIds, tenantId, lineDiscounts);
     if (lines.length === 0) return null;
 
-    const { totals } = pricingService.priceSnapshotLines(lines, {
+    const priced = pricingService.priceSnapshotLines(lines, {
       discount: asDiscount(discount),
     });
+    const { totals } = priced;
 
     return {
       SubTotal: totals.netAmount,
@@ -80,7 +99,30 @@ class PosBillService extends BaseCRUDService {
       Discount: totals.discountAmount,
       Total: totals.grossAmount,
       TaxByComponent: totals.taxByComponent,
+      // The priced lines the totals were computed FROM. The ledger stores these
+      // very lines, so a document can always be reconciled against its header.
+      Lines: priced.lines,
     };
+  }
+
+  /**
+   * Refuses to change a bill that has already been posted.
+   *
+   * A posted bill IS an invoice; editing its total or payments afterwards would
+   * make the POS and the ledger disagree with no record of which is right.
+   * Corrections go through a refund.
+   * @param {string} id
+   * @param {string} tenantId
+   */
+  async assertBillMutable(id, tenantId) {
+    const bill = await this.getById(id, tenantId); // 404 if missing
+    if (bill.TransactionDetailLogId) {
+      throw new HttpError(
+        MESSAGES.ERROR.LEDGER_IMMUTABLE,
+        MESSAGES.HTTP_STATUS.CONFLICT,
+      );
+    }
+    return bill;
   }
 
   /**
@@ -94,60 +136,79 @@ class PosBillService extends BaseCRUDService {
    */
   async settle(id, data, tenantId, userEmail) {
     return withTransaction(async (connection) => {
-      const existing = await this.getById(id, tenantId); // 404 if missing
+      // Refuses a bill that is already posted, before any work is done — a
+      // second settle must not be able to issue a second invoice.
+      const existing = await this.assertBillMutable(id, tenantId);
       const discount = data.Discount !== undefined ? data.Discount : existing.Discount;
+      const lineDiscounts = data.LineDiscounts !== undefined
+        ? data.LineDiscounts
+        : asObject(existing.LineDiscounts);
 
       // Re-price against the bill's rounds so a discount entered at settle time
-      // reduces the taxable base. Falls back to the client's Total only when the
-      // bill has no linked orders (e.g. raised before this shipped).
+      // reduces the taxable base.
       const orderIds = await repository.getBillOrderIdsTx(connection, id, tenantId);
-      const recomputed = await this.recomputeTotals(connection, orderIds, discount, tenantId);
-      const total = recomputed
-        ? recomputed.Total
-        : (data.Total !== undefined ? data.Total : existing.Total);
+      const recomputed = await this.recomputeTotals(
+        connection, orderIds, discount, tenantId, lineDiscounts,
+      );
 
-      if (recomputed) {
-        await connection.execute(this.queries.UPDATE_TOTALS, [
-          recomputed.SubTotal, recomputed.TaxAmount, userEmail, id, tenantId,
-        ]);
-      }
-
-      // ── Post to the accounting ledger ──────────────────────────────────
-      // Only when the bill can be recomputed from its rounds: a bill with no
-      // linked orders has no lines to post, and inventing them would be worse
-      // than leaving it out of the ledger.
-      let posted = null;
-      if (recomputed) {
-        const lines = await repository.getLedgerLinesTx(connection, orderIds, tenantId);
-        posted = await ledgerService.postSaleFromBill(
-          connection,
-          {
-            billId: id,
-            totals: recomputed,
-            lines,
-            tenders: normalizeTenders(data, total),
-            posCustomerId: await repository.getSessionCustomerIdTx(connection, orderIds, tenantId),
-            branchId: existing.BranchDetailId,
-          },
-          tenantId,
-          userEmail,
+      // Every settle posts a document. A bill with no priced lines cannot be
+      // posted, and settling it anyway would put money in the POS that the
+      // ledger has never heard of — so it is refused instead.
+      if (!recomputed) {
+        throw new HttpError(
+          MESSAGES.ERROR.LEDGER_BILL_NOT_POSTABLE,
+          MESSAGES.HTTP_STATUS.BAD_REQUEST,
         );
       }
+
+      await connection.execute(this.queries.UPDATE_TOTALS, [
+        recomputed.SubTotal, recomputed.TaxAmount, userEmail, id, tenantId,
+      ]);
+
+      // ── Post to the accounting ledger ──────────────────────────────────
+      const lines = await repository.toLedgerLinesTx(connection, recomputed.Lines, tenantId);
+      const posted = await ledgerService.postSaleFromBill(
+        connection,
+        {
+          billId: id,
+          totals: recomputed,
+          lines,
+          tenders: normalizeTenders(data, recomputed.Total),
+          posCustomerId: await repository.getSessionCustomerIdTx(connection, orderIds, tenantId),
+          branchId: existing.BranchDetailId,
+        },
+        tenantId,
+        userEmail,
+      );
 
       await connection.execute(this.queries.SETTLE, [
         toJson(data.Payments ?? data.Tenders),
         discount,
-        posted ? posted.payable : total,
+        toJson(lineDiscounts),
+        posted.payable,
         // A part-tendered bill stays open — "paid" would be a lie.
-        posted && posted.balanceDue > 0 ? 'partially_paid' : 'paid',
+        posted.balanceDue > 0 ? POS_BILL_STATUS.PARTIALLY_PAID : POS_BILL_STATUS.PAID,
         userEmail,
         id,
         tenantId,
       ]);
 
-      const bill = await this.getById(id, tenantId);
-      return posted ? { ...bill, ...posted } : bill;
+      // Read back on the transaction's own connection, or the caller gets the
+      // bill as it looked BEFORE it was settled.
+      const bill = await this.getByIdTx(connection, id, tenantId);
+      return { ...bill, ...posted };
     });
+  }
+
+  /** A posted bill is corrected by refund, never by editing or deleting. */
+  async update(id, data, tenantId, userEmail) {
+    await this.assertBillMutable(id, tenantId);
+    return super.update(id, data, tenantId, userEmail);
+  }
+
+  async delete(id, tenantId) {
+    await this.assertBillMutable(id, tenantId);
+    return super.delete(id, tenantId);
   }
 
   /**
@@ -162,17 +223,28 @@ class PosBillService extends BaseCRUDService {
       ? data.OrderIds
       : [data.OrderId].filter(Boolean);
 
-    if (orderIds.length === 0) return super.create(data, tenantId, userEmail);
+    // BillNo is NOT NULL and is now server-issued, so even a bill covering no
+    // rounds has to go through the numbering transaction.
+    if (orderIds.length === 0) {
+      return withTransaction(async (connection) => {
+        const BillNo = await issuePosNumber(connection, 'POS_BILL', 'BILL', tenantId, userEmail);
+        return this.createTx(connection, { ...data, BillNo }, tenantId, userEmail);
+      });
+    }
 
     return withTransaction(async (connection) => {
       const id = uuidv4();
       const recomputed = await this.recomputeTotals(
-        connection, orderIds, data.Discount, tenantId,
+        connection, orderIds, data.Discount, tenantId, data.LineDiscounts,
       );
 
       const row = recomputed
         ? { ...data, ...recomputed, OrderId: data.OrderId || orderIds[0] }
         : { ...data, OrderId: data.OrderId || orderIds[0] };
+      // BillNo comes from the POS_BILL series, not from the client, which minted
+      // it from the last 6 digits of Date.now() — a value that wraps every
+      // ~16m40s and then collides with UNIQUE (BillNo, TenantId).
+      row.BillNo = await issuePosNumber(connection, 'POS_BILL', 'BILL', tenantId, userEmail);
       // TaxByComponent is a computed footer, not a column.
       delete row.TaxByComponent;
       delete row.OrderIds;
@@ -205,7 +277,7 @@ class PosBillService extends BaseCRUDService {
         return { ...bill, OrderIds: bill.OrderId ? [bill.OrderId] : [], TaxByComponent: [] };
       }
       const recomputed = await this.recomputeTotals(
-        connection, orderIds, bill.Discount, tenantId,
+        connection, orderIds, bill.Discount, tenantId, asObject(bill.LineDiscounts),
       );
       return {
         ...bill,
@@ -224,6 +296,7 @@ class PosBillService extends BaseCRUDService {
       data.SubTotal !== undefined ? data.SubTotal : 0,
       data.TaxAmount !== undefined ? data.TaxAmount : 0,
       data.Discount !== undefined ? data.Discount : 0,
+      toJson(data.LineDiscounts),
       data.Total !== undefined ? data.Total : 0,
       toJson(data.Payments),
       data.Status ?? null,
@@ -242,6 +315,8 @@ class PosBillService extends BaseCRUDService {
       data.SubTotal !== undefined ? data.SubTotal : existing.SubTotal,
       data.TaxAmount !== undefined ? data.TaxAmount : existing.TaxAmount,
       data.Discount !== undefined ? data.Discount : existing.Discount,
+      data.LineDiscounts !== undefined
+        ? toJson(data.LineDiscounts) : toJson(existing.LineDiscounts),
       data.Total !== undefined ? data.Total : existing.Total,
       data.Payments !== undefined ? toJson(data.Payments) : toJson(existing.Payments),
       data.Status !== undefined ? data.Status : existing.Status,

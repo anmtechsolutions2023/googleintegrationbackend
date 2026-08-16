@@ -27,16 +27,22 @@ const USER = 'cashier@test.com';
 const CASH_MODE = 'mode-cash';
 const CARD_MODE = 'mode-card';
 
+const CASH_ACCOUNT = 'acct-cash';
+const BANK_ACCOUNT = 'acct-bank';
+
 const MASTERS = {
   'POS Sale':       [{ Id: 'type-sale', TransactionTypeConfigId: 'cfg-1' }],
+  Expense:          [{ Id: 'type-exp', TransactionTypeConfigId: 'cfg-exp' }],
   DRAFT:            [{ Id: 'st-draft', Name: 'DRAFT' }],
   SETTLED:          [{ Id: 'st-settled', Name: 'SETTLED' }],
   PARTIALLY_PAID:   [{ Id: 'st-part', Name: 'PARTIALLY_PAID' }],
   REFUNDED:         [{ Id: 'st-refund', Name: 'REFUNDED' }],
-  Sales:            [{ Id: 'acct-sales' }],
+  Sales:            [{ Id: 'acct-sales', Kind: 'INCOME' }],
+  Expenses:         [{ Id: 'acct-expenses', Kind: 'EXPENSE' }],
   Full:             [{ Id: 'rt-full' }],
   Partial:          [{ Id: 'rt-part' }],
   Refund:           [{ Id: 'rt-refund' }],
+  Payment:          [{ Id: 'rt-payment' }],
 };
 
 /** Routes every query the ledger issues; overrides let a test bend one answer. */
@@ -53,7 +59,22 @@ const route = (over = {}) => {
     if (/FROM accounttypebase WHERE Name/i.test(q)) return Promise.resolve([MASTERS[params[0]] || []]);
     if (/FROM paymentreceivedtype WHERE Type/i.test(q)) return Promise.resolve([MASTERS[params[0]] || []]);
     if (/FROM paymentmode WHERE Id/i.test(q)) {
-      return Promise.resolve([[{ Id: params[0], Type: params[0] === CARD_MODE ? 'Card' : 'Cash' }]]);
+      const isCard = params[0] === CARD_MODE;
+      return Promise.resolve([[{
+        Id: params[0],
+        Type: isCard ? 'Card' : 'Cash',
+        // Where the money lands. `unmappedMode` drops it to prove a mode with
+        // no account cannot silently take payments.
+        DefaultAccountTypeBaseId: over.unmappedMode
+          ? null
+          : (isCard ? BANK_ACCOUNT : CASH_ACCOUNT),
+      }]]);
+    }
+    if (/FROM expense_category/i.test(q)) {
+      return Promise.resolve([over.expenseCategory || [{ Id: 'cat-1', Name: 'Gas', AccountTypeBaseId: 'acct-expenses' }]]);
+    }
+    if (/FROM pos_expense/i.test(q)) {
+      return Promise.resolve([[{ TransactionDetailLogId: over.expenseAlreadyPosted || null }]]);
     }
     if (/FROM transactiontypeconfig WHERE Id/i.test(q)) {
       return Promise.resolve([[{ Id: 'cfg-1', StartCounterNo: '1', CurrentCounterNo: over.counter ?? 0, Prefix: 'INV-', Format: 'INV-{0000}' }]]);
@@ -154,9 +175,10 @@ describe('posting a sale', () => {
   it('numbers lines so one item can appear twice with different options', async () => {
     route();
     await ledger.postSaleFromBill(mockConn, BILL({
+      totals: { SubTotal: 230, TaxAmount: 0, Discount: 0, Total: 230, TaxByComponent: [] },
       lines: [
-        { itemDetailId: 'item-1', quantity: 1, unitAmount: 130, variants: [{ id: 'v1', name: 'Large' }], name: 'Dosa' },
-        { itemDetailId: 'item-1', quantity: 1, unitAmount: 100, variants: [], name: 'Dosa' },
+        { itemDetailId: 'item-1', quantity: 1, unitAmount: 130, grossAmount: 130, variants: [{ id: 'v1', name: 'Large' }], name: 'Dosa' },
+        { itemDetailId: 'item-1', quantity: 1, unitAmount: 100, grossAmount: 100, variants: [], name: 'Dosa' },
       ],
     }), TENANT, USER);
 
@@ -167,13 +189,43 @@ describe('posting a sale', () => {
   it('stores the variants on the line', async () => {
     route();
     await ledger.postSaleFromBill(mockConn, BILL({
-      lines: [{ itemDetailId: 'item-1', quantity: 1, unitAmount: 130, basePrice: 100, variantAmount: 30, variants: [{ id: 'v1', name: 'Large', price: 30 }], name: 'Dosa' }],
+      totals: { SubTotal: 130, TaxAmount: 0, Discount: 0, Total: 130, TaxByComponent: [] },
+      lines: [{ itemDetailId: 'item-1', quantity: 1, unitAmount: 130, basePrice: 100, variantAmount: 30, grossAmount: 130, variants: [{ id: 'v1', name: 'Large', price: 30 }], name: 'Dosa' }],
     }), TENANT, USER);
 
-    const params = firstCall(/INSERT INTO transactionitemdetail/i)[1];
-    expect(JSON.parse(params[14])).toEqual([{ id: 'v1', name: 'Large', price: 30 }]);
-    expect(params[8]).toBe(100);  // BasePrice
-    expect(params[9]).toBe(30);   // VariantAmount
+    // Bound by column name rather than position — the line INSERT gains columns
+    // over time, and a bare index silently starts asserting the wrong one.
+    const [sql, params] = firstCall(/INSERT INTO transactionitemdetail/i);
+    const at = (col) => params[
+      sql.slice(sql.indexOf('('), sql.indexOf(')'))
+        .replace(/[()\s]/g, '')
+        .split(',')
+        .indexOf(col)
+    ];
+
+    expect(JSON.parse(at('Variants'))).toEqual([{ id: 'v1', name: 'Large', price: 30 }]);
+    expect(at('BasePrice')).toBe(100);
+    expect(at('VariantAmount')).toBe(30);
+  });
+
+  it('records the item discount separately from the bill’s share', async () => {
+    // "We discounted this dish" and "this dish absorbed part of a bill discount"
+    // are different facts. Merged, "which products do we discount?" cannot be
+    // answered at all.
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL({
+      totals: { SubTotal: 80, TaxAmount: 0, Discount: 20, Total: 80, TaxByComponent: [] },
+      lines: [{
+        itemDetailId: 'item-1', quantity: 1, unitAmount: 100, grossAmount: 80,
+        discountAmount: 20, itemDiscountAmount: 15, name: 'Dosa',
+      }],
+    }), TENANT, USER);
+
+    const [sql, params] = firstCall(/INSERT INTO transactionitemdetail/i);
+    const cols = sql.slice(sql.indexOf('('), sql.indexOf(')')).replace(/[()\s]/g, '').split(',');
+
+    expect(params[cols.indexOf('DiscountAmount')]).toBe(20);
+    expect(params[cols.indexOf('ItemDiscountAmount')]).toBe(15);
   });
 
   it('writes one tender row per payment, each with its own instrument', async () => {
@@ -355,5 +407,167 @@ describe('refund — reversal, never deletion', () => {
     route({ log: [] });
     await expect(ledger.refundSale(mockConn, 'nope', null, TENANT, USER))
       .rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+describe('line integrity — a document must itemise everything it charges for', () => {
+  it('refuses a line whose menu item is no longer linked to the catalogue', async () => {
+    route();
+    await expect(ledger.postSaleFromBill(mockConn, BILL({
+      lines: [{ itemDetailId: null, quantity: 1, grossAmount: 118, name: 'Ghost Dosa' }],
+    }), TENANT, USER)).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('names the offending item so the cashier can fix it', async () => {
+    route();
+    await expect(ledger.postSaleFromBill(mockConn, BILL({
+      lines: [{ itemDetailId: null, quantity: 1, grossAmount: 118, name: 'Ghost Dosa' }],
+    }), TENANT, USER)).rejects.toThrow(/Ghost Dosa/);
+  });
+
+  it('writes NOTHING when a line cannot be posted', async () => {
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL({
+      lines: [{ itemDetailId: null, quantity: 1, grossAmount: 118, name: 'Ghost' }],
+    }), TENANT, USER).catch(() => {});
+    expect(calls(/INSERT INTO paymentdetail/i)).toHaveLength(0);
+    expect(calls(/INSERT INTO paymentbreakup/i)).toHaveLength(0);
+  });
+
+  it('refuses a document whose lines do not add up to its header', async () => {
+    route();
+    await expect(ledger.postSaleFromBill(mockConn, BILL({
+      totals: { SubTotal: 100, TaxAmount: 18, Discount: 0, Total: 118, TaxByComponent: [] },
+      lines: [{ itemDetailId: 'item-1', quantity: 1, grossAmount: 50, name: 'Dosa' }],
+    }), TENANT, USER)).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('stores the per-line discount that product analytics reports on', async () => {
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL({
+      totals: { SubTotal: 90, TaxAmount: 0, Discount: 10, Total: 90, TaxByComponent: [] },
+      lines: [{ itemDetailId: 'item-1', quantity: 1, unitAmount: 100, netAmount: 90, discountAmount: 10, grossAmount: 90, name: 'Dosa' }],
+    }), TENANT, USER);
+    expect(firstCall(/INSERT INTO transactionitemdetail/i)[1][11]).toBe(10);
+  });
+});
+
+describe('account attribution — where the money actually landed', () => {
+  it('books a cash tender to the Cash account, not to Sales', async () => {
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL(), TENANT, USER);
+    expect(firstCall(/INSERT INTO paymentbreakup/i)[1][2]).toBe(CASH_ACCOUNT);
+  });
+
+  it('books a card tender to the Bank account', async () => {
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL({
+      tenders: [{ paymentModeId: CARD_MODE, amount: 118, refNo: 'AUTH-9' }],
+    }), TENANT, USER);
+    expect(firstCall(/INSERT INTO paymentbreakup/i)[1][2]).toBe(BANK_ACCOUNT);
+  });
+
+  it('still books the income side to Sales', async () => {
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL(), TENANT, USER);
+    expect(firstCall(/INSERT INTO paymentdetail/i)[1][2]).toBe('acct-sales');
+  });
+
+  it('refuses a payment mode with no account mapped', async () => {
+    route({ unmappedMode: true });
+    await expect(ledger.postSaleFromBill(mockConn, BILL(), TENANT, USER))
+      .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('splits a mixed settlement across the accounts it landed in', async () => {
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL({
+      tenders: [
+        { paymentModeId: CASH_MODE, amount: 100 },
+        { paymentModeId: CARD_MODE, amount: 18, refNo: 'AUTH-1' },
+      ],
+    }), TENANT, USER);
+    const accounts = calls(/INSERT INTO paymentbreakup/i).map(([, p]) => p[2]);
+    expect(accounts).toEqual([CASH_ACCOUNT, BANK_ACCOUNT]);
+  });
+});
+
+describe('refund — the POS side must not disagree', () => {
+  const SETTLED_LOG = { log: [{ Id: 'log-1', TransactionTypeConfigId: 'cfg-1', SettledAt: new Date() }] };
+
+  it('marks the linked bill refunded in the same transaction', async () => {
+    route(SETTLED_LOG);
+    await ledger.refundSale(mockConn, 'log-1', 'spoiled', TENANT, USER);
+    const call = firstCall(/UPDATE pos_bill SET Status/i);
+    expect(call).toBeDefined();
+    expect(call[1][0]).toBe('refunded');
+  });
+
+  it('reverses money out of the account it went into', async () => {
+    route({
+      ...SETTLED_LOG,
+      paymentDetail: [{ Id: 'pd-1' }],
+      breakups: [{ Amount: 118, AccountTypeBaseId: CASH_ACCOUNT, PaymentModeId: CASH_MODE }],
+    });
+    await ledger.refundSale(mockConn, 'log-1', null, TENANT, USER);
+    const breakup = firstCall(/INSERT INTO paymentbreakup/i)[1];
+    expect(breakup[2]).toBe(CASH_ACCOUNT);
+    expect(breakup[6]).toBe(-118);
+  });
+});
+
+describe('expenses — money out, in the same ledger', () => {
+  const EXPENSE = (over = {}) => ({
+    expenseId: 'exp-1',
+    amount: 500,
+    categoryId: 'cat-1',
+    paymentModeId: CASH_MODE,
+    description: 'LPG cylinder',
+    branchId: 'branch-1',
+    expenseDate: '2026-08-01',
+    ...over,
+  });
+
+  it('posts a numbered document', async () => {
+    route();
+    const result = await ledger.postExpense(mockConn, EXPENSE(), TENANT, USER);
+    expect(calls(/INSERT INTO transactiondetaillog/i)).toHaveLength(1);
+    expect(result.transactionNo).toBeTruthy();
+  });
+
+  it('writes a NEGATIVE tender — this is what makes cash flow one query', async () => {
+    route();
+    await ledger.postExpense(mockConn, EXPENSE(), TENANT, USER);
+    expect(firstCall(/INSERT INTO paymentbreakup/i)[1][6]).toBe(-500);
+  });
+
+  it('takes the money out of the account it was paid from', async () => {
+    route();
+    await ledger.postExpense(mockConn, EXPENSE(), TENANT, USER);
+    expect(firstCall(/INSERT INTO paymentbreakup/i)[1][2]).toBe(CASH_ACCOUNT);
+  });
+
+  it('books the cost against the category account', async () => {
+    route();
+    await ledger.postExpense(mockConn, EXPENSE(), TENANT, USER);
+    expect(firstCall(/INSERT INTO paymentdetail/i)[1][2]).toBe('acct-expenses');
+  });
+
+  it('writes no item lines — the category is the analysis axis', async () => {
+    route();
+    await ledger.postExpense(mockConn, EXPENSE(), TENANT, USER);
+    expect(calls(/INSERT INTO transactionitemdetail/i)).toHaveLength(0);
+  });
+
+  it('refuses to post the same expense twice', async () => {
+    route({ expenseAlreadyPosted: 'log-existing' });
+    await expect(ledger.postExpense(mockConn, EXPENSE(), TENANT, USER))
+      .rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('numbers expenses off their OWN series, not the sales series', async () => {
+    route();
+    await ledger.postExpense(mockConn, EXPENSE(), TENANT, USER);
+    expect(firstCall(/FROM transactiontypeconfig WHERE Id/i)[1][0]).toBe('cfg-exp');
   });
 });

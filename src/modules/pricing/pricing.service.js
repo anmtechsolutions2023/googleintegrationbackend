@@ -168,6 +168,11 @@ const priceLines = async (lines, tenantId, options = {}) => {
       // a second lookup, and so an order stores what was actually charged.
       variants: p.selectedVariants,
       ...breakdown,
+      // Kept apart so a bill can show "₹20 off this dish" separately from
+      // "this dish's share of the 10% off the bill". `discountAmount` remains
+      // the total borne by the line.
+      itemDiscountAmount: fromMinor(p.lineDiscountMinor),
+      billDiscountAmount: fromMinor(perLineDocDiscount[index]),
     };
   });
 
@@ -217,7 +222,17 @@ const priceSnapshotLines = (lines, options = {}) => {
         ? { type: 'amount', value: fromMinor(totalDiscountMinor) }
         : null,
     });
-    return { ...p.line, ...breakdown };
+    return {
+      ...p.line,
+      ...breakdown,
+      // The two kinds of discount are reported separately — "we discounted this
+      // dish" and "this dish absorbed part of a bill discount" are different
+      // facts, and merging them makes it impossible to answer which products we
+      // actually give away. `discountAmount` (from computeTax) stays the total
+      // borne by the line, so the SUM(line) = document invariant is untouched.
+      itemDiscountAmount: fromMinor(p.lineDiscountMinor),
+      billDiscountAmount: fromMinor(perLineDocDiscount[index]),
+    };
   });
 
   return { lines: pricedLines, totals: sumLines(pricedLines) };

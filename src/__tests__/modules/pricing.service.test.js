@@ -227,6 +227,43 @@ describe('priceLines — discounts apply before tax', () => {
     expect(lines[1].discountAmount).toBe(10);
   });
 
+  // "We discounted this dish" and "this dish absorbed part of a bill discount"
+  // are different business facts. Merged into one figure, the first — which is
+  // the one a manager actually decides — becomes unrecoverable.
+  it('reports the item discount separately from the bill’s share', async () => {
+    const { lines } = await service.priceLines(
+      [
+        { costInfoId: CI_100, quantity: 1, discount: { type: 'amount', value: 20 } },
+        { costInfoId: CI_50, quantity: 1 },
+      ],
+      TENANT,
+      { discount: { type: 'amount', value: 26 } },
+    );
+
+    expect(lines[0].itemDiscountAmount).toBe(20);
+    expect(lines[0].billDiscountAmount).toBe(16);
+    // Line 2 was never discounted on its own, only by the bill.
+    expect(lines[1].itemDiscountAmount).toBe(0);
+    expect(lines[1].billDiscountAmount).toBe(10);
+  });
+
+  it('keeps the split adding back up to the line total', async () => {
+    const { lines, totals } = await service.priceLines(
+      [
+        { costInfoId: CI_100, quantity: 1, discount: { type: 'percent', value: 10 } },
+        { costInfoId: CI_50, quantity: 1 },
+      ],
+      TENANT,
+      { discount: { type: 'amount', value: 7 } },
+    );
+
+    lines.forEach((l) => {
+      expect(l.itemDiscountAmount + l.billDiscountAmount).toBeCloseTo(l.discountAmount, 2);
+    });
+    const summed = lines.reduce((s, l) => s + l.discountAmount, 0);
+    expect(summed).toBeCloseTo(totals.discountAmount, 2);
+  });
+
   it('caps a document discount at the document value', async () => {
     const { totals } = await service.priceLines(
       [{ costInfoId: CI_100, quantity: 1 }],
@@ -371,6 +408,50 @@ describe('priceLines — per-line rounding policy', () => {
     );
     const lineSum = lines.reduce((s, l) => s + l.taxAmount, 0);
     expect(Number(lineSum.toFixed(2))).toBe(totals.taxAmount);
+  });
+});
+
+// This is the path a bill actually settles through: rounds are re-priced from
+// the snapshot each order stored, never from the live tax chain.
+describe('priceSnapshotLines — per-item discount on a bill', () => {
+  const snap = (over = {}) => ({
+    unitAmount: 100,
+    quantity: 1,
+    isTaxIncluded: false,
+    components: [{ name: 'CGST', rate: 9 }, { name: 'SGST', rate: 9 }],
+    ...over,
+  });
+
+  it('applies a per-item discount before tax', () => {
+    const { lines } = service.priceSnapshotLines([
+      snap({ discount: { type: 'amount', value: 20 } }),
+    ]);
+    // Taxed on 80, not on 100.
+    expect(lines[0].netAmount).toBe(80);
+    expect(lines[0].taxAmount).toBe(14.4);
+    expect(lines[0].itemDiscountAmount).toBe(20);
+  });
+
+  it('leaves an undiscounted line alone', () => {
+    const { lines } = service.priceSnapshotLines([snap(), snap({ unitAmount: 50 })]);
+    lines.forEach((l) => {
+      expect(l.itemDiscountAmount).toBe(0);
+      expect(l.billDiscountAmount).toBe(0);
+    });
+  });
+
+  it('combines a per-item and a whole-bill discount, keeping them distinguishable', () => {
+    const { lines, totals } = service.priceSnapshotLines(
+      [snap({ discount: { type: 'amount', value: 20 } }), snap({ unitAmount: 50 })],
+      { discount: { type: 'amount', value: 26 } },
+    );
+
+    expect(lines[0].itemDiscountAmount).toBe(20);
+    expect(lines[1].itemDiscountAmount).toBe(0);
+    // The bill's 26 is spread by value: 80 and 50 out of 130.
+    expect(lines[0].billDiscountAmount + lines[1].billDiscountAmount).toBeCloseTo(26, 2);
+    // And the document still reconciles against its own lines.
+    expect(totals.discountAmount).toBeCloseTo(46, 2);
   });
 });
 

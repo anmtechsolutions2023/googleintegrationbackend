@@ -2,13 +2,26 @@
 // Joi validation schemas for POS Order operations.
 
 const Joi = require('joi');
+const { POS_ORDER_STATUSES, POS_ORDER_TYPES } = require('../../config/constants');
 
+// Canonical lowercase enums, normalized on write. Status and OrderType were both
+// free-text before, which is how 'Active'/'open' and 'Dine-in'/'dinein' ended up
+// coexisting in the same column.
+const statusField = Joi.string().lowercase().valid(...POS_ORDER_STATUSES);
+const orderTypeField = Joi.string().lowercase().valid(...POS_ORDER_TYPES);
+
+// OrderNo is issued server-side from the POS_ORDER numbering series. The client
+// used to generate it from the last 6 digits of Date.now(), which wrapped every
+// ~16m40s and collided with UNIQUE (OrderNo, TenantId). Any value sent is ignored.
 const createSchema = Joi.object({
-  OrderNo: Joi.string().required().max(50).allow(null).trim(),
+  OrderNo: Joi.string().optional().max(50).allow(null, '').trim(),
   TableId: Joi.string().uuid().optional().allow(null),
   CustomerId: Joi.string().uuid().optional().allow(null),
-  OrderType: Joi.string().optional().max(20).allow(null, '').trim(),
-  Status: Joi.string().optional().max(20).allow(null, '').trim(),
+  OrderType: orderTypeField.optional().allow(null, '').default('dinein'),
+  // A round is born open — the client does not choose this. Both columns are
+  // NOT NULL, so an omitted Status has to resolve to a value before it reaches
+  // the INSERT (see prepareInsertParams).
+  Status: statusField.optional().allow(null, '').default('open'),
   Items: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   SubTotal: Joi.number().optional().default(0).allow(null),
   TaxAmount: Joi.number().optional().default(0).allow(null),
@@ -21,8 +34,8 @@ const updateSchema = Joi.object({
   OrderNo: Joi.string().optional().max(50).allow(null, '').trim(),
   TableId: Joi.string().uuid().optional().allow(null),
   CustomerId: Joi.string().uuid().optional().allow(null),
-  OrderType: Joi.string().optional().max(20).allow(null, '').trim(),
-  Status: Joi.string().optional().max(20).allow(null, '').trim(),
+  OrderType: orderTypeField.optional().allow(null, ''),
+  Status: statusField.optional().allow(null, ''),
   Items: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   SubTotal: Joi.number().optional().allow(null),
   TaxAmount: Joi.number().optional().allow(null),
@@ -31,9 +44,17 @@ const updateSchema = Joi.object({
   Active: Joi.boolean().optional(),
 }).min(1);
 
+// Both filters are optional, and omitting them yields the original unfiltered
+// list — existing callers are unaffected.
 const paginationSchema = Joi.object({
   page: Joi.number().integer().min(1).optional().default(1),
   limit: Joi.number().integer().min(1).max(100).optional().default(10),
+  // One table's rounds. Lets Billing resume an occupied table's session without
+  // pulling and locally filtering the whole (page-capped) order list.
+  tableId: Joi.string().uuid().optional(),
+  // Only rounds still part of a live session — a settled table must not look
+  // occupied just because it traded earlier today.
+  openOnly: Joi.boolean().optional().default(false),
 });
 
 const uuidParamSchema = Joi.object({

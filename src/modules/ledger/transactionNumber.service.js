@@ -80,4 +80,35 @@ const issueNumber = async (conn, transactionTypeConfigId, tenantId, userEmail) =
   return { transactionNo: formatNumber(config, next), counter: next };
 };
 
-module.exports = { issueNumber, formatNumber };
+/**
+ * Issues the next number for a series addressed by its TagName.
+ *
+ * Financial documents know their config id already. Operational documents
+ * (orders, KOTs, bills) only know which series they belong to, so they look it
+ * up by tag. Returns `null` when the tenant has no such series — the caller
+ * decides whether that is fatal. It must not be for a sale: a missing master row
+ * is a provisioning gap, and wedging the till over it would be worse than the
+ * gap itself.
+ *
+ * MUST be called with an open transaction connection — see issueNumber.
+ *
+ * @param {Object} conn - Open transaction connection.
+ * @param {string} tagName - e.g. 'POS_ORDER', 'POS_KOT', 'POS_BILL'.
+ * @param {string} tenantId
+ * @param {string} userEmail
+ * @returns {Promise<string|null>} The rendered number, or null if unconfigured.
+ */
+const issueByTag = async (conn, tagName, tenantId, userEmail) => {
+  const [rows] = await conn.execute(QUERIES.LEDGER.SELECT_CONFIG_BY_TAG, [
+    tagName,
+    tenantId,
+  ]);
+  // Anything other than a row with an Id means "no series here" — treated the
+  // same as a miss. This runs on the sale path, so an unexpected result shape
+  // must degrade to the caller's fallback rather than throw.
+  if (!Array.isArray(rows) || rows.length === 0 || !rows[0]?.Id) return null;
+  const { transactionNo } = await issueNumber(conn, rows[0].Id, tenantId, userEmail);
+  return transactionNo;
+};
+
+module.exports = { issueNumber, issueByTag, formatNumber };

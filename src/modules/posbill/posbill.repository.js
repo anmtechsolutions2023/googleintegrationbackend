@@ -58,18 +58,25 @@ const getBillOrderIdsTx = async (conn, billId, tenantId) => {
  * @param {string} tenantId
  * @returns {Promise<Array<Object>>} Lines shaped for pricing.priceSnapshotLines.
  */
-const getOrderLinesTx = async (conn, orderIds, tenantId) => {
+const getOrderLinesTx = async (conn, orderIds, tenantId, lineDiscounts = null) => {
   const ids = [...new Set((orderIds || []).filter(Boolean))];
   if (ids.length === 0) return [];
 
   const sql = expandIds(QUERIES.POS_BILL_ORDER.SELECT_ORDER_ITEMS, ids.length);
   const [rows] = await conn.execute(sql, [tenantId, ...ids]);
 
+  // Per-item discounts live on the BILL, keyed "<orderId>#<lineIndex>" — the
+  // same ref the settle quote builds. The round itself records only what was
+  // ordered; what was taken off it is the document's decision.
+  const discounts = lineDiscounts && typeof lineDiscounts === 'object' ? lineDiscounts : {};
+
   const lines = [];
   rows.forEach((row) => {
-    asArray(row.Items).forEach((item) => {
+    asArray(row.Items).forEach((item, index) => {
       lines.push({
         orderId: row.Id,
+        ref: `${row.Id}#${index}`,
+        discount: discounts[`${row.Id}#${index}`] || null,
         id: item.id ?? item.Id ?? null,
         name: item.name ?? null,
         costInfoId: item.costInfoId ?? null,
@@ -92,19 +99,24 @@ const getOrderLinesTx = async (conn, orderIds, tenantId) => {
 };
 
 /**
- * The bill's lines shaped for the ledger.
+ * Shapes already-PRICED bill lines for the ledger.
+ *
+ * Takes the output of `pricing.priceSnapshotLines` rather than re-reading the
+ * orders, because the amounts the ledger stores must be the very ones the bill
+ * total was computed from. Reading the raw order lines here instead would leave
+ * every ledger line with no net/tax/gross at all, and no document could then
+ * reconcile against its own header.
  *
  * Ledger lines reference the MASTER item (`itemdetail`), not the POS menu row,
- * so each line's `pos_item_meta.Id` is resolved to its `ItemDetailId`. Everything
- * else is the snapshot the order already stored — this never re-prices.
+ * so each line's `pos_item_meta.Id` is resolved to its `ItemDetailId`.
  *
  * @param {Object} conn
- * @param {string[]} orderIds
+ * @param {Array<Object>} pricedLines - From pricing.priceSnapshotLines().lines
  * @param {string} tenantId
  * @returns {Promise<Array<Object>>}
  */
-const getLedgerLinesTx = async (conn, orderIds, tenantId) => {
-  const lines = await getOrderLinesTx(conn, orderIds, tenantId);
+const toLedgerLinesTx = async (conn, pricedLines, tenantId) => {
+  const lines = Array.isArray(pricedLines) ? pricedLines : [];
   if (lines.length === 0) return [];
 
   const metaIds = [...new Set(lines.map((l) => l.id).filter(Boolean))];
@@ -128,6 +140,13 @@ const getLedgerLinesTx = async (conn, orderIds, tenantId) => {
     variantAmount: l.variantAmount,
     variants: l.variants,
     netAmount: l.netAmount,
+    // The line's own discount plus its share of the bill discount, already
+    // apportioned by the pricing engine.
+    discountAmount: l.discountAmount,
+    // Of that, the part given on this dish specifically. Kept apart so reports
+    // can answer "which products do we discount?" rather than only "what did
+    // this line absorb?".
+    itemDiscountAmount: l.itemDiscountAmount ?? 0,
     taxAmount: l.taxAmount,
     grossAmount: l.grossAmount,
     taxComponents: l.components,
@@ -159,7 +178,7 @@ module.exports = {
   setBillOrdersTx,
   getBillOrderIdsTx,
   getOrderLinesTx,
-  getLedgerLinesTx,
+  toLedgerLinesTx,
   getSessionCustomerIdTx,
   asArray,
 };

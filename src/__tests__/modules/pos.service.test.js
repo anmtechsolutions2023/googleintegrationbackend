@@ -146,6 +146,15 @@ POS_MODULES.forEach(({ name, servicePath, exports: ex, createData, updateData, e
             .resolves.toMatchObject({ deletedOrderId: RECORD_ID });
           return;
         }
+        // Floor-plan rows with trading history are RETIRED, not deleted — the
+        // reports are built on that history. The shared mock answers every
+        // SELECT with a row, so both read as referenced here; the delete-vs-retire
+        // decision itself is covered in retire.test.js.
+        if (name === 'postable' || name === 'posfloor') {
+          await expect(svc[ex.delete](RECORD_ID, TENANT_ID, USER_EMAIL))
+            .resolves.toMatchObject({ id: RECORD_ID, retired: true });
+          return;
+        }
         await expect(svc[ex.delete](RECORD_ID, TENANT_ID)).resolves.toBeUndefined();
       });
 
@@ -211,21 +220,111 @@ describe('POS domain actions', () => {
 
   describe('posbill.settle', () => {
     const svc = require('../../modules/posbill/posbill.service');
+    const CASH_MODE = 'mode-cash';
 
-    it('settles a bill and returns it', async () => {
-      setupReadWriteMock(mockConnection, { ...billRow, Status: 'paid' });
-      const result = await svc.settle(RECORD_ID, { Payments: [{ mode: 'cash', amount: 100 }] }, TENANT_ID, USER_EMAIL);
+    /**
+     * Settling now posts a full accounting document, so the mock has to answer
+     * the whole chain: bill → its rounds → their priced items → the ledger
+     * masters. A generic "every SELECT returns the bill row" mock cannot express
+     * that, and would only prove that the guard rejects it.
+     */
+    const routeSettle = (over = {}) => {
+      mockConnection.execute.mockImplementation((sql, params = []) => {
+        const q = String(sql);
+        if (/FROM pos_bill\b/i.test(q) || /FROM pos_bill e?\s/i.test(q)) {
+          return Promise.resolve([[{
+            ...billRow,
+            Id: RECORD_ID,
+            Discount: 0,
+            BranchDetailId: 'branch-1',
+            TransactionDetailLogId: over.alreadyPosted || null,
+          }]]);
+        }
+        if (/FROM pos_bill_order/i.test(q)) return Promise.resolve([[{ OrderId: 'order-1' }]]);
+        if (/FROM pos_order/i.test(q)) {
+          return Promise.resolve([[{
+            Id: 'order-1',
+            // One round, one item at 100, no tax components → gross 100.
+            Items: JSON.stringify([{ id: 'meta-1', name: 'Dosa', price: 100, qty: 1, taxComponents: [] }]),
+            CustomerId: null,
+          }]]);
+        }
+        if (/FROM pos_item_meta/i.test(q)) {
+          return Promise.resolve([[{ Id: 'meta-1', ItemDetailId: 'item-1' }]]);
+        }
+        if (/FROM transactiontype WHERE Name/i.test(q)) return Promise.resolve([[{ Id: 'type-sale', TransactionTypeConfigId: 'cfg-1' }]]);
+        if (/FROM transactiontypestatus WHERE Name/i.test(q)) return Promise.resolve([[{ Id: `st-${params[0]}`, Name: params[0] }]]);
+        if (/FROM accounttypebase WHERE Name/i.test(q)) return Promise.resolve([[{ Id: 'acct-sales', Kind: 'INCOME' }]]);
+        if (/FROM paymentreceivedtype WHERE Type/i.test(q)) return Promise.resolve([[{ Id: 'rt-full' }]]);
+        if (/FROM paymentmode WHERE Id/i.test(q)) {
+          return Promise.resolve([[{ Id: params[0], Type: 'Cash', DefaultAccountTypeBaseId: 'acct-cash' }]]);
+        }
+        if (/FROM transactiontypeconfig WHERE Id/i.test(q)) {
+          return Promise.resolve([[{ Id: 'cfg-1', StartCounterNo: '1', CurrentCounterNo: 0, Prefix: 'INV', Format: 'INV-{0000}' }]]);
+        }
+        if (/FROM transactiontypebaseconversion/i.test(q)) return Promise.resolve([[{ Id: 'conv-1' }]]);
+        if (/^\s*SELECT/i.test(q)) return Promise.resolve([[]]);
+        return Promise.resolve([{ affectedRows: 1 }]);
+      });
+    };
+
+    const TENDER = { Tenders: [{ paymentModeId: CASH_MODE, amount: 100 }] };
+
+    it('settles a bill and returns it with its document number', async () => {
+      routeSettle();
+      const result = await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL);
       expect(result).toHaveProperty('Id', RECORD_ID);
+      expect(result.transactionNo).toBe('INV-0001');
     });
 
     it('marks the bill paid via the SETTLE query', async () => {
-      setupReadWriteMock(mockConnection, billRow);
-      await svc.settle(RECORD_ID, { Payments: [{ mode: 'card', amount: 100 }] }, TENANT_ID, USER_EMAIL);
+      routeSettle();
+      await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL);
       const settleCall = mockConnection.execute.mock.calls.find(
         ([sql]) => /UPDATE pos_bill SET Payments/i.test(sql)
       );
       expect(settleCall).toBeDefined();
       expect(settleCall[1]).toContain('paid');
+    });
+
+    it('posts exactly one document, with the bill linked to it', async () => {
+      routeSettle();
+      await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL);
+      const logs = mockConnection.execute.mock.calls.filter(
+        ([sql]) => /INSERT INTO transactiondetaillog/i.test(String(sql))
+      );
+      const links = mockConnection.execute.mock.calls.filter(
+        ([sql]) => /UPDATE pos_bill SET TransactionDetailLogId/i.test(String(sql))
+      );
+      expect(logs).toHaveLength(1);
+      expect(links).toHaveLength(1);
+    });
+
+    it('refuses to settle a bill that is already posted', async () => {
+      routeSettle({ alreadyPosted: 'log-existing' });
+      await expect(svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL))
+        .rejects.toMatchObject({ statusCode: 409 });
+    });
+
+    it('writes no document when the bill is already posted', async () => {
+      routeSettle({ alreadyPosted: 'log-existing' });
+      await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL).catch(() => {});
+      expect(mockConnection.execute.mock.calls.filter(
+        ([sql]) => /INSERT INTO transactiondetaillog/i.test(String(sql))
+      )).toHaveLength(0);
+    });
+
+    it('refuses a bill with no priced lines rather than settling it silently', async () => {
+      // A bill covering no rounds has nothing to itemise. Settling it would put
+      // money in the POS that the ledger never heard of.
+      mockConnection.execute.mockImplementation((sql) => {
+        const q = String(sql);
+        if (/FROM pos_bill\b/i.test(q)) return Promise.resolve([[{ ...billRow, Id: RECORD_ID }]]);
+        if (/^\s*SELECT/i.test(q)) return Promise.resolve([[]]);
+        return Promise.resolve([{ affectedRows: 1 }]);
+      });
+      await expect(svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL))
+        .rejects.toMatchObject({ statusCode: 400 });
     });
 
     it('throws when the bill does not exist', async () => {
@@ -244,8 +343,21 @@ describe('POS domain actions', () => {
   describe('posorder.fireKot', () => {
     const svc = require('../../modules/posorder/posorder.service');
 
+    // fireKot is send-once, so it first asks whether the round already has a
+    // ticket. The generic read/write mock answers every SELECT with the order
+    // row, which would read as "already sent" — answer that one lookup with an
+    // empty set so these cover the send path.
+    const setupUnsent = (row = orderRow) => {
+      setupReadWriteMock(mockConnection, row);
+      const inner = mockConnection.execute.getMockImplementation();
+      mockConnection.execute.mockImplementation((sql, params) =>
+        /SELECT Id, KotNo, Status FROM pos_kot/i.test(String(sql))
+          ? Promise.resolve([[]])
+          : inner(sql, params));
+    };
+
     it('creates a KOT and returns its summary', async () => {
-      setupReadWriteMock(mockConnection, orderRow);
+      setupUnsent();
       const result = await svc.fireKot(RECORD_ID, {}, TENANT_ID, USER_EMAIL);
       expect(result).toHaveProperty('OrderId', RECORD_ID);
       expect(result).toHaveProperty('KotId');
@@ -253,7 +365,7 @@ describe('POS domain actions', () => {
     });
 
     it('inserts into pos_kot and marks the order fired', async () => {
-      setupReadWriteMock(mockConnection, orderRow);
+      setupUnsent();
       await svc.fireKot(RECORD_ID, { KotNo: 'KOT-99' }, TENANT_ID, USER_EMAIL);
       const kotInsert = mockConnection.execute.mock.calls.find(
         ([sql]) => /INSERT INTO pos_kot/i.test(sql)
@@ -269,6 +381,65 @@ describe('POS domain actions', () => {
     it('throws when the order does not exist', async () => {
       setupNotFoundMock(mockConnection);
       await expect(svc.fireKot(RECORD_ID, {}, TENANT_ID, USER_EMAIL)).rejects.toThrow();
+    });
+
+    it('refuses to send a closed round back to the kitchen', async () => {
+      setupReadWriteMock(mockConnection, { ...orderRow, Status: 'closed' });
+      await expect(svc.fireKot(RECORD_ID, {}, TENANT_ID, USER_EMAIL))
+        .rejects.toMatchObject({ statusCode: 409 });
+    });
+  });
+
+  // Placing a round records it; SENDING it to the kitchen is a separate,
+  // deliberate act. A counter-served drink never needs a ticket, and the cashier
+  // decides when an order is complete enough to cook.
+  describe('posorder.create — places the round, does not cook it', () => {
+    const svc = require('../../modules/posorder/posorder.service');
+
+    const kotInserts = () => mockConnection.execute.mock.calls.filter(
+      ([sql]) => /INSERT INTO pos_kot/i.test(String(sql))
+    );
+
+    it('writes no kitchen ticket', async () => {
+      setupInsertMock(mockConnection);
+      await svc.create({ Active: true }, TENANT_ID, USER_EMAIL);
+      expect(kotInserts()).toHaveLength(0);
+    });
+
+    it('leaves the round open, waiting to be sent', async () => {
+      setupInsertMock(mockConnection);
+      const result = await svc.create({ Active: true }, TENANT_ID, USER_EMAIL);
+      expect(result.Status).toBeUndefined();
+    });
+
+    it('ignores an OrderNo sent by the client', async () => {
+      // The client used to mint this from the last 6 digits of Date.now(), which
+      // wraps every ~16m40s and then collides with UNIQUE (OrderNo, TenantId).
+      setupInsertMock(mockConnection);
+      const result = await svc.create(
+        { OrderNo: 'ORD-999999', Active: true }, TENANT_ID, USER_EMAIL,
+      );
+      expect(result.OrderNo).not.toBe('ORD-999999');
+    });
+
+    it('freezes where the round was served', async () => {
+      // Snapshot, not a join: renaming the table or moving it to another floor
+      // must not rewrite where past revenue was earned. See posVenue.js.
+      setupInsertMock(mockConnection);
+      const result = await svc.create(
+        { TableId: 'tbl-1', Active: true }, TENANT_ID, USER_EMAIL,
+      );
+      expect(result).toHaveProperty('TableName');
+      expect(result).toHaveProperty('FloorId');
+      expect(result).toHaveProperty('FloorName');
+      expect(result).toHaveProperty('TableCapacity');
+    });
+
+    it('records no venue for a round with no table', async () => {
+      setupInsertMock(mockConnection);
+      const result = await svc.create({ Active: true }, TENANT_ID, USER_EMAIL);
+      expect(result.TableName).toBeNull();
+      expect(result.FloorId).toBeNull();
     });
   });
 });

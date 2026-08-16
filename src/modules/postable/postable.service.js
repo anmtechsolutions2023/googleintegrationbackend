@@ -3,10 +3,30 @@
 
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
+const { deleteOrRetire } = require('../../common/retire');
 
 class PosTableService extends BaseCRUDService {
   constructor() {
     super('POS Table', QUERIES.POS_TABLE);
+  }
+
+  /**
+   * Remove a table from the floor plan.
+   *
+   * A table that has served orders is retired (Active = 0), not deleted: its
+   * trading history is what the venue reports are built on, and pos_order.TableId
+   * is a FOREIGN KEY that would reject the delete with an opaque error anyway.
+   */
+  async retire(id, tenantId, userEmail) {
+    return deleteOrRetire({
+      table: 'pos_table',
+      entityName: 'POS Table',
+      references: [{ table: 'pos_order', column: 'TableId' }],
+      deleteQuery: this.queries.DELETE,
+      id,
+      tenantId,
+      userEmail,
+    });
   }
 
   prepareInsertParams(id, data, tenantId, userEmail) {
@@ -48,5 +68,5 @@ module.exports = {
   getById: (id, tenantId) => service.getById(id, tenantId),
   create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
   update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
-  remove: (id, tenantId) => service.delete(id, tenantId),
+  remove: (id, tenantId, userEmail) => service.retire(id, tenantId, userEmail),
 };

@@ -23,11 +23,16 @@ const {
 } = require('./posorder.schemas');
 const { logger } = require('../../utils/logger');
 
+// `tableId` narrows the list to one table's rounds — what Billing needs when a
+// cashier selects an occupied table and has to resume its session. Without it
+// the client had to pull the whole (page-capped) order list and filter locally,
+// which silently missed rounds once an outlet passed a page of orders.
+// Omitting the filter keeps the original behaviour exactly.
 const getAll = asyncHandler(async (req, res) => {
   const { tid: tenantId } = req.user;
-  const { page, limit } = req.query;
-  logger.info('PosOrder.getAll called', { tenantId, page, limit });
-  const result = await service.getAll(tenantId, page, limit);
+  const { page, limit, tableId, openOnly } = req.query;
+  logger.info('PosOrder.getAll called', { tenantId, page, limit, tableId, openOnly });
+  const result = await service.getAll(tenantId, page, limit, { tableId, openOnly });
   paginatedResponse(res, result.data, result.pagination, 'POS Orders retrieved successfully');
 });
 

@@ -53,12 +53,20 @@ const update = asyncHandler(async (req, res) => {
   successResponse(res, updated, 'POS Table updated successfully');
 });
 
+// A row with trading history is RETIRED, not deleted — see common/retire.js.
+// The message says which happened, so "it's still in my reports" is expected
+// rather than surprising.
 const deleteById = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId } = req.user;
+  const { tid: tenantId, email: userEmail } = req.user;
   logger.info('PosTable.deleteById called', { id, tenantId });
-  await service.remove(id, tenantId);
-  noContentResponse(res, 'POS Table deleted successfully');
+  const result = await service.remove(id, tenantId, userEmail);
+  noContentResponse(
+    res,
+    result && result.retired
+      ? 'POS Table retired — it has trading history, so it is hidden rather than erased'
+      : 'POS Table deleted successfully',
+  );
 });
 
 module.exports = {

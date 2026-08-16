@@ -566,10 +566,15 @@ module.exports = {
         LEFT JOIN transactiondetaillog tdl ON tid.TransactionDetailLogId = tdl.Id AND tdl.TenantId = tid.TenantId
         LEFT JOIN itemdetail i ON tid.ItemId = i.Id AND i.TenantId = tid.TenantId
         WHERE tid.Id = ? AND tid.TenantId = ?`,
+      // The discount columns are named explicitly rather than left to the DDL
+      // default. This endpoint prices without any discount concept, so the value
+      // is 0 either way on insert — but naming it means an UPDATE carries the
+      // ledger's figure forward instead of depending on the column simply not
+      // being mentioned, which is what the SUM(line) = log invariant rests on.
       INSERT:
-        'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, LineNo, ItemId, Quantity, CostInfoId, UnitPrice, BasePrice, VariantAmount, NetAmount, TaxAmount, GrossAmount, TaxComponents, Variants, Comment, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO transactionitemdetail (Id, TenantId, TransactionDetailLogId, LineNo, ItemId, Quantity, CostInfoId, UnitPrice, BasePrice, VariantAmount, NetAmount, DiscountAmount, ItemDiscountAmount, TaxAmount, GrossAmount, TaxComponents, Variants, Comment, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE transactionitemdetail SET TransactionDetailLogId = ?, LineNo = ?, ItemId = ?, Quantity = ?, CostInfoId = ?, UnitPrice = ?, BasePrice = ?, VariantAmount = ?, NetAmount = ?, TaxAmount = ?, GrossAmount = ?, TaxComponents = ?, Variants = ?, Comment = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE transactionitemdetail SET TransactionDetailLogId = ?, LineNo = ?, ItemId = ?, Quantity = ?, CostInfoId = ?, UnitPrice = ?, BasePrice = ?, VariantAmount = ?, NetAmount = ?, DiscountAmount = ?, ItemDiscountAmount = ?, TaxAmount = ?, GrossAmount = ?, TaxComponents = ?, Variants = ?, Comment = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM transactionitemdetail WHERE Id = ? AND TenantId = ?',
     },
 
@@ -868,8 +873,8 @@ module.exports = {
       SELECT_ALL: 'SELECT * FROM pos_order WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM pos_order WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM pos_order WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_order (Id, TenantId, OrderNo, TableId, CustomerId, OrderType, Status, Items, SubTotal, TaxAmount, Total, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_order SET OrderNo = ?, TableId = ?, CustomerId = ?, OrderType = ?, Status = ?, Items = ?, SubTotal = ?, TaxAmount = ?, Total = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_order (Id, TenantId, OrderNo, TableId, CustomerId, OrderType, Status, Items, SubTotal, TaxAmount, Total, BranchDetailId, TableName, FloorId, FloorName, TableCapacity, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_order SET OrderNo = ?, TableId = ?, CustomerId = ?, OrderType = ?, Status = ?, Items = ?, SubTotal = ?, TaxAmount = ?, Total = ?, BranchDetailId = ?, TableName = ?, FloorId = ?, FloorName = ?, TableCapacity = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_order WHERE Id = ? AND TenantId = ?',
       // Domain action helper: update order status (e.g. after firing a KOT)
       SET_STATUS: 'UPDATE pos_order SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
@@ -890,11 +895,12 @@ module.exports = {
       SELECT_ALL: 'SELECT * FROM pos_bill WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM pos_bill WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM pos_bill WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_bill (Id, TenantId, BillNo, OrderId, SubTotal, TaxAmount, Discount, Total, Payments, Status, SettledAt, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_bill SET BillNo = ?, OrderId = ?, SubTotal = ?, TaxAmount = ?, Discount = ?, Total = ?, Payments = ?, Status = ?, SettledAt = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_bill (Id, TenantId, BillNo, OrderId, SubTotal, TaxAmount, Discount, LineDiscounts, Total, Payments, Status, SettledAt, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_bill SET BillNo = ?, OrderId = ?, SubTotal = ?, TaxAmount = ?, Discount = ?, LineDiscounts = ?, Total = ?, Payments = ?, Status = ?, SettledAt = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_bill WHERE Id = ? AND TenantId = ?',
-      // Domain action: settle a bill (record payments, mark paid)
-      SETTLE: 'UPDATE pos_bill SET Payments = ?, Discount = ?, Total = ?, Status = ?, SettledAt = NOW(), UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      // Domain action: settle a bill (record payments, mark paid). LineDiscounts
+      // moves too — a settle may revise which dishes were discounted.
+      SETTLE: 'UPDATE pos_bill SET Payments = ?, Discount = ?, LineDiscounts = ?, Total = ?, Status = ?, SettledAt = NOW(), UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       // Settle re-prices the bill (discount before tax), so SubTotal/TaxAmount
       // move too — SETTLE alone only carries the payable Total.
       UPDATE_TOTALS:
@@ -929,12 +935,111 @@ module.exports = {
     },
 
     POS_EXPENSE: {
-      SELECT_ALL: 'SELECT * FROM pos_expense WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      SELECT_ALL: `
+        SELECT e.*, ec.Name AS CategoryName, pm.Type AS PaymentMode, l.TransactionNo
+          FROM pos_expense e
+          LEFT JOIN expense_category ec ON ec.Id = e.ExpenseCategoryId
+          LEFT JOIN paymentmode pm      ON pm.Id = e.PaymentModeId
+          LEFT JOIN transactiondetaillog l ON l.Id = e.TransactionDetailLogId
+         WHERE e.TenantId = ? ORDER BY e.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM pos_expense WHERE TenantId = ?',
-      SELECT_BY_ID: 'SELECT * FROM pos_expense WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_expense (Id, TenantId, Category, Description, Amount, ExpenseDate, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_expense SET Category = ?, Description = ?, Amount = ?, ExpenseDate = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID: `
+        SELECT e.*, ec.Name AS CategoryName, pm.Type AS PaymentMode, l.TransactionNo
+          FROM pos_expense e
+          LEFT JOIN expense_category ec ON ec.Id = e.ExpenseCategoryId
+          LEFT JOIN paymentmode pm      ON pm.Id = e.PaymentModeId
+          LEFT JOIN transactiondetaillog l ON l.Id = e.TransactionDetailLogId
+         WHERE e.Id = ? AND e.TenantId = ?`,
+      INSERT:
+        'INSERT INTO pos_expense (Id, TenantId, ExpenseCategoryId, Description, Amount, ExpenseDate, PaymentModeId, Status, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE:
+        'UPDATE pos_expense SET ExpenseCategoryId = ?, Description = ?, Amount = ?, ExpenseDate = ?, PaymentModeId = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_expense WHERE Id = ? AND TenantId = ?',
+      APPROVE:
+        "UPDATE pos_expense SET Status = 'approved', ApprovedBy = ?, ApprovedAt = NOW(), UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?",
+      REJECT:
+        "UPDATE pos_expense SET Status = 'cancelled', UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?",
+    },
+
+    EXPENSE_CATEGORY: {
+      SELECT_ALL: `
+        SELECT ec.*, a.Name AS AccountName FROM expense_category ec
+          LEFT JOIN accounttypebase a ON a.Id = ec.AccountTypeBaseId
+         WHERE ec.TenantId = ? ORDER BY ec.Name ASC`,
+      COUNT: 'SELECT COUNT(*) as total FROM expense_category WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM expense_category WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO expense_category (Id, TenantId, Name, AccountTypeBaseId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE expense_category SET Name = ?, AccountTypeBaseId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM expense_category WHERE Id = ? AND TenantId = ?',
+    },
+
+    ASSET_CATEGORY: {
+      SELECT_ALL: 'SELECT * FROM asset_category WHERE TenantId = ? ORDER BY Name ASC',
+      COUNT: 'SELECT COUNT(*) as total FROM asset_category WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM asset_category WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO asset_category (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE asset_category SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM asset_category WHERE Id = ? AND TenantId = ?',
+    },
+
+    ASSET: {
+      SELECT_ALL: `
+        SELECT a.*, ac.Name AS CategoryName, b.BranchName, c.FirstName AS SupplierFirstName, c.LastName AS SupplierLastName
+          FROM asset a
+          LEFT JOIN asset_category ac ON ac.Id = a.AssetCategoryId
+          LEFT JOIN branchdetail b    ON b.Id = a.BranchDetailId
+          LEFT JOIN contactdetail c   ON c.Id = a.SupplierContactDetailId
+         WHERE a.TenantId = ? ORDER BY a.CreatedOn DESC`,
+      COUNT: 'SELECT COUNT(*) as total FROM asset WHERE TenantId = ?',
+      SELECT_BY_ID: `
+        SELECT a.*, ac.Name AS CategoryName, b.BranchName
+          FROM asset a
+          LEFT JOIN asset_category ac ON ac.Id = a.AssetCategoryId
+          LEFT JOIN branchdetail b    ON b.Id = a.BranchDetailId
+         WHERE a.Id = ? AND a.TenantId = ?`,
+      INSERT:
+        'INSERT INTO asset (Id, TenantId, Name, AssetCategoryId, BranchDetailId, SerialNo, PurchaseDate, PurchaseCost, SupplierContactDetailId, Status, Notes, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE:
+        'UPDATE asset SET Name = ?, AssetCategoryId = ?, BranchDetailId = ?, SerialNo = ?, PurchaseDate = ?, PurchaseCost = ?, SupplierContactDetailId = ?, Status = ?, Notes = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM asset WHERE Id = ? AND TenantId = ?',
+      // Register value by branch and category — the register's reason to exist.
+      SUMMARY_BY_BRANCH: `
+        SELECT b.Id AS BranchDetailId, b.BranchName, ac.Name AS CategoryName,
+               COUNT(*) AS Assets, COALESCE(SUM(a.PurchaseCost), 0) AS PurchaseCost
+          FROM asset a
+          LEFT JOIN branchdetail b    ON b.Id = a.BranchDetailId
+          LEFT JOIN asset_category ac ON ac.Id = a.AssetCategoryId
+         WHERE a.TenantId = ? AND a.Active = 1
+         GROUP BY b.Id, b.BranchName, ac.Name
+         ORDER BY b.BranchName ASC, PurchaseCost DESC`,
+    },
+
+    POS_CASH_SESSION: {
+      SELECT_ALL: `
+        SELECT cs.*, b.BranchName FROM pos_cash_session cs
+          LEFT JOIN branchdetail b ON b.Id = cs.BranchDetailId
+         WHERE cs.TenantId = ? ORDER BY cs.OpenedAt DESC`,
+      COUNT: 'SELECT COUNT(*) as total FROM pos_cash_session WHERE TenantId = ?',
+      SELECT_BY_ID: `
+        SELECT cs.*, b.BranchName FROM pos_cash_session cs
+          LEFT JOIN branchdetail b ON b.Id = cs.BranchDetailId
+         WHERE cs.Id = ? AND cs.TenantId = ?`,
+      INSERT:
+        'INSERT INTO pos_cash_session (Id, TenantId, BranchDetailId, CashierEmail, ShiftLabel, OpeningFloat, OpenedAt, OpenedBy, Status, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, 1, NOW(), ?, ?)',
+      // Only an open session can be closed, and only once: the Status predicate
+      // is the concurrency guard, so a double close updates zero rows.
+      CLOSE: `
+        UPDATE pos_cash_session
+           SET ClosedAt = NOW(), ClosedBy = ?, CountedCash = ?, ExpectedCash = ?,
+               Variance = ?, Notes = ?, Status = 'closed', UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE Id = ? AND TenantId = ? AND Status = 'open'`,
+      // One open till per cashier per branch — enforced here because MySQL
+      // treats every NULL ClosedAt as distinct, so a UNIQUE key cannot say it.
+      SELECT_OPEN_FOR_CASHIER:
+        "SELECT Id FROM pos_cash_session WHERE TenantId = ? AND BranchDetailId = ? AND CashierEmail = ? AND Status = 'open' LIMIT 1",
+      SELECT_OPEN_BY_ID:
+        "SELECT * FROM pos_cash_session WHERE Id = ? AND TenantId = ? AND Status = 'open' LIMIT 1",
+      DELETE: 'DELETE FROM pos_cash_session WHERE Id = ? AND TenantId = ?',
     },
 
     POS_STAFF: {
@@ -1118,11 +1223,13 @@ module.exports = {
       SELECT_TYPE_BY_NAME:
         'SELECT Id, TransactionTypeConfigId FROM transactiontype WHERE Name = ? AND TenantId = ? AND Active = 1 LIMIT 1',
       SELECT_ACCOUNT_BY_NAME:
-        'SELECT Id FROM accounttypebase WHERE Name = ? AND TenantId = ? AND Active = 1 LIMIT 1',
+        'SELECT Id, Kind FROM accounttypebase WHERE Name = ? AND TenantId = ? AND Active = 1 LIMIT 1',
       SELECT_RECEIVED_TYPE_BY_NAME:
         'SELECT Id FROM paymentreceivedtype WHERE Type = ? AND TenantId = ? AND Active = 1 LIMIT 1',
+      // DefaultAccountTypeBaseId is what turns a tender into a cash movement:
+      // it says which account the money landed in.
       SELECT_PAYMENT_MODE:
-        'SELECT Id, Type FROM paymentmode WHERE Id = ? AND TenantId = ? AND Active = 1 LIMIT 1',
+        'SELECT Id, Type, DefaultAccountTypeBaseId FROM paymentmode WHERE Id = ? AND TenantId = ? AND Active = 1 LIMIT 1',
 
       // Status machine: a move is legal only if the whitelist permits it, and
       // every move taken is recorded.
@@ -1171,9 +1278,10 @@ module.exports = {
       INSERT_LINE: `
         INSERT INTO transactionitemdetail
           (Id, TenantId, TransactionDetailLogId, LineNo, ItemId, Quantity, CostInfoId,
-           UnitPrice, BasePrice, VariantAmount, NetAmount, TaxAmount, GrossAmount,
+           UnitPrice, BasePrice, VariantAmount, NetAmount, DiscountAmount, ItemDiscountAmount,
+           TaxAmount, GrossAmount,
            TaxComponents, Variants, Comment, Active, CreatedOn, CreatedBy, UpdatedBy)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
       SELECT_LINES_BY_LOG: `
         SELECT t.*, i.Name AS ItemName
           FROM transactionitemdetail t
@@ -1219,6 +1327,293 @@ module.exports = {
         'SELECT TransactionDetailLogId FROM pos_bill WHERE Id = ? AND TenantId = ?',
       UPDATE_BILL_LEDGER_LINK:
         'UPDATE pos_bill SET TransactionDetailLogId = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      // A refunded document must not leave the POS side claiming 'paid'.
+      UPDATE_BILL_STATUS_BY_LOG:
+        'UPDATE pos_bill SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE TransactionDetailLogId = ? AND TenantId = ?',
+
+      // Expense link (same posting + idempotency shape as the bill)
+      SELECT_EXPENSE_LEDGER_LINK:
+        'SELECT TransactionDetailLogId FROM pos_expense WHERE Id = ? AND TenantId = ?',
+      UPDATE_EXPENSE_LEDGER_LINK:
+        "UPDATE pos_expense SET TransactionDetailLogId = ?, Status = 'settled', UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?",
+      SELECT_EXPENSE_CATEGORY_ACCOUNT: `
+        SELECT ec.Id, ec.Name, ec.AccountTypeBaseId
+          FROM expense_category ec
+         WHERE ec.Id = ? AND ec.TenantId = ? AND ec.Active = 1 LIMIT 1`,
+    },
+
+    // Reporting. Every query here is tenant + date bounded and aggregates in
+    // SQL — the range is never pulled into Node and reduced there.
+    // Date predicates are parameterised; only the bucket expression and the
+    // weekend filter are interpolated, and both come from a fixed whitelist in
+    // utils/dateRange.js, never from request text.
+    LEDGER_REPORT: {
+      // Invoiced vs collected. GrossAmount is what the document says; the
+      // paymentdetail subquery is what was actually taken, and the difference
+      // is the outstanding balance that makes partial payment visible.
+      SALES_SUMMARY: `
+        SELECT
+          COUNT(*)                                AS Documents,
+          COALESCE(SUM(l.NetAmount), 0)           AS NetAmount,
+          COALESCE(SUM(l.TaxAmount), 0)           AS TaxAmount,
+          COALESCE(SUM(l.DiscountAmount), 0)      AS DiscountAmount,
+          COALESCE(SUM(l.RoundOff), 0)            AS RoundOff,
+          COALESCE(SUM(l.GrossAmount), 0)         AS GrossAmount,
+          COALESCE(SUM(p.Collected), 0)           AS Collected,
+          COALESCE(SUM(l.GrossAmount), 0) - COALESCE(SUM(p.Collected), 0) AS Outstanding
+        FROM transactiondetaillog l
+        JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+        JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+        LEFT JOIN (
+          SELECT TransactionDetailLogId, SUM(TotalAmount) AS Collected
+            FROM paymentdetail WHERE TenantId = ? GROUP BY TransactionDetailLogId
+        ) p ON p.TransactionDetailLogId = l.Id
+        WHERE l.TenantId = ? AND t.Name = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+
+      SALES_TREND: `
+        SELECT
+          {{BUCKET}}                              AS Bucket,
+          COUNT(*)                                AS Documents,
+          COALESCE(SUM(l.GrossAmount), 0)         AS GrossAmount,
+          COALESCE(SUM(l.DiscountAmount), 0)      AS DiscountAmount,
+          COALESCE(SUM(l.TaxAmount), 0)           AS TaxAmount
+        FROM transactiondetaillog l
+        JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+        JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+        WHERE l.TenantId = ? AND t.Name = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+        GROUP BY Bucket ORDER BY Bucket ASC`,
+
+      // Product performance. Quantity, revenue and discount come from the line
+      // snapshots, so a renamed or repriced item cannot rewrite history.
+      PRODUCT_SALES: `
+        SELECT
+          ti.ItemId,
+          i.Name                                  AS ItemName,
+          c.Name                                  AS CategoryName,
+          COALESCE(SUM(ti.Quantity), 0)           AS QuantitySold,
+          COALESCE(SUM(ti.NetAmount), 0)          AS NetAmount,
+          COALESCE(SUM(ti.DiscountAmount), 0)     AS DiscountAmount,
+          COALESCE(SUM(ti.TaxAmount), 0)          AS TaxAmount,
+          COALESCE(SUM(ti.GrossAmount), 0)        AS GrossAmount,
+          COUNT(DISTINCT ti.TransactionDetailLogId) AS Documents
+        FROM transactionitemdetail ti
+        JOIN transactiondetaillog l  ON l.Id = ti.TransactionDetailLogId
+        JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+        LEFT JOIN itemdetail i       ON i.Id = ti.ItemId
+        LEFT JOIN categorydetail c   ON c.Id = i.CategoryId
+        WHERE ti.TenantId = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+
+      // Revenue by floor and table.
+      //
+      // The ledger has no idea what a table is, so this walks BACKWARDS to find
+      // out: document ← pos_bill ← pos_bill_order → pos_order, and reads the
+      // venue SNAPSHOT frozen on the round (see modules/posorder/posVenue.js) so
+      // renaming a table or moving it between floors cannot rewrite history.
+      //
+      // A bill can cover several rounds, possibly on different tables, so that
+      // join fans out and a naive SUM(l.GrossAmount) would count one document
+      // once per round. Each document's amounts are therefore APPORTIONED across
+      // its rounds by the round's share of the bill (o.Total / SUM(o.Total)) —
+      // the same principle the pricing engine uses to spread a discount. The
+      // consequence that matters: this report's total ties back to the sales
+      // report exactly, instead of being a plausible but different number.
+      //
+      // Derived table rather than a window function: nothing else in this
+      // codebase needs one, and a single report is a poor reason to take a
+      // dependency on the server's MySQL version.
+      VENUE_REVENUE: `
+        SELECT
+          o.FloorId                                     AS FloorId,
+          COALESCE(o.FloorName, 'Unassigned')           AS FloorName,
+          o.TableId                                     AS TableId,
+          COALESCE(o.TableName, 'No table')             AS TableName,
+          MAX(o.TableCapacity)                          AS Capacity,
+          COUNT(DISTINCT o.Id)                          AS Orders,
+          COUNT(DISTINCT l.Id)                          AS Bills,
+          COALESCE(SUM(l.NetAmount      * o.Total / bt.BillTotal), 0) AS NetAmount,
+          COALESCE(SUM(l.DiscountAmount * o.Total / bt.BillTotal), 0) AS DiscountAmount,
+          COALESCE(SUM(l.TaxAmount      * o.Total / bt.BillTotal), 0) AS TaxAmount,
+          COALESCE(SUM(l.GrossAmount    * o.Total / bt.BillTotal), 0) AS GrossAmount
+        FROM transactiondetaillog l
+        JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+        JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+        JOIN pos_bill b        ON b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId
+        JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
+        JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+        JOIN (
+          SELECT bo2.BillId AS BillId, SUM(o2.Total) AS BillTotal
+            FROM pos_bill_order bo2
+            JOIN pos_order o2 ON o2.Id = bo2.OrderId AND o2.TenantId = bo2.TenantId
+           WHERE bo2.TenantId = ?
+           GROUP BY bo2.BillId
+        ) bt ON bt.BillId = b.Id AND bt.BillTotal > 0
+        WHERE l.TenantId = ? AND t.Name = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+
+      // How much we gave away, per product, split by WHY.
+      // ItemDiscountAmount is the part decided on the dish itself; the remainder
+      // is its share of a whole-bill discount. Only the first answers "which
+      // products do we choose to discount?".
+      DISCOUNT_SUMMARY: `
+        SELECT
+          COUNT(DISTINCT l.Id)                                       AS Documents,
+          COALESCE(SUM(ti.DiscountAmount), 0)                        AS DiscountAmount,
+          COALESCE(SUM(ti.ItemDiscountAmount), 0)                    AS ItemDiscountAmount,
+          COALESCE(SUM(ti.DiscountAmount - ti.ItemDiscountAmount), 0) AS BillDiscountAmount,
+          COALESCE(SUM(ti.GrossAmount), 0)                           AS GrossAmount
+        FROM transactionitemdetail ti
+        JOIN transactiondetaillog l  ON l.Id = ti.TransactionDetailLogId
+        JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+        WHERE ti.TenantId = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+
+      DISCOUNT_BY_PRODUCT: `
+        SELECT
+          ti.ItemId,
+          i.Name                                                     AS ItemName,
+          COALESCE(SUM(ti.Quantity), 0)                              AS QuantitySold,
+          COALESCE(SUM(ti.DiscountAmount), 0)                        AS DiscountAmount,
+          COALESCE(SUM(ti.ItemDiscountAmount), 0)                    AS ItemDiscountAmount,
+          COALESCE(SUM(ti.DiscountAmount - ti.ItemDiscountAmount), 0) AS BillDiscountAmount,
+          COALESCE(SUM(ti.GrossAmount), 0)                           AS GrossAmount,
+          COUNT(DISTINCT ti.TransactionDetailLogId)                  AS Documents
+        FROM transactionitemdetail ti
+        JOIN transactiondetaillog l  ON l.Id = ti.TransactionDetailLogId
+        JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+        LEFT JOIN itemdetail i       ON i.Id = ti.ItemId
+        WHERE ti.TenantId = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+          AND ti.DiscountAmount > 0`,
+
+      DISCOUNT_BY_BILL: `
+        SELECT
+          l.Id, l.TransactionNo, l.TransactionDate, l.CustomerName,
+          l.GrossAmount, l.DiscountAmount,
+          COALESCE(SUM(ti.ItemDiscountAmount), 0)                    AS ItemDiscountAmount,
+          l.DiscountAmount - COALESCE(SUM(ti.ItemDiscountAmount), 0) AS BillDiscountAmount
+        FROM transactiondetaillog l
+        JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+        JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+        LEFT JOIN transactionitemdetail ti
+               ON ti.TransactionDetailLogId = l.Id AND ti.TenantId = l.TenantId
+        WHERE l.TenantId = ? AND t.Name = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+          AND l.DiscountAmount > 0`,
+
+      // Unpaid: what has been invoiced but not fully collected.
+      PENDING_PAYMENT: `
+        SELECT
+          l.Id, l.TransactionNo, l.TransactionDate, l.GrossAmount,
+          l.CustomerName, l.CustomerMobile,
+          COALESCE(p.Collected, 0)                        AS Collected,
+          l.GrossAmount - COALESCE(p.Collected, 0)        AS Outstanding
+        FROM transactiondetaillog l
+        JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+        JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+        LEFT JOIN (
+          SELECT TransactionDetailLogId, SUM(TotalAmount) AS Collected
+            FROM paymentdetail WHERE TenantId = ? GROUP BY TransactionDetailLogId
+        ) p ON p.TransactionDetailLogId = l.Id
+        WHERE l.TenantId = ? AND t.Name = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND l.GrossAmount - COALESCE(p.Collected, 0) > 0
+        ORDER BY l.TransactionDate DESC`,
+
+      // Unbilled: rounds still open on the floor. Operational, so it reads the
+      // POS tables — there is no document for a sale that has not happened.
+      PENDING_UNBILLED: `
+        SELECT o.Id, o.OrderNo, o.OrderType, o.Status, o.Items, o.Total, o.CreatedOn,
+               o.TableId, o.BranchDetailId
+          FROM pos_order o
+          LEFT JOIN pos_bill_order bo ON bo.OrderId = o.Id AND bo.TenantId = o.TenantId
+          LEFT JOIN pos_bill b        ON b.Id = bo.BillId AND b.TenantId = o.TenantId
+         WHERE o.TenantId = ?
+           AND o.CreatedOn BETWEEN ? AND ?
+           AND (b.Id IS NULL OR b.Status IN ('unpaid', 'partially_paid'))
+         ORDER BY o.CreatedOn DESC`,
+
+      // Tender mix / Z-report. Refunds and expense payments are negative rows,
+      // so SUM() nets them without a special case.
+      TENDER_MIX: `
+        SELECT
+          pm.Id                                   AS PaymentModeId,
+          pm.Type                                 AS PaymentMode,
+          a.Name                                  AS AccountName,
+          a.Kind                                  AS AccountKind,
+          COUNT(*)                                AS Tenders,
+          COALESCE(SUM(CASE WHEN b.Amount > 0 THEN b.Amount ELSE 0 END), 0) AS Inflow,
+          COALESCE(SUM(CASE WHEN b.Amount < 0 THEN -b.Amount ELSE 0 END), 0) AS Outflow,
+          COALESCE(SUM(b.Amount), 0)              AS NetAmount
+        FROM paymentbreakup b
+        JOIN paymentmodetransactiondetail pmtd ON pmtd.Id = b.PaymentModeTransactionDetailId
+        JOIN paymentmode pm  ON pm.Id = pmtd.PaymentModeId
+        LEFT JOIN accounttypebase a ON a.Id = b.AccountTypeBaseId
+        WHERE b.TenantId = ? AND b.Timestamp BETWEEN ? AND ?
+        GROUP BY pm.Id, pm.Type, a.Name, a.Kind
+        ORDER BY NetAmount DESC`,
+
+      // Cash flow per account. Only asset accounts hold money, so this is the
+      // "where is the cash" view rather than the "what did we earn" view.
+      CASH_FLOW: `
+        SELECT
+          a.Id                                    AS AccountTypeBaseId,
+          a.Name                                  AS AccountName,
+          a.Kind                                  AS AccountKind,
+          COALESCE(SUM(CASE WHEN b.Amount > 0 THEN b.Amount ELSE 0 END), 0) AS Inflow,
+          COALESCE(SUM(CASE WHEN b.Amount < 0 THEN -b.Amount ELSE 0 END), 0) AS Outflow,
+          COALESCE(SUM(b.Amount), 0)              AS NetMovement
+        FROM paymentbreakup b
+        JOIN accounttypebase a ON a.Id = b.AccountTypeBaseId
+        WHERE b.TenantId = ? AND a.Kind = 'ASSET' AND b.Timestamp BETWEEN ? AND ?
+        GROUP BY a.Id, a.Name, a.Kind
+        ORDER BY a.Name ASC`,
+
+      // Expected cash for a till: opening float plus every cash movement in the
+      // session's window at that branch. Sales add, expenses and refunds subtract
+      // — all of them are already rows in paymentbreakup.
+      SESSION_CASH_MOVEMENT: `
+        SELECT COALESCE(SUM(b.Amount), 0) AS NetCash
+          FROM paymentbreakup b
+          JOIN paymentdetail pd ON pd.Id = b.PaymentDetailId AND pd.TenantId = b.TenantId
+          JOIN transactiondetaillog l ON l.Id = pd.TransactionDetailLogId
+          JOIN accounttypebase a ON a.Id = b.AccountTypeBaseId
+         WHERE b.TenantId = ? AND a.Name = 'Cash'
+           AND (l.BranchId = ? OR ? IS NULL)
+           AND b.Timestamp >= ? AND b.Timestamp <= ?`,
+
+      // Spend by category, from the Expense documents rather than pos_expense,
+      // so an unapproved claim never counts as a cost.
+      EXPENSE_SUMMARY: `
+        SELECT
+          ec.Id                                   AS ExpenseCategoryId,
+          ec.Name                                 AS CategoryName,
+          COUNT(*)                                AS Entries,
+          COALESCE(SUM(e.Amount), 0)              AS Amount
+        FROM pos_expense e
+        JOIN expense_category ec ON ec.Id = e.ExpenseCategoryId
+        JOIN transactiondetaillog l ON l.Id = e.TransactionDetailLogId
+        WHERE e.TenantId = ? AND l.TransactionDate BETWEEN ? AND ?
+        GROUP BY ec.Id, ec.Name
+        ORDER BY Amount DESC`,
+
+      EXPENSE_TREND: `
+        SELECT {{BUCKET}} AS Bucket,
+               COUNT(*)                           AS Entries,
+               COALESCE(SUM(e.Amount), 0)         AS Amount
+        FROM pos_expense e
+        JOIN transactiondetaillog l ON l.Id = e.TransactionDetailLogId
+        WHERE e.TenantId = ? AND l.TransactionDate BETWEEN ? AND ?
+        GROUP BY Bucket ORDER BY Bucket ASC`,
     },
 
     // Tax & pricing chain: costinfo → taxgroup → taxgrouptaxtypemapper → TaxTypes.
@@ -1304,10 +1699,27 @@ module.exports = {
     SUSPENDED: 'SUSPENDED',
     ACTIVATED: 'ACTIVATED',
   },
-  // Canonical POS table statuses — single source of truth shared by the
-  // Joi validation schema and the Swagger docs. The frontend landing page
-  // (occupancy view) color-codes tables by these exact values.
-  POS_TABLE_STATUSES: ['Available', 'Occupied', 'Reserved'],
+  // Canonical POS status vocabularies — single source of truth shared by the
+  // Joi validation schemas, the Swagger docs and the frontend, which colour-codes
+  // by these exact values.
+  //
+  // All lowercase, matching the DDL defaults (pos_table 'free', pos_order 'open',
+  // pos_kot 'pending', pos_order.OrderType 'dinein'). Mixed casing is what made
+  // the KDS and the dashboard disagree: readers compared 'Ready' against a server
+  // that only ever wrote 'ready', so every KOT counted as pending forever. The
+  // schemas below normalize with .lowercase(), so a stale title-case payload
+  // converges rather than being rejected.
+  POS_TABLE_STATUSES: ['free', 'occupied', 'reserved'],
+  POS_ORDER_STATUSES: ['open', 'fired', 'closed', 'cancelled'],
+  POS_ORDER_TYPES: ['dinein', 'takeaway', 'delivery'],
+  POS_KOT_STATUSES: ['pending', 'ready', 'cancelled'],
+  POS_TOKEN_STATUSES: ['waiting', 'called', 'served', 'cancelled'],
+  // Ordered: the Tracking board advances an order one stage at a time, so the
+  // order of this list IS the workflow. 'cancelled' is an exit, not a stage.
+  POS_ONLINE_ORDER_STAGES: ['new', 'accepted', 'processing', 'out for delivery', 'delivered'],
+  POS_ONLINE_ORDER_STATUSES: [
+    'new', 'accepted', 'processing', 'out for delivery', 'delivered', 'cancelled',
+  ],
   AUDIT_CATEGORIES: {
     AUTH:         'AUTH',
     ONBOARDING:   'ONBOARDING',
@@ -1397,19 +1809,54 @@ module.exports = {
   // match database/02-seed-data.sql PART 11.
   LEDGER: {
     TYPE_POS_SALE:        'POS Sale',
+    TYPE_EXPENSE:         'Expense',
     STATUS_DRAFT:         'DRAFT',
     STATUS_PARTIALLY_PAID:'PARTIALLY_PAID',
     STATUS_SETTLED:       'SETTLED',
     STATUS_CANCELLED:     'CANCELLED',
     STATUS_REFUNDED:      'REFUNDED',
     ACCOUNT_SALES:        'Sales',
+    ACCOUNT_CASH:         'Cash',
+    ACCOUNT_EXPENSES:     'Expenses',
     RECEIVED_FULL:        'Full',
     RECEIVED_PARTIAL:     'Partial',
     RECEIVED_REFUND:      'Refund',
+    RECEIVED_PAYMENT:     'Payment',
     // A settled document is never edited — corrections happen by reversal.
     IMMUTABLE_STATUSES:   ['SETTLED', 'PARTIALLY_PAID', 'REFUNDED', 'CANCELLED'],
     // Modes that must carry a reference number for reconciliation.
     REF_REQUIRED_MODES:   ['Card', 'UPI', 'Wallet'],
+  },
+
+  // POS bill lifecycle. These strings are written by settle and read by every
+  // report; they were previously inline literals, and a report filtering on
+  // 'Settled' against a service writing 'paid' silently returned zero revenue.
+  POS_BILL_STATUS: {
+    UNPAID:         'unpaid',
+    PARTIALLY_PAID: 'partially_paid',
+    PAID:           'paid',
+    REFUNDED:       'refunded',
+    VOID:           'void',
+  },
+
+  // Expense lifecycle. A DRAFT claim is not a cost; only settling posts to the
+  // ledger, which is why APPROVED sits between the two.
+  EXPENSE_STATUS: {
+    DRAFT:     'draft',
+    APPROVED:  'approved',
+    SETTLED:   'settled',
+    CANCELLED: 'cancelled',
+  },
+
+  CASH_SESSION_STATUS: {
+    OPEN:   'open',
+    CLOSED: 'closed',
+  },
+
+  ASSET_STATUS: {
+    IN_USE:       'in_use',
+    UNDER_REPAIR: 'under_repair',
+    RETIRED:      'retired',
   },
 
   // First-time tenancy (master-data) setup gate.
@@ -1470,5 +1917,11 @@ module.exports = {
     POS_OPS_READ: 'POS_OPS:READ',
     POS_OPS_WRITE: 'POS_OPS:WRITE',
     POS_REPORTS_READ: 'POS_REPORTS:READ',
+    // Approving an expense commits money, so it is deliberately separate from
+    // POS_OPS:WRITE — the person who raises a claim should not approve it.
+    EXPENSE_APPROVE: 'EXPENSE:APPROVE',
+    // The asset register is finance-owned reference data, not floor operations.
+    ASSET_READ: 'ASSET:READ',
+    ASSET_WRITE: 'ASSET:WRITE',
   },
 }
