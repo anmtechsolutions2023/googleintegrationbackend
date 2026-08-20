@@ -18,6 +18,8 @@
 const { v4: uuidv4 } = require('uuid');
 const { QUERIES } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
+// The one date authority, shared with whatever reads these dates back.
+const { businessDate } = require('../../utils/dateRange');
 const MESSAGES = require('../../config/messages');
 const { LEDGER, POS_BILL_STATUS } = require('../../config/constants');
 const { toMinor, fromMinor } = require('../../utils/taxCalculator');
@@ -174,7 +176,7 @@ const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
 
   await conn.execute(QUERIES.LEDGER.INSERT_LOG, [
     logId, tenantId, transactionNo, configId, saleType.Id, draft.Id, branchId ?? null,
-    new Date().toISOString().slice(0, 10),
+    businessDate(),
     totals.SubTotal ?? 0, totals.TaxAmount ?? 0, totals.Discount ?? 0,
     roundOff, roundedGross, toJson(totals.TaxByComponent || []),
     customer.contactDetailId, customer.name, customer.mobile,
@@ -440,7 +442,7 @@ const postExpense = async (conn, input, tenantId, userEmail) => {
   // a sale. Amount sits in Net and Gross so the two agree.
   await conn.execute(QUERIES.LEDGER.INSERT_LOG, [
     logId, tenantId, transactionNo, configId, expenseType.Id, draft.Id, branchId ?? null,
-    (expenseDate ? new Date(expenseDate) : new Date()).toISOString().slice(0, 10),
+    businessDate(expenseDate),
     gross, 0, 0, 0, gross, toJson([]),
     null, null, null,
     description ? String(description).slice(0, 500) : null, userEmail, userEmail,

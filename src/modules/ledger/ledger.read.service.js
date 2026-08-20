@@ -22,6 +22,35 @@ const parseJson = (v) => {
 };
 
 /**
+ * How a document is identified to a human: by token, by table, or by neither.
+ *
+ * Derived on the server so the ledger list, the ledger detail, the dashboard and
+ * any future screen cannot each invent their own rule for what an order "is".
+ *
+ * @param {Array} orders - Rounds the document covers.
+ * @returns {{kind:'token'|'table'|'none', label:string|null, orderNos:string[]}}
+ */
+const sourceOf = (tokenLabel, tableName, orderNos = []) => {
+  // Token wins: a counter customer is holding a number, not a table. A round
+  // can legitimately have both if it was moved, and the number is what was
+  // actually handed over.
+  if (tokenLabel) return { kind: 'token', label: tokenLabel, orderNos };
+  if (tableName) return { kind: 'table', label: tableName, orderNos };
+  return { kind: 'none', label: null, orderNos };
+};
+
+/** From the joined rounds of one document (the detail read). */
+const describeSource = (orders = []) => {
+  const join = (key) => [...new Set(orders.map((o) => o[key]).filter(Boolean))].join(', ') || null;
+  return sourceOf(join('TokenLabel'), join('TableName'), orders.map((o) => o.OrderNo).filter(Boolean));
+};
+
+/** From the pre-concatenated columns the LIST query returns. Same rule. */
+const splitList = (v) => (v ? String(v).split(', ').filter(Boolean) : []);
+const describeSourceRow = (row) =>
+  sourceOf(row.TokenLabels || null, row.TableNames || null, splitList(row.OrderNos));
+
+/**
  * Lists ledger documents, newest first.
  * @param {Object} filters - { status, fromDate, toDate, contactDetailId, search }
  */
@@ -55,7 +84,12 @@ const listDocuments = (filters, page, limit, tenantId) =>
       params,
     );
 
-    return { data: rows, pagination: getPaginationMetadata(total, pageNum, limitNum) };
+    return {
+      // Same identification rule as the detail read, so a document cannot be
+      // labelled one way in the list and another way when opened.
+      data: rows.map((r) => ({ ...r, Source: describeSourceRow(r) })),
+      pagination: getPaginationMetadata(total, pageNum, limitNum),
+    };
   });
 
 /**
@@ -73,6 +107,10 @@ const getDocument = (id, tenantId) =>
     const [lines] = await conn.execute(QUERIES.LEDGER.SELECT_LINES_BY_LOG, [id, tenantId]);
     const [tenders] = await conn.execute(QUERIES.LEDGER.SELECT_TENDERS_BY_LOG, [id, tenantId]);
     const [history] = await conn.execute(QUERIES.LEDGER.SELECT_TRANSITION_HISTORY, [id, tenantId]);
+    // The rounds behind this invoice, and the token each was handed for. An
+    // expense document has no POS bill, so this is legitimately empty rather
+    // than an error.
+    const [orders] = await conn.execute(QUERIES.LEDGER.SELECT_DOC_ORDERS, [id, tenantId]);
 
     return {
       ...log,
@@ -84,6 +122,13 @@ const getDocument = (id, tenantId) =>
       })),
       Tenders: tenders,
       History: history,
+      // Each round with its token (if any) and the venue it was served at, so
+      // the document can be traced back to the floor it came from.
+      Orders: orders,
+      // The customer-facing handle, resolved once here rather than by every
+      // screen that renders a document. 'token' wins when one was issued: a
+      // counter customer is holding a number, not a table.
+      Source: describeSource(orders),
       // Drives whether the UI offers any action at all.
       IsImmutable: LEDGER.IMMUTABLE_STATUSES.includes(log.StatusName),
     };

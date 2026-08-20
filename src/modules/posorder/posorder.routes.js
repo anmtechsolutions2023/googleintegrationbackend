@@ -17,6 +17,13 @@ const audit = auditLogCrud('POS Order', AUDIT_CATEGORIES.POS);
 router.get('/', authenticateToken,
   checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_ORDER_READ, SCOPES.POS_ORDER_WRITE), audit, ...controller.getAll);
 
+/**
+ * GET /:id/detail — the round with its token, kitchen tickets and invoice.
+ * Declared BEFORE /:id so 'detail' is not read as part of an id.
+ */
+router.get('/:id/detail', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_ORDER_READ, SCOPES.POS_ORDER_WRITE), audit, ...controller.getDetail);
+
 /** GET /:id — get one POS Order by ID. */
 router.get('/:id', authenticateToken,
   checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_ORDER_READ, SCOPES.POS_ORDER_WRITE), audit, ...controller.getById);

@@ -17,6 +17,15 @@ const audit = auditLogCrud('POS Token', AUDIT_CATEGORIES.POS);
 router.get('/', authenticateToken,
   checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_OPS_READ, SCOPES.POS_OPS_WRITE), audit, ...controller.getAll);
 
+/**
+ * GET /stats — queue performance for a date range.
+ * Declared BEFORE /:id, or 'stats' is parsed as a token id and 400s on the
+ * uuid check.
+ */
+router.get('/stats', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_OPS_READ,
+    SCOPES.POS_OPS_WRITE, SCOPES.POS_REPORTS_READ), audit, ...controller.stats);
+
 /** GET /:id — get one POS Token by ID. */
 router.get('/:id', authenticateToken,
   checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_OPS_READ, SCOPES.POS_OPS_WRITE), audit, ...controller.getById);
@@ -38,6 +47,21 @@ router.put(
   audit,
   ...controller.update
 );
+
+/**
+ * POST /:id/call  — call the token to the counter.
+ * POST /:id/serve — hand it over.
+ * Domain actions rather than PUTs: each stamps its own timestamp, and a client
+ * that had to send Status + CalledAt itself could disagree with the clock the
+ * rest of the ledger runs on. Same shape as KOT mark-ready.
+ */
+router.post('/:id/call', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_OPS_WRITE),
+  audit, ...controller.call);
+
+router.post('/:id/serve', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_OPS_WRITE),
+  audit, ...controller.serve);
 
 /** DELETE /:id — delete a POS Token. */
 router.delete(

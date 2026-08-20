@@ -464,7 +464,9 @@ const MODULES = [
   { path: '/api/pos/bills', body: { Active: true }, updateBody: { Status: 'paid' }, emptyCreateIsValid: true },
   { path: '/api/pos/online-orders', body: { Platform: 'Swiggy', Active: true }, updateBody: { Status: 'accepted' } },
   { path: '/api/pos/feedback', body: { CustomerName: 'Rahul', Rating: 5, Active: true }, updateBody: { Rating: 4 } },
-  { path: '/api/pos/tokens', body: { TokenNumber: 1, Active: true }, updateBody: { Status: 'called' } },
+  // A token's number is minted server-side from the branch's numbering mode, so
+  // the branch — the queue it belongs to — is the only thing a client sends.
+  { path: '/api/pos/tokens', body: { BranchDetailId: UUID_1, Active: true }, updateBody: { Status: 'called' } },
   // Category is a master (expense_category), not free text, so spend reports
   // can group by id instead of by spelling.
   { path: '/api/pos/expenses', body: { ExpenseCategoryId: UUID_1, Amount: 500, Active: true }, updateBody: { Amount: 600 } },

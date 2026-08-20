@@ -67,6 +67,8 @@ const posbillRoutes = require('../modules/posbill/posbill.routes');
 const posonlineorderRoutes = require('../modules/posonlineorder/posonlineorder.routes');
 const posfeedbackRoutes = require('../modules/posfeedback/posfeedback.routes');
 const postokenRoutes = require('../modules/postoken/postoken.routes');
+const possettingRoutes = require('../modules/possetting/possetting.routes');
+const posbranchRoutes = require('../modules/posbranch/posbranch.routes');
 const posexpenseRoutes = require('../modules/posexpense/posexpense.routes');
 const posstaffRoutes = require('../modules/posstaff/posstaff.routes');
 const posreportRoutes = require('../modules/posreport/posreport.routes');
@@ -250,6 +252,8 @@ const registerRoutes = (app) => {
   app.use('/api/pos/online-orders', posonlineorderRoutes);
   app.use('/api/pos/feedback', posfeedbackRoutes);
   app.use('/api/pos/tokens', postokenRoutes);
+  app.use('/api/pos/settings', possettingRoutes);
+  app.use('/api/pos/branches', posbranchRoutes);
   app.use('/api/pos/expenses', posexpenseRoutes);
   app.use('/api/pos/staff', posstaffRoutes);
   app.use('/api/pos/reports', posreportRoutes);

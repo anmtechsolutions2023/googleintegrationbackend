@@ -86,6 +86,60 @@ function crudPaths(tag, path, createRef, updateRef, responseRef, hasExpand = tru
   };
 }
 
+// ── Reports ──────────────────────────────────────────────────────────────────
+// Every report takes ONE query contract (ledger.schemas.reportQuerySchema), so
+// the timeframe is described once here rather than nine times. Daily, last-3,
+// weekend-only and custom are `preset` values, not separate endpoints — which
+// is what stops mix-and-match becoming a combinatorial pile of paths.
+const reportParams = [
+  { name: 'preset', in: 'query', schema: { type: 'string', enum: ['today', 'yesterday', 'last3', 'last5', 'week', 'weekend', 'month', 'custom'], default: 'today' }, description: 'Timeframe. `custom` REQUIRES fromDate and toDate.' },
+  { name: 'fromDate', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Required when preset=custom. Range may not exceed 366 days.' },
+  { name: 'toDate', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Required when preset=custom.' },
+  { name: 'bucket', in: 'query', schema: { type: 'string', enum: ['day', 'week', 'month'], default: 'day' }, description: 'Trend granularity, where the report has a trend.' },
+  { name: 'branchId', in: 'query', schema: { type: 'string', format: 'uuid' } },
+  { name: 'floorId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Venue bound. Matches the venue SNAPSHOT frozen on each round, so it means "served there at the time".' },
+  { name: 'tableId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Venue bound, as above.' },
+  { name: 'categoryId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Product report only.' },
+  { name: 'itemId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Product report only.' },
+  { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200 }, description: 'Leaderboard cap, where the report ranks rows.' },
+];
+
+/** One GET report endpoint. Same shape for all of them — only the payload differs. */
+function reportPath(tag, summary, schemaRef, description) {
+  return {
+    get: {
+      tags: [tag], summary, description, security,
+      parameters: reportParams,
+      responses: {
+        ...singleResponse(schemaRef),
+        ...responses.validation, ...responses.unauthorized, ...responses.forbidden,
+      },
+    },
+  };
+}
+
+/** The resolved window every report echoes back, so a caller can label its own output. */
+const reportRange = {
+  type: 'object',
+  properties: {
+    from: { type: 'string', format: 'date' },
+    to: { type: 'string', format: 'date' },
+    bucket: { type: 'string', enum: ['day', 'week', 'month'] },
+    weekendOnly: { type: 'boolean', description: 'True for preset=weekend — the same window as `week` with a filter on top.' },
+    preset: { type: 'string' },
+  },
+};
+
+/** Money columns shared by every per-row revenue breakdown. */
+const revenueRow = {
+  Orders: { type: 'number' },
+  Bills: { type: 'number' },
+  NetAmount: { type: 'number' },
+  DiscountAmount: { type: 'number' },
+  TaxAmount: { type: 'number' },
+  GrossAmount: { type: 'number' },
+};
+
 const auditFields = {
   Id:        { type: 'string', format: 'uuid', readOnly: true, example: 'a1b2c3d4-0000-0000-0000-000000000001' },
   TenantId:  { type: 'string', format: 'uuid', readOnly: true },
@@ -1857,21 +1911,21 @@ const swaggerSpec = {
         },
       },
       PosTokenCreate: {
-        type: 'object', required: ["TokenNumber"],
+        // TokenNumber/TokenLabel are minted server-side from the branch's
+        // numbering mode (pos_setting 'token.numbering'), so a client sends only
+        // the queue the token belongs to. Anything else is ignored.
+        type: 'object', required: ["BranchDetailId"],
         properties: {
-          TokenNumber: {"type":"integer"},
-          OrderId: {"type":"string","format":"uuid"},
-          Status: {"type":"string"},
-          BranchDetailId: {"type":"string","format":"uuid"},
+          BranchDetailId: {"type":"string","format":"uuid", description: 'The counter queue this token belongs to.'},
+          OrderId: {"type":"string","format":"uuid", description: 'The order behind the token, when there is one.'},
           Active: {"type":"boolean"},
         },
       },
       PosTokenUpdate: {
         type: 'object',
         properties: {
-          TokenNumber: {"type":"integer"},
           OrderId: {"type":"string","format":"uuid"},
-          Status: {"type":"string"},
+          Status: {"type":"string", enum: ['waiting', 'called', 'served', 'cancelled']},
           BranchDetailId: {"type":"string","format":"uuid"},
           Active: {"type":"boolean"},
         },
@@ -1879,11 +1933,215 @@ const swaggerSpec = {
       PosToken: {
         type: 'object',
         properties: { ...auditFields,
-          TokenNumber: {"type":"integer"},
+          TokenNumber: {"type":"integer", description: 'Sortable counter. In daily mode this is what the customer is told.'},
+          TokenLabel: {"type":"string", description: 'What is displayed and called out: "12" or "TOK-0438".'},
+          TokenDate: {"type":"string","format":"date", description: 'The day the token belongs to — the reset axis for daily numbering.'},
           OrderId: {"type":"string","format":"uuid"},
-          Status: {"type":"string"},
+          Status: {"type":"string", enum: ['waiting', 'called', 'served', 'cancelled']},
+          CalledAt: {"type":"string","format":"date-time", nullable: true},
+          ServedAt: {"type":"string","format":"date-time", nullable: true},
           BranchDetailId: {"type":"string","format":"uuid"},
           Active: {"type":"boolean"},
+        },
+      },
+      // ── Finance report payloads ────────────────────────────────────────
+      // Every one of these reads the LEDGER, never pos_bill: the POS tables are
+      // operational state, and a figure taken from them can disagree with the
+      // invoice that was actually issued. Only `unbilled` on the pending report
+      // is operational, and it says so.
+      ReportSalesSummary: {
+        type: 'object',
+        description: 'Invoiced and collected are reported SEPARATELY — collapsing them into one "revenue" figure is what hides outstanding money.',
+        properties: {
+          Documents: { type: 'number' },
+          NetAmount: { type: 'number' }, TaxAmount: { type: 'number' },
+          DiscountAmount: { type: 'number' }, RoundOff: { type: 'number' },
+          GrossAmount: { type: 'number', description: 'Invoiced.' },
+          Collected: { type: 'number', description: 'Actually taken.' },
+          Outstanding: { type: 'number' },
+        },
+      },
+      ReportSales: {
+        type: 'object',
+        properties: {
+          range: reportRange,
+          summary: { $ref: '#/components/schemas/ReportSalesSummary' },
+          trend: { type: 'array', items: { type: 'object', properties: {
+            Bucket: { type: 'string' }, Documents: { type: 'number' },
+            GrossAmount: { type: 'number' }, DiscountAmount: { type: 'number' }, TaxAmount: { type: 'number' },
+          } } },
+        },
+      },
+      ReportProducts: {
+        type: 'object',
+        properties: {
+          range: reportRange,
+          products: { type: 'array', items: { type: 'object', properties: {
+            ItemId: { type: 'string', format: 'uuid' }, ItemName: { type: 'string' },
+            CategoryName: { type: 'string', nullable: true },
+            QuantitySold: { type: 'number' }, NetAmount: { type: 'number' },
+            DiscountAmount: { type: 'number', description: 'Stored per-line column, so a line discount and a spread bill discount are both counted exactly once.' },
+            TaxAmount: { type: 'number' }, GrossAmount: { type: 'number' }, Documents: { type: 'number' },
+          } } },
+        },
+      },
+      ReportPending: {
+        type: 'object',
+        description: 'Two different questions with two different owners: unbilled is operational (the floor), unpaid is financial (the ledger).',
+        properties: {
+          range: reportRange,
+          unpaid: { type: 'object', properties: {
+            documents: { type: 'array', items: { type: 'object', properties: {
+              TransactionNo: { type: 'string' }, CustomerName: { type: 'string', nullable: true },
+              GrossAmount: { type: 'number' }, Collected: { type: 'number' }, Outstanding: { type: 'number' },
+            } } },
+            totalOutstanding: { type: 'number' },
+          } },
+          unbilled: { type: 'object', properties: {
+            orders: { type: 'array', items: { type: 'object', properties: {
+              OrderNo: { type: 'string' }, OrderType: { type: 'string' },
+              Status: { type: 'string' }, Total: { type: 'number' },
+            } } },
+            totalValue: { type: 'number' },
+          } },
+        },
+      },
+      ReportTenders: {
+        type: 'object',
+        description: 'The Z-report. Refunds and expense payments net out, so a tender line is what that instrument actually took.',
+        properties: {
+          range: reportRange,
+          tenders: { type: 'array', items: { type: 'object', properties: {
+            PaymentModeId: { type: 'string', format: 'uuid' }, PaymentMode: { type: 'string' },
+            AccountName: { type: 'string' }, Tenders: { type: 'number' },
+            Inflow: { type: 'number' }, Outflow: { type: 'number' }, NetAmount: { type: 'number' },
+          } } },
+        },
+      },
+      ReportCashFlow: {
+        type: 'object',
+        properties: {
+          range: reportRange,
+          accounts: { type: 'array', items: { type: 'object', properties: {
+            AccountTypeBaseId: { type: 'string', format: 'uuid' }, AccountName: { type: 'string' },
+            AccountKind: { type: 'string' }, Inflow: { type: 'number' },
+            Outflow: { type: 'number' }, NetMovement: { type: 'number' },
+          } } },
+          totals: { type: 'object', properties: {
+            Inflow: { type: 'number' }, Outflow: { type: 'number' }, NetMovement: { type: 'number' },
+          } },
+        },
+      },
+      ReportExpenses: {
+        type: 'object',
+        description: 'Settled expense DOCUMENTS only — a draft or merely approved claim is not yet a cost.',
+        properties: {
+          range: reportRange,
+          categories: { type: 'array', items: { type: 'object', properties: {
+            ExpenseCategoryId: { type: 'string', format: 'uuid' }, CategoryName: { type: 'string' },
+            Entries: { type: 'number' }, Amount: { type: 'number' },
+          } } },
+          trend: { type: 'array', items: { type: 'object', properties: {
+            Bucket: { type: 'string' }, Entries: { type: 'number' }, Amount: { type: 'number' },
+          } } },
+          totalAmount: { type: 'number' },
+        },
+      },
+      ReportOverview: {
+        type: 'object',
+        description: 'Only answerable because expenses post to the SAME ledger as sales — money in and money out are rows in one table, so "what is left" is a subtraction rather than a reconciliation.',
+        properties: {
+          range: reportRange,
+          sales: { $ref: '#/components/schemas/ReportSalesSummary' },
+          salesTrend: { type: 'array', items: { type: 'object' } },
+          expenses: { type: 'object', properties: {
+            total: { type: 'number' }, categories: { type: 'array', items: { type: 'object' } },
+          } },
+          cash: { type: 'object', properties: {
+            Inflow: { type: 'number' }, Outflow: { type: 'number' }, NetMovement: { type: 'number' },
+          } },
+          accounts: { type: 'array', items: { type: 'object' } },
+          netPosition: { type: 'number', description: 'COLLECTED minus spent — cash in hand, not invoiced.' },
+        },
+      },
+      ReportVenue: {
+        type: 'object',
+        description: 'Grouped on the venue snapshot frozen on each round, never on a live join to pos_table — so renaming a table or moving it upstairs leaves last month where it was earned. Rounds with no table are labelled by CHANNEL (Counter / Delivery) rather than pooled under one anonymous row.',
+        properties: {
+          range: reportRange,
+          floors: { type: 'array', items: { type: 'object', properties: {
+            FloorId: { type: 'string', nullable: true }, FloorName: { type: 'string' },
+            Tables: { type: 'number' }, Seats: { type: 'number' }, ...revenueRow,
+            AvgBillValue: { type: 'number' },
+            RevenuePerSeat: { type: 'number', nullable: true, description: 'Null rather than a fake zero when capacity is unknown.' },
+          } } },
+          tables: { type: 'array', items: { type: 'object', properties: {
+            FloorId: { type: 'string', nullable: true }, FloorName: { type: 'string' },
+            TableId: { type: 'string', nullable: true },
+            TableName: { type: 'string', description: 'The table, or the channel name when the round had no table.' },
+            Capacity: { type: 'number', nullable: true }, ...revenueRow,
+            AvgBillValue: { type: 'number' }, RevenuePerSeat: { type: 'number', nullable: true },
+          } } },
+          totalGross: { type: 'number' },
+        },
+      },
+      ReportChannels: {
+        type: 'object',
+        description: 'The same money as the venue report, cut by WHERE THE SALE HAPPENED. Both are built on one apportioned bill→round join, so they cannot disagree about the same bill. A round seated at a table is Dine-in whatever it was typed as — the same rule that decides whether a counter token is issued at settle time.',
+        properties: {
+          range: reportRange,
+          channels: { type: 'array', items: { type: 'object', properties: {
+            Channel: { type: 'string', enum: ['Dine-in', 'Counter', 'Delivery', 'Other'] },
+            ...revenueRow,
+            AvgBillValue: { type: 'number', description: 'What makes a counter and a dining room comparable at all.' },
+            ShareOfRevenue: { type: 'number', description: 'Percent of the period’s gross.' },
+          } } },
+          totalGross: { type: 'number' },
+        },
+      },
+      ReportDiscounts: {
+        type: 'object',
+        description: 'Split by WHY throughout. ItemDiscountAmount is a decision someone made about that dish; the remainder is the dish’s share of a whole-bill discount. Only the first answers "which products do we choose to give away?".',
+        properties: {
+          range: reportRange,
+          summary: { type: 'object', properties: {
+            Documents: { type: 'number' }, DiscountAmount: { type: 'number' },
+            ItemDiscountAmount: { type: 'number' }, BillDiscountAmount: { type: 'number' },
+            GrossAmount: { type: 'number' },
+          } },
+          products: { type: 'array', items: { type: 'object' } },
+          bills: { type: 'array', items: { type: 'object' } },
+        },
+      },
+      TokenQueueStats: {
+        type: 'object',
+        description: 'How the counter QUEUE performed, not what it earned — read from pos_token, which is operational state. The money half of the same question is /api/ledger/reports/channels. Tokens still waiting count towards Issued but contribute to no average: a wait that has not ended is not a short wait.',
+        properties: {
+          range: reportRange,
+          summary: { type: 'object', properties: {
+            Issued: { type: 'number' }, Served: { type: 'number' },
+            Waiting: { type: 'number' }, Called: { type: 'number' }, Cancelled: { type: 'number' },
+            AvgWaitMinutes: { type: 'number', nullable: true, description: 'Issued → called. Null when no wait has completed — which is not the same fact as zero.' },
+            MaxWaitMinutes: { type: 'number', nullable: true },
+            AvgCollectMinutes: { type: 'number', nullable: true, description: 'Called → handed over. Kept apart from the wait above, or the kitchen gets blamed for a customer who wandered off.' },
+          } },
+          trend: { type: 'array', items: { type: 'object', properties: {
+            Bucket: { type: 'string', format: 'date' }, Issued: { type: 'number' },
+            Served: { type: 'number' }, AvgWaitMinutes: { type: 'number', nullable: true },
+          } } },
+        },
+      },
+
+      PosSettings: {
+        // Per-branch POS preferences. Every known key is always present —
+        // defaults are filled in for keys the branch has never saved.
+        type: 'object',
+        properties: {
+          'token.numbering': {
+            type: 'string', enum: ['daily', 'series'], default: 'daily',
+            description: 'daily: counter tokens restart at 1 each day, per branch. '
+              + 'series: continuous TOK-0001 from the tenant-wide POS_TOKEN series.',
+          },
         },
       },
       PosExpenseCreate: {
@@ -2033,6 +2291,24 @@ const swaggerSpec = {
         },
       },
     },
+
+    // ── Finance reports ───────────────────────────────────────────────────
+    // Nine cuts of the same ledger, one query contract. Gated on TRANSACTIONS
+    // read/write, not on the POS scopes: a ledger document IS the transaction
+    // record.
+    '/api/ledger/reports/overview': reportPath('LedgerReports', 'Earned, collected, spent, and what is left', 'ReportOverview',
+      'The daily cash-flow question in one call.'),
+    '/api/ledger/reports/sales': reportPath('LedgerReports', 'Invoiced vs collected, with a bucketed trend', 'ReportSales'),
+    '/api/ledger/reports/products': reportPath('LedgerReports', 'Quantity, revenue and discount per product', 'ReportProducts',
+      'Ranked and capped — a leaderboard, not a data dump.'),
+    '/api/ledger/reports/pending': reportPath('LedgerReports', 'Unbilled rounds and unpaid documents', 'ReportPending'),
+    '/api/ledger/reports/tenders': reportPath('LedgerReports', 'Tender mix (the Z-report)', 'ReportTenders'),
+    '/api/ledger/reports/cashflow': reportPath('LedgerReports', 'Money in, out and net per asset account', 'ReportCashFlow'),
+    '/api/ledger/reports/expenses': reportPath('LedgerReports', 'Spend by category, from settled documents', 'ReportExpenses'),
+    '/api/ledger/reports/venue': reportPath('LedgerReports', 'Revenue by floor and by table', 'ReportVenue'),
+    '/api/ledger/reports/channels': reportPath('LedgerReports', 'Revenue by sales channel', 'ReportChannels',
+      'Dine-in, counter and delivery. Counter sales were always in every total — a counter bill posts the same ledger document as any other — but until this report nothing could name them.'),
+    '/api/ledger/reports/discounts': reportPath('LedgerReports', 'What was given away, and why', 'ReportDiscounts'),
     '/api/pricing/quote': {
       post: {
         tags: ['Pricing'],
@@ -2209,10 +2485,63 @@ const swaggerSpec = {
     },
     '/api/pos/bills/{id}/settle': {
       post: {
-        tags: ['PosBills'], summary: 'Settle a bill (record payments, mark paid)', security,
+        tags: ['PosBills'],
+        summary: 'Settle a bill (record payments, mark paid)',
+        // A counter sale — every round takeaway, none at a table — also gets its
+        // queue token minted here, inside the same transaction, and the response
+        // carries TokenLabel/TokenNumber/TokenDate.
+        description: 'Posts the bill to the ledger. For a counter sale the response also '
+          + 'carries the token issued to the customer (TokenLabel, TokenNumber, TokenDate).',
+        security,
         parameters: [idParam],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosBillSettle' } } } },
         responses: { ...singleResponse('PosBill'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/tokens/stats': {
+      get: {
+        tags: ['PosTokens'],
+        summary: 'Counter queue performance',
+        description: 'How long people waited, not what they paid. Shares the finance reports\' timeframe vocabulary so one range means the same thing on both sides of the screen.',
+        security,
+        parameters: reportParams.filter((p) => ['preset', 'fromDate', 'toDate', 'branchId'].includes(p.name)),
+        responses: {
+          ...singleResponse('TokenQueueStats'),
+          ...responses.validation, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/pos/tokens/{id}/call': {
+      post: {
+        tags: ['PosTokens'],
+        summary: 'Call a token to the counter',
+        description: 'Stamps CalledAt the first time only, so a recall keeps the original call time.',
+        security,
+        parameters: [idParam],
+        responses: { ...singleResponse('PosToken'), ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/tokens/{id}/serve': {
+      post: {
+        tags: ['PosTokens'], summary: 'Mark a token handed over', security,
+        parameters: [idParam],
+        responses: { ...singleResponse('PosToken'), ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/settings': {
+      get: {
+        tags: ['PosSettings'],
+        summary: 'Per-branch POS settings',
+        description: 'Every known key is returned, with defaults filled in for keys this branch has never saved.',
+        security,
+        parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { ...singleResponse('PosSettings'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+      put: {
+        tags: ['PosSettings'], summary: 'Update per-branch POS settings', security,
+        parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosSettings' } } } },
+        responses: { ...singleResponse('PosSettings'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
       },
     },
 

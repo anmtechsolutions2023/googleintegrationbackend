@@ -2,6 +2,69 @@
 // Centralized constants for queries, statuses, and other reusable strings
 // Organized by domain/module for better maintainability and scalability
 
+// ── Shared SQL fragments ─────────────────────────────────────────────────────
+// Defined once, above the export, so the reports that share them cannot drift.
+// They are static, whitelisted SQL — never user input — and are interpolated
+// because MySQL cannot parameterise a projection or a GROUP BY expression.
+
+/**
+ * How a round is classified for reporting: where the sale happened.
+ *
+ * The TABLE wins over the order type, deliberately and in that order. A round
+ * seated at a table is dine-in revenue whatever it was typed as, which is the
+ * same rule that decides whether a counter token is issued at settle time — so
+ * the report and the till cannot disagree about what a counter sale is.
+ *
+ * Requires `pos_order o` in scope.
+ */
+const CHANNEL_LABEL_SQL = `
+  CASE
+    WHEN o.TableId IS NOT NULL THEN 'Dine-in'
+    WHEN LOWER(COALESCE(o.OrderType, '')) = 'takeaway' THEN 'Counter'
+    WHEN LOWER(COALESCE(o.OrderType, '')) = 'delivery' THEN 'Delivery'
+    ELSE 'Other'
+  END`;
+
+/**
+ * Settled sale documents joined to the rounds they cover, apportioned.
+ *
+ * A bill covering several rounds is split between them by each round's share of
+ * the bill (o.Total / SUM(o.Total)) — the same principle the pricing engine uses
+ * to spread a discount. That is what makes any report built on this tie back to
+ * the sales report to the paisa instead of merely looking plausible.
+ *
+ * Params, in order: tenantId (derived table), tenantId, transactionTypeName,
+ * from, to. Shared by the venue and channel reports, which differ ONLY in what
+ * they group by — duplicating this join is how two reports of the same money
+ * start disagreeing.
+ */
+const APPORTIONED_SALE_ROUNDS_SQL = `
+  FROM transactiondetaillog l
+  JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+  JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+  JOIN pos_bill b        ON b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId
+  JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
+  JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+  JOIN (
+    SELECT bo2.BillId AS BillId, SUM(o2.Total) AS BillTotal
+      FROM pos_bill_order bo2
+      JOIN pos_order o2 ON o2.Id = bo2.OrderId AND o2.TenantId = bo2.TenantId
+     WHERE bo2.TenantId = ?
+     GROUP BY bo2.BillId
+  ) bt ON bt.BillId = b.Id AND bt.BillTotal > 0
+  WHERE l.TenantId = ? AND t.Name = ?
+    AND l.TransactionDate BETWEEN ? AND ?
+    AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`;
+
+/** The apportioned money columns every report over the above shares. */
+const APPORTIONED_MONEY_SQL = `
+  COUNT(DISTINCT o.Id)                          AS Orders,
+  COUNT(DISTINCT l.Id)                          AS Bills,
+  COALESCE(SUM(l.NetAmount      * o.Total / bt.BillTotal), 0) AS NetAmount,
+  COALESCE(SUM(l.DiscountAmount * o.Total / bt.BillTotal), 0) AS DiscountAmount,
+  COALESCE(SUM(l.TaxAmount      * o.Total / bt.BillTotal), 0) AS TaxAmount,
+  COALESCE(SUM(l.GrossAmount    * o.Total / bt.BillTotal), 0) AS GrossAmount`;
+
 module.exports = {
   QUERIES: {
     // User & Tenant Queries
@@ -926,12 +989,122 @@ module.exports = {
     },
 
     POS_TOKEN: {
-      SELECT_ALL: 'SELECT * FROM pos_token WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      // The order behind the token is joined in: a queue that cannot say what
+      // #7 gets is just a number pad. Newest first — a counter works the top of
+      // the list, and TokenNumber orders a day's queue where CreatedOn ties.
+      SELECT_ALL: `
+        SELECT t.*, o.OrderNo, o.Total AS OrderTotal, o.Items AS OrderItems
+          FROM pos_token t
+          LEFT JOIN pos_order o ON o.Id = t.OrderId
+         WHERE t.TenantId = ? ORDER BY t.TokenDate DESC, t.TokenNumber DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM pos_token WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM pos_token WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_token (Id, TenantId, TokenNumber, OrderId, Status, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_token SET TokenNumber = ?, OrderId = ?, Status = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_token (Id, TenantId, TokenNumber, TokenLabel, TokenDate, OrderId, Status, CalledAt, ServedAt, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_token SET TokenNumber = ?, TokenLabel = ?, TokenDate = ?, OrderId = ?, Status = ?, CalledAt = ?, ServedAt = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_token WHERE Id = ? AND TenantId = ?',
+      // Domain action: advance the queue. CalledAt/ServedAt are stamped only on
+      // the move that earns them, and only once — a recall must not overwrite
+      // when the customer was first called.
+      SET_STATUS: `
+        UPDATE pos_token
+           SET Status    = ?,
+               CalledAt  = CASE WHEN ? = 'called' AND CalledAt IS NULL THEN NOW() ELSE CalledAt END,
+               ServedAt  = CASE WHEN ? = 'served' AND ServedAt IS NULL THEN NOW() ELSE ServedAt END,
+               UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE Id = ? AND TenantId = ?`,
+      // A deleted round must not leave its token calling for food that no
+      // longer exists — and the OrderId FK would reject the delete outright.
+      DELETE_BY_ORDER: 'DELETE FROM pos_token WHERE OrderId = ? AND TenantId = ?',
+      SELECT_BY_ORDER: 'SELECT * FROM pos_token WHERE OrderId = ? AND TenantId = ? LIMIT 1',
+    },
+
+    // How the counter QUEUE performed, as opposed to what it earned.
+    //
+    // Deliberately not in LEDGER_REPORT: a token is operational state, not an
+    // accounting document, and the reporting engine's one rule is that its
+    // figures come from the ledger. Wait times belong to the queue that
+    // measured them.
+    //
+    // Waits are measured only where both ends exist — a token still waiting has
+    // no wait yet, and averaging it in as zero would flatter the number.
+    POS_TOKEN_STATS: {
+      SUMMARY: `
+        SELECT
+          COUNT(*)                                                     AS Issued,
+          SUM(Status = 'served')                                       AS Served,
+          SUM(Status = 'waiting')                                      AS Waiting,
+          SUM(Status = 'called')                                       AS Called,
+          SUM(Status = 'cancelled')                                    AS Cancelled,
+          AVG(CASE WHEN CalledAt IS NOT NULL
+                   THEN TIMESTAMPDIFF(SECOND, CreatedOn, CalledAt) END) AS AvgWaitSeconds,
+          MAX(CASE WHEN CalledAt IS NOT NULL
+                   THEN TIMESTAMPDIFF(SECOND, CreatedOn, CalledAt) END) AS MaxWaitSeconds,
+          AVG(CASE WHEN ServedAt IS NOT NULL AND CalledAt IS NOT NULL
+                   THEN TIMESTAMPDIFF(SECOND, CalledAt, ServedAt) END)  AS AvgCollectSeconds
+        FROM pos_token
+        WHERE TenantId = ? AND TokenDate BETWEEN ? AND ?`,
+      BY_DAY: `
+        SELECT
+          TokenDate                AS Bucket,
+          COUNT(*)                 AS Issued,
+          SUM(Status = 'served')   AS Served,
+          AVG(CASE WHEN CalledAt IS NOT NULL
+                   THEN TIMESTAMPDIFF(SECOND, CreatedOn, CalledAt) END) AS AvgWaitSeconds
+        FROM pos_token
+        WHERE TenantId = ? AND TokenDate BETWEEN ? AND ?`,
+    },
+
+    // The per-day, per-branch counter behind 'daily' numbering. SELECT_FOR_UPDATE
+    // must run inside a transaction — the lock is what serialises two tills.
+    POS_TOKEN_COUNTER: {
+      SELECT_FOR_UPDATE: 'SELECT LastNumber FROM pos_token_counter WHERE TenantId = ? AND BranchDetailId = ? AND TokenDate = ? FOR UPDATE',
+      INSERT: 'INSERT INTO pos_token_counter (TenantId, BranchDetailId, TokenDate, LastNumber, UpdatedOn, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?)',
+      UPDATE: 'UPDATE pos_token_counter SET LastNumber = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE TenantId = ? AND BranchDetailId = ? AND TokenDate = ?',
+    },
+
+    // Just enough of branchdetail to name a branch in a POS dropdown. The two
+    // columns a picker needs and not one more — /api/branchdetails returns the
+    // whole record and is gated on ORGANIZATION_READ, which a cashier working
+    // one outlet's token queue has no business holding.
+    POS_BRANCH: {
+      SELECT_ALL: 'SELECT Id, BranchName FROM branchdetail WHERE TenantId = ? ORDER BY BranchName',
+    },
+
+    // Per-branch POS preferences. A missing row is a valid state meaning "use
+    // the default", so reads never assume one exists.
+    POS_SETTING: {
+      SELECT_ALL: 'SELECT * FROM pos_setting WHERE TenantId = ? ORDER BY BranchDetailId, SettingKey',
+      SELECT_BY_BRANCH: 'SELECT SettingKey, SettingValue FROM pos_setting WHERE TenantId = ? AND BranchDetailId = ?',
+      SELECT_VALUE: 'SELECT SettingValue FROM pos_setting WHERE TenantId = ? AND BranchDetailId = ? AND SettingKey = ? LIMIT 1',
+      UPSERT: `
+        INSERT INTO pos_setting (Id, TenantId, BranchDetailId, SettingKey, SettingValue, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, 1, NOW(), ?, ?)
+        ON DUPLICATE KEY UPDATE SettingValue = VALUES(SettingValue), UpdatedOn = NOW(), UpdatedBy = VALUES(UpdatedBy)`,
+    },
+
+    // Everything hanging off ONE round: the token handed for it, its kitchen
+    // tickets, and the invoice it was billed on. Assembled server-side so every
+    // screen that links an order number opens the same view of it.
+    POS_ORDER_DETAIL: {
+      ORDER: `
+        SELECT o.*, tk.Id AS TokenId, tk.TokenLabel, tk.TokenNumber,
+               tk.Status AS TokenStatus, tk.TokenDate, tk.CalledAt, tk.ServedAt
+          FROM pos_order o
+          LEFT JOIN pos_token tk ON tk.OrderId = o.Id AND tk.TenantId = o.TenantId
+         WHERE o.Id = ? AND o.TenantId = ?`,
+      KOTS: `
+        SELECT Id, KotNo, Status, FiredAt, CreatedOn
+          FROM pos_kot WHERE OrderId = ? AND TenantId = ? ORDER BY CreatedOn ASC`,
+      BILL: `
+        SELECT b.Id AS BillId, b.BillNo, b.Status AS BillStatus, b.Total AS BillTotal,
+               b.SettledAt, b.TransactionDetailLogId,
+               l.TransactionNo, s.Name AS LedgerStatus
+          FROM pos_bill_order bo
+          JOIN pos_bill b ON b.Id = bo.BillId AND b.TenantId = bo.TenantId
+          LEFT JOIN transactiondetaillog l ON l.Id = b.TransactionDetailLogId
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+         WHERE bo.OrderId = ? AND bo.TenantId = ?
+         ORDER BY b.CreatedOn DESC LIMIT 1`,
     },
 
     POS_EXPENSE: {
@@ -1267,11 +1440,55 @@ module.exports = {
       SELECT_LOG_LIST: `
         SELECT l.Id, l.TransactionNo, l.TransactionDate, l.GrossAmount, l.NetAmount,
                l.TaxAmount, l.CustomerName, l.CustomerMobile, l.SettledAt,
-               s.Name AS StatusName, t.Name AS TypeName
+               s.Name AS StatusName, t.Name AS TypeName,
+               -- What the customer was holding: a token number, or a table.
+               -- Correlated subqueries rather than joins: a bill covering three
+               -- rounds would fan this row out three times and every list total
+               -- would triple. An invoice with no POS bill behind it (an
+               -- expense) simply gets nulls.
+               (SELECT GROUP_CONCAT(DISTINCT tk.TokenLabel ORDER BY tk.TokenNumber SEPARATOR ', ')
+                  FROM pos_bill b
+                  JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
+                  JOIN pos_token tk      ON tk.OrderId = bo.OrderId AND tk.TenantId = bo.TenantId
+                 WHERE b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId) AS TokenLabels,
+               (SELECT GROUP_CONCAT(DISTINCT o.TableName ORDER BY o.TableName SEPARATOR ', ')
+                  FROM pos_bill b
+                  JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
+                  JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+                 WHERE b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId) AS TableNames,
+               (SELECT GROUP_CONCAT(DISTINCT o.OrderNo ORDER BY o.OrderNo SEPARATOR ', ')
+                  FROM pos_bill b
+                  JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
+                  JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+                 WHERE b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId) AS OrderNos
           FROM transactiondetaillog l
           LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
           LEFT JOIN transactiontype t       ON t.Id = l.TransactionTypeId
          WHERE l.TenantId = ?`,
+
+      // The rounds one invoice covers, each with the token issued for it (if
+      // any) and the venue it was served at. This is what lets a ledger
+      // document say "Token 7" or "Table G02" instead of standing alone with no
+      // link back to the floor.
+      SELECT_DOC_ORDERS: `
+        SELECT o.Id            AS OrderId,
+               o.OrderNo,
+               o.OrderType,
+               o.Status        AS OrderStatus,
+               o.Total         AS OrderTotal,
+               o.CreatedOn     AS OrderCreatedOn,
+               o.TableId,
+               o.TableName,
+               o.FloorName,
+               tk.Id           AS TokenId,
+               tk.TokenLabel,
+               tk.Status       AS TokenStatus
+          FROM pos_bill b
+          JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
+          JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+          LEFT JOIN pos_token tk ON tk.OrderId = o.Id AND tk.TenantId = o.TenantId
+         WHERE b.TransactionDetailLogId = ? AND b.TenantId = ?
+         ORDER BY o.CreatedOn ASC`,
       COUNT_LOGS: 'SELECT COUNT(*) as total FROM transactiondetaillog WHERE TenantId = ?',
 
       // Lines
@@ -1427,35 +1644,41 @@ module.exports = {
       // Derived table rather than a window function: nothing else in this
       // codebase needs one, and a single report is a poor reason to take a
       // dependency on the server's MySQL version.
+      // Table-less rounds are named by CHANNEL rather than pooled under one
+      // 'No table' row. Counter and delivery are different businesses, and a
+      // single anonymous bucket holding both grows with counter volume while
+      // reading like a floor-plan gap.
       VENUE_REVENUE: `
         SELECT
           o.FloorId                                     AS FloorId,
           COALESCE(o.FloorName, 'Unassigned')           AS FloorName,
           o.TableId                                     AS TableId,
-          COALESCE(o.TableName, 'No table')             AS TableName,
+          COALESCE(o.TableName, ${CHANNEL_LABEL_SQL})   AS TableName,
           MAX(o.TableCapacity)                          AS Capacity,
-          COUNT(DISTINCT o.Id)                          AS Orders,
-          COUNT(DISTINCT l.Id)                          AS Bills,
-          COALESCE(SUM(l.NetAmount      * o.Total / bt.BillTotal), 0) AS NetAmount,
-          COALESCE(SUM(l.DiscountAmount * o.Total / bt.BillTotal), 0) AS DiscountAmount,
-          COALESCE(SUM(l.TaxAmount      * o.Total / bt.BillTotal), 0) AS TaxAmount,
-          COALESCE(SUM(l.GrossAmount    * o.Total / bt.BillTotal), 0) AS GrossAmount
-        FROM transactiondetaillog l
-        JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
-        JOIN transactiontype t       ON t.Id = l.TransactionTypeId
-        JOIN pos_bill b        ON b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId
-        JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
-        JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
-        JOIN (
-          SELECT bo2.BillId AS BillId, SUM(o2.Total) AS BillTotal
-            FROM pos_bill_order bo2
-            JOIN pos_order o2 ON o2.Id = bo2.OrderId AND o2.TenantId = bo2.TenantId
-           WHERE bo2.TenantId = ?
-           GROUP BY bo2.BillId
-        ) bt ON bt.BillId = b.Id AND bt.BillTotal > 0
-        WHERE l.TenantId = ? AND t.Name = ?
-          AND l.TransactionDate BETWEEN ? AND ?
-          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+          ${APPORTIONED_MONEY_SQL}
+        ${APPORTIONED_SALE_ROUNDS_SQL}`,
+
+      // The grouping the projection above requires, kept beside it so the two
+      // cannot drift.
+      //
+      // The channel expression is REPEATED here rather than referenced by its
+      // alias: `TableName` in a GROUP BY resolves to the real pos_order column
+      // of that name, not to the aliased expression, which leaves o.OrderType
+      // ungrouped and fails outright under only_full_group_by.
+      VENUE_GROUP_BY: `
+        GROUP BY o.FloorId, FloorName, o.TableId, COALESCE(o.TableName, ${CHANNEL_LABEL_SQL})
+        ORDER BY GrossAmount DESC`,
+
+      // The same money, cut by WHERE THE SALE HAPPENED rather than by table.
+      // Counter revenue was previously invisible: it is in every total, but no
+      // report could name it, so "how much came over the counter today?" had no
+      // answer. Built on the same apportioned join as the venue report, so the
+      // two can never disagree about the same bill.
+      CHANNEL_REVENUE: `
+        SELECT
+          ${CHANNEL_LABEL_SQL}                          AS Channel,
+          ${APPORTIONED_MONEY_SQL}
+        ${APPORTIONED_SALE_ROUNDS_SQL}`,
 
       // How much we gave away, per product, split by WHY.
       // ItemDiscountAmount is the part decided on the dish itself; the remainder
@@ -1714,6 +1937,21 @@ module.exports = {
   POS_ORDER_TYPES: ['dinein', 'takeaway', 'delivery'],
   POS_KOT_STATUSES: ['pending', 'ready', 'cancelled'],
   POS_TOKEN_STATUSES: ['waiting', 'called', 'served', 'cancelled'],
+
+  // How a branch numbers its counter tokens. Configured per branch in
+  // pos_setting under POS_SETTING_KEYS.TOKEN_NUMBERING.
+  //   DAILY  — restarts at 1 every day, per branch. What a physical token
+  //            counter does, and what keeps the number short enough to call out.
+  //   SERIES — continuous TOK-0001 from the POS_TOKEN numbering series. That
+  //            series lives in transactiontypeconfig, which is TENANT-scoped, so
+  //            branches sharing a tenant share the counter.
+  TOKEN_NUMBERING: { DAILY: 'daily', SERIES: 'series' },
+  // Absence of a pos_setting row means DAILY — a branch that has never been
+  // configured behaves like a token counter, which is the unsurprising default.
+  TOKEN_NUMBERING_DEFAULT: 'daily',
+  POS_SETTING_KEYS: { TOKEN_NUMBERING: 'token.numbering' },
+  // Series tag + fallback prefix for 'series' numbering.
+  POS_TOKEN_SERIES: { TAG: 'POS_TOKEN', PREFIX: 'TOK' },
   // Ordered: the Tracking board advances an order one stage at a time, so the
   // order of this list IS the workflow. 'cancelled' is an exit, not a stage.
   POS_ONLINE_ORDER_STAGES: ['new', 'accepted', 'processing', 'out for delivery', 'delivered'],

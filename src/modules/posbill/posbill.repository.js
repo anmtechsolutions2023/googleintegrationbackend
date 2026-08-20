@@ -48,6 +48,28 @@ const getBillOrderIdsTx = async (conn, billId, tenantId) => {
 };
 
 /**
+ * Order type / table / branch for the rounds a bill covers.
+ *
+ * Enough to answer "is this a counter sale?" without pulling the priced line
+ * snapshots, which are large and irrelevant to that question.
+ *
+ * @param {Object} conn
+ * @param {string[]} orderIds
+ * @param {string} tenantId
+ * @returns {Promise<Array<{Id:string, OrderType:string, TableId:string|null, BranchDetailId:string|null}>>}
+ */
+const getOrdersMetaTx = async (conn, orderIds, tenantId) => {
+  const ids = [...new Set((orderIds || []).filter(Boolean))];
+  if (ids.length === 0) return [];
+  const sql = expandIds(
+    'SELECT Id, OrderType, TableId, BranchDetailId FROM pos_order WHERE TenantId = ? AND Id IN (:ids)',
+    ids.length,
+  );
+  const [rows] = await conn.execute(sql, [tenantId, ...ids]);
+  return rows;
+};
+
+/**
  * Flattens the priced line snapshots of several orders into one list.
  *
  * Uses what the orders STORED, not the live tax chain — a bill must reflect the
@@ -177,6 +199,7 @@ const getSessionCustomerIdTx = async (conn, orderIds, tenantId) => {
 module.exports = {
   setBillOrdersTx,
   getBillOrderIdsTx,
+  getOrdersMetaTx,
   getOrderLinesTx,
   toLedgerLinesTx,
   getSessionCustomerIdTx,

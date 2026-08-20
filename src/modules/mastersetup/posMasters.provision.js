@@ -66,6 +66,9 @@ const SERIES = [
   ['POS_ORDER', 'ORD', 'ORD-{0000}'],
   ['POS_KOT', 'KOT', 'KOT-{0000}'],
   ['POS_BILL', 'BILL', 'BILL-{0000}'],
+  // Counter tokens, for branches set to 'series' numbering. Branches on the
+  // default 'daily' setting count in pos_token_counter and never touch this.
+  ['POS_TOKEN', 'TOK', 'TOK-{0000}'],
 ];
 
 // Permitted status moves per series. SETTLED → CANCELLED is deliberately absent

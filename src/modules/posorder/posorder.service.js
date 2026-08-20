@@ -329,6 +329,11 @@ class PosOrderService extends BaseCRUDService {
       await connection.execute(
         'DELETE FROM pos_kot WHERE OrderId = ? AND TenantId = ?', [id, tenantId],
       );
+      // And its counter token: pos_token.OrderId is a foreign key, so leaving it
+      // would reject the delete outright with a raw SQL error the cashier cannot
+      // act on — and a token still calling for food that no longer exists is
+      // worse than no token at all.
+      await connection.execute(QUERIES.POS_TOKEN.DELETE_BY_ORDER, [id, tenantId]);
       await connection.execute(QUERIES.POS_ORDER.DELETE, [id, tenantId]);
       await refreshTable(connection, order.TableId, tenantId, userEmail);
       return { deletedOrderId: id };

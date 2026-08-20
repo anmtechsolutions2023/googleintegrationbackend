@@ -2,6 +2,7 @@
 // Controller layer for POS Order — HTTP request/response handling.
 
 const service = require('./posorder.service');
+const detailService = require('./posorder.detail.service');
 const { asyncHandler } = require('../../utils/controllerHelper');
 const {
   successResponse,
@@ -42,6 +43,16 @@ const getById = asyncHandler(async (req, res) => {
   logger.info('PosOrder.getById called', { id, tenantId });
   const record = await service.getById(id, tenantId);
   successResponse(res, record, 'POS Order retrieved successfully');
+});
+
+// The round plus its token, tickets and invoice — what the shared order-detail
+// modal renders, wherever an order number was clicked.
+const getDetail = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { tid: tenantId } = req.user;
+  logger.info('PosOrder.getDetail called', { id, tenantId });
+  const detail = await detailService.getOrderDetail(id, tenantId);
+  successResponse(res, detail, 'POS Order detail retrieved successfully');
 });
 
 const create = asyncHandler(async (req, res) => {
@@ -87,6 +98,7 @@ const fireKot = asyncHandler(async (req, res) => {
 module.exports = {
   getAll: [validateQuery(paginationSchema), getAll],
   getById: [validateParams(uuidParamSchema), getById],
+  getDetail: [validateParams(uuidParamSchema), getDetail],
   create: [validateBody(createSchema), create],
   update: [validateParams(uuidParamSchema), validateBody(updateSchema), update],
   deleteById: [validateParams(uuidParamSchema), deleteById],

@@ -146,6 +146,21 @@ describe('deleteRound — remove a round even after KOT fired', () => {
     expect(tableUpdate.params[4]).toBeNull(); // CurrentOrderId cleared
   });
 
+  it('pulls the round\'s counter token before deleting the order', async () => {
+    // pos_token.OrderId is a foreign key: leaving the token behind rejects the
+    // delete outright with a raw SQL error the cashier cannot act on. And a
+    // token still calling for food that no longer exists is worse than none.
+    state.order = { Id: 'o1', TableId: null, Status: 'open', Items: [] };
+    state.kots = [];
+    await service.remove('o1', 'tn', 'u@x');
+
+    const sqls = executed.map((e) => e.sql);
+    const tokenDelete = sqls.findIndex((s) => /DELETE FROM pos_token WHERE OrderId/.test(s));
+    const orderDelete = sqls.findIndex((s) => /DELETE FROM pos_order/.test(s));
+    expect(tokenDelete).toBeGreaterThan(-1);
+    expect(tokenDelete).toBeLessThan(orderDelete);
+  });
+
   it('keeps the table occupied when other rounds remain', async () => {
     state.order = { Id: 'o1', TableId: 't1', Status: 'open', Items: [] };
     state.openAfterDelete = [{ Id: 'o2' }];

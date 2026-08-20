@@ -35,8 +35,16 @@ const route = (over = {}) => {
     if (/AS Bucket/i.test(q)) {
       return Promise.resolve([over.trend || [{ Bucket: '2026-08-01', Documents: 3, GrossAmount: '354.00', DiscountAmount: '20.00', TaxAmount: '54.00' }]]);
     }
-    // Venue and discount shapes are matched BEFORE the generic ones — they read
-    // the same tables, and the broader patterns below would swallow them.
+    // Channel, venue and discount shapes are matched BEFORE the generic ones —
+    // they read the same tables, and the broader patterns below would swallow
+    // them. Channel comes first: it shares its whole join with the venue query.
+    if (/AS Channel/i.test(q)) {
+      return Promise.resolve([over.channels || [
+        { Channel: 'Dine-in',  Orders: '6', Bills: '4', NetAmount: '800.00', DiscountAmount: '20.00', TaxAmount: '144.00', GrossAmount: '944.00' },
+        { Channel: 'Counter',  Orders: '9', Bills: '9', NetAmount: '400.00', DiscountAmount: '0.00',  TaxAmount: '72.00',  GrossAmount: '472.00' },
+        { Channel: 'Delivery', Orders: '2', Bills: '2', NetAmount: '200.00', DiscountAmount: '0.00',  TaxAmount: '36.00',  GrossAmount: '236.00' },
+      ]]);
+    }
     if (/AS FloorName/i.test(q)) {
       return Promise.resolve([over.venue || [
         { FloorId: 'f1', FloorName: 'Ground', TableId: 't1', TableName: 'T1', Capacity: '4', Orders: '3', Bills: '2', NetAmount: '200.00', DiscountAmount: '0.00', TaxAmount: '36.00', GrossAmount: '236.00' },
@@ -94,6 +102,8 @@ const route = (over = {}) => {
 };
 
 const sqlOf = (re) => mockConn.execute.mock.calls.map(([s]) => String(s)).filter((s) => re.test(s));
+/** Same money rounding the service applies, so expectations state the rule. */
+const round2 = (v) => Math.round(v * 100) / 100;
 const allSql = () => mockConn.execute.mock.calls.map(([s]) => String(s)).join('\n');
 const paramsOf = (re) => mockConn.execute.mock.calls.find(([s]) => re.test(String(s)))?.[1];
 
@@ -346,6 +356,103 @@ describe('discount report — what we gave away, and why', () => {
 });
 
 // The mix-and-match requirement: the same reports, sliced by venue.
+// Counter sales were always in the totals — a counter bill posts the same
+// ledger document as any other — but nothing could NAME them, so "how much came
+// over the counter today?" had no answer.
+describe('channel report — where the sale happened', () => {
+  it('classifies on the round, with the table winning over the order type', async () => {
+    // Same rule that decides whether a token is issued at settle time: a round
+    // seated at a table is dine-in revenue whatever it was typed as. If the two
+    // disagreed, a sale could get a counter token and be reported as dine-in.
+    await reports.channelReport({ preset: 'month' }, TENANT);
+    const sql = sqlOf(/AS Channel/)[0];
+    expect(sql).toMatch(/WHEN o\.TableId IS NOT NULL THEN 'Dine-in'/);
+    expect(sql).toMatch(/'takeaway' THEN 'Counter'/);
+    expect(sql).toMatch(/'delivery' THEN 'Delivery'/);
+  });
+
+  it('apportions a bill across its rounds, exactly as the venue report does', async () => {
+    // The two reports slice the same money. Sharing the join is what stops them
+    // disagreeing about the same bill.
+    await reports.channelReport({ preset: 'month' }, TENANT);
+    const channelSql = sqlOf(/AS Channel/)[0];
+    await reports.venueReport({ preset: 'month' }, TENANT);
+    const venueSql = sqlOf(/AS FloorName/)[0];
+
+    expect(channelSql).toMatch(/o\.Total \/ bt\.BillTotal/);
+    // The shared join is byte-identical, not merely similar — the two reports
+    // differ only in what they project and group by.
+    const join = (sql) => {
+      const from = sql.indexOf('FROM transactiondetaillog');
+      const end = sql.indexOf("PARTIALLY_PAID')") + "PARTIALLY_PAID')".length;
+      return sql.slice(from, end);
+    };
+    expect(join(channelSql)).toBe(join(venueSql));
+  });
+
+  it('reads only settled and part-paid documents', async () => {
+    await reports.channelReport({ preset: 'month' }, TENANT);
+    expect(sqlOf(/AS Channel/)[0]).toMatch(/s\.Name IN \('SETTLED', 'PARTIALLY_PAID'\)/);
+  });
+
+  it('reports each channel’s share of revenue', async () => {
+    const r = await reports.channelReport({ preset: 'month' }, TENANT);
+    const total = 944 + 472 + 236;
+    const counter = r.channels.find((c) => c.Channel === 'Counter');
+
+    expect(r.totalGross).toBe(total);
+    expect(counter.ShareOfRevenue).toBe(round2((472 / total) * 100));
+    expect(r.channels.reduce((s, c) => s + c.ShareOfRevenue, 0)).toBeCloseTo(100, 1);
+  });
+
+  it('gives each channel an average bill — the number that makes them comparable', async () => {
+    const r = await reports.channelReport({ preset: 'month' }, TENANT);
+    const counter = r.channels.find((c) => c.Channel === 'Counter');
+    const dinein = r.channels.find((c) => c.Channel === 'Dine-in');
+
+    expect(counter.AvgBillValue).toBe(round2(472 / 9));
+    expect(dinein.AvgBillValue).toBe(round2(944 / 4));
+  });
+
+  it('divides by zero nowhere when the range is empty', async () => {
+    route({ channels: [] });
+    const r = await reports.channelReport({ preset: 'month' }, TENANT);
+    expect(r.totalGross).toBe(0);
+    expect(r.channels).toEqual([]);
+  });
+
+  it('accepts the shared branch and venue bounds', async () => {
+    await reports.channelReport({ preset: 'month', branchId: 'br-1', floorId: 'f-1' }, TENANT);
+    const sql = sqlOf(/AS Channel/)[0];
+    expect(sql).toMatch(/l\.BranchId = \?/);
+    expect(sql).toMatch(/o\.FloorId = \?/);
+  });
+});
+
+// A table-less round used to collapse into one anonymous 'No table' row holding
+// counter and delivery together — a bucket that grows with counter volume while
+// reading like a floor-plan gap.
+describe('venue report — table-less rounds are named by channel', () => {
+  it('labels a round with no table by its channel', async () => {
+    await reports.venueReport({ preset: 'month' }, TENANT);
+    const sql = sqlOf(/AS FloorName/)[0];
+    expect(sql).toMatch(/COALESCE\(o\.TableName,\s*\n?\s*CASE/);
+    expect(sql).not.toMatch(/'No table'/);
+  });
+
+  // `TableName` in a GROUP BY resolves to the real pos_order column of that
+  // name, NOT to the aliased expression — which leaves o.OrderType ungrouped
+  // and fails outright under only_full_group_by. The expression has to be
+  // repeated. Mocked tests cannot catch this; the database can and did.
+  it('groups by the channel expression itself, never by the alias', async () => {
+    await reports.venueReport({ preset: 'month' }, TENANT);
+    const sql = sqlOf(/AS FloorName/)[0];
+    const groupBy = sql.slice(sql.indexOf('GROUP BY'));
+    expect(groupBy).toMatch(/COALESCE\(o\.TableName,\s*\n?\s*CASE/);
+    expect(groupBy).not.toMatch(/GROUP BY o\.FloorId, FloorName, o\.TableId, TableName/);
+  });
+});
+
 describe('venue filters on the existing reports', () => {
   it('filters sales by floor without fanning the rows out', async () => {
     // A join through pos_bill_order would multiply a multi-round bill into

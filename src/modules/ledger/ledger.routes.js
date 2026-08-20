@@ -29,6 +29,8 @@ router.get('/reports/tenders', authenticateToken, checkScope(...READ), ...contro
 router.get('/reports/cashflow', authenticateToken, checkScope(...READ), ...controller.cashFlowReport);
 router.get('/reports/expenses', authenticateToken, checkScope(...READ), ...controller.expenseReport);
 router.get('/reports/venue', authenticateToken, checkScope(...READ), ...controller.venueReport);
+// Revenue by sales channel — dine-in / counter / delivery.
+router.get('/reports/channels', authenticateToken, checkScope(...READ), ...controller.channelReport);
 router.get('/reports/discounts', authenticateToken, checkScope(...READ), ...controller.discountReport);
 
 router.get('/documents', authenticateToken, checkScope(...READ), ...controller.list);

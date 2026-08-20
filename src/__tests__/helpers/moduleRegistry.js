@@ -446,9 +446,14 @@ const registry = [
     servicePath: '../../modules/postoken/postoken.service',
     httpPath: '/api/pos/tokens',
     exports: POS,
-    createData:  { TokenNumber: 1, Active: true },
+    // TokenNumber/TokenLabel are minted server-side from the branch's numbering
+    // mode, so a client sends only the queue it belongs to.
+    createData:  { BranchDetailId: UUID, Active: true },
     updateData:  { Status: 'called' },
-    existingRow: { TokenNumber: 1, OrderId: null, Status: 'waiting', BranchDetailId: null },
+    existingRow: {
+      TokenNumber: 1, TokenLabel: '1', TokenDate: '2026-08-16', OrderId: null,
+      Status: 'waiting', CalledAt: null, ServedAt: null, BranchDetailId: UUID,
+    },
   },
   {
     name: 'posexpense',

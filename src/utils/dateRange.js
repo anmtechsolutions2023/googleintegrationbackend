@@ -43,6 +43,22 @@ const pad = (n) => String(n).padStart(2, '0');
 const toISODate = (date) =>
   `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 
+/**
+ * The calendar date a business document belongs to.
+ *
+ * The one authority for "which day is this?", used by whatever WRITES a date
+ * and by whatever READS a range. Documents were previously stamped with
+ * `toISOString().slice(0, 10)` — the date in UTC — while every report resolves
+ * a range from toISODate below, which reads the LOCAL calendar. In UTC+5:30
+ * that filed every sale taken between midnight and 05:30 under the previous
+ * day: the till said today, Finance said yesterday, and neither was lying
+ * about its own clock.
+ *
+ * @param {Date|string} [when] - Defaults to now.
+ * @returns {string} YYYY-MM-DD, local calendar.
+ */
+const businessDate = (when) => toISODate(when ? new Date(when) : new Date());
+
 const daysAgo = (n) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -128,6 +144,7 @@ module.exports = {
   weekendPredicate,
   toDateTimeBounds,
   toISODate,
+  businessDate,
   VALID_PRESETS,
   VALID_BUCKETS,
 };

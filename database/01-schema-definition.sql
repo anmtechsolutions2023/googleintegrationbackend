@@ -998,6 +998,8 @@ DROP TABLE IF EXISTS pos_customer;
 DROP TABLE IF EXISTS pos_online_order;
 DROP TABLE IF EXISTS pos_feedback;
 DROP TABLE IF EXISTS pos_token;
+DROP TABLE IF EXISTS pos_token_counter;
+DROP TABLE IF EXISTS pos_setting;
 DROP TABLE IF EXISTS pos_expense;
 DROP TABLE IF EXISTS pos_staff;
 
@@ -1338,13 +1340,37 @@ CREATE TABLE pos_online_order (
     UNIQUE (Platform, ExternalRef, TenantId)
 );
 
--- 4.14 pos_token — token/queue number system
+-- 4.14 pos_token — counter-service queue number
+--
+-- The customer-facing handle for an order taken at the counter, where there is
+-- no table to anchor it to. Issued when a takeaway bill is SETTLED (pay first,
+-- then token), so a number always has a paid order behind it.
+--
+-- Lifecycle: waiting --call--> called --serve--> served   (cancelled is an exit)
 CREATE TABLE pos_token (
     Id              VARCHAR(50)  NOT NULL,
+    -- The sortable counter. In 'daily' mode this is the number the customer is
+    -- told; in 'series' mode it is the series counter behind TokenLabel. One
+    -- integer column serves both so the queue sorts the same either way.
     TokenNumber     INT          NOT NULL,
+    -- What is displayed and called out: '12' or 'TOK-0438'. Rendered once at
+    -- issue time — re-deriving it later would need the numbering mode that was
+    -- in force back then, which nothing records.
+    TokenLabel      VARCHAR(50)  NOT NULL,
+    -- The day the token belongs to. This is the reset axis for 'daily'
+    -- numbering AND the queue filter: a counter shows today, not all history.
+    TokenDate       DATE         NOT NULL,
     OrderId         VARCHAR(50)  NULL,
     Status          VARCHAR(20)  NOT NULL DEFAULT 'waiting',
-    BranchDetailId  VARCHAR(50)  NULL,
+    -- When it was called to the counter and when it was handed over. Ordering
+    -- the customer display by CalledAt is what keeps the most recent call at
+    -- the top; the pair also makes wait time answerable later.
+    CalledAt        DATETIME     NULL,
+    ServedAt        DATETIME     NULL,
+    -- NOT NULL: a token belongs to exactly one counter queue, and a nullable
+    -- branch cannot participate in the unique key below — MySQL treats NULLs as
+    -- distinct in a unique index, so two tills could both mint token #7.
+    BranchDetailId  VARCHAR(50)  NOT NULL,
     TenantId        VARCHAR(50)  NOT NULL,
     Active          TINYINT(1)   NOT NULL,
     CreatedOn       DATETIME,
@@ -1352,8 +1378,59 @@ CREATE TABLE pos_token (
     UpdatedOn       DATETIME,
     UpdatedBy       VARCHAR(50),
     PRIMARY KEY (Id),
-    UNIQUE (TokenNumber, BranchDetailId, TenantId),
+    -- One number per branch per day. The backstop if the counter row lock in
+    -- pos_token_counter ever fails to serialise two tills.
+    UNIQUE (TenantId, BranchDetailId, TokenDate, TokenNumber),
+    -- The customer display polls this every few seconds.
+    INDEX idx_postoken_queue (TenantId, BranchDetailId, TokenDate, Status),
     FOREIGN KEY (OrderId) REFERENCES pos_order(Id)
+);
+
+-- 4.14b pos_token_counter — the per-day, per-branch token counter
+--
+-- Taken with SELECT ... FOR UPDATE so two tills serialise on it, exactly as
+-- transactiontypeconfig serialises document numbering. A dedicated counter row
+-- is used rather than MAX(TokenNumber)+1 over pos_token because that relies on
+-- InnoDB gap locks over an empty range — correct, but too subtle to rest a sale
+-- on. Rows are per day, so 'daily' numbering resets simply by moving to a new
+-- one; yesterday's row is left as the record of how many it reached.
+CREATE TABLE pos_token_counter (
+    TenantId        VARCHAR(50)  NOT NULL,
+    BranchDetailId  VARCHAR(50)  NOT NULL,
+    TokenDate       DATE         NOT NULL,
+    LastNumber      INT          NOT NULL DEFAULT 0,
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (TenantId, BranchDetailId, TokenDate)
+);
+
+-- 4.14c pos_setting — per-branch POS preferences
+--
+-- Branch-scoped, not tenant-scoped: a food-court counter and a fine-dine outlet
+-- under one owner legitimately want different behaviour. BranchDetailId is
+-- NOT NULL for the same reason as on pos_token — a nullable "tenant default"
+-- row cannot be deduplicated by the unique key. A branch with no row falls back
+-- to the default in code, so absence is a valid, meaningful state.
+--
+-- Keys in use:
+--   token.numbering  'daily'  — TokenNumber restarts at 1 each day (default)
+--                    'series' — continuous TOK-0001 from the POS_TOKEN series.
+--                               NOTE: that series lives in transactiontypeconfig,
+--                               which is tenant-scoped, so 'series' branches
+--                               under one tenant share a counter.
+CREATE TABLE pos_setting (
+    Id              VARCHAR(50)   NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    BranchDetailId  VARCHAR(50)   NOT NULL,
+    SettingKey      VARCHAR(100)  NOT NULL,
+    SettingValue    VARCHAR(255)  NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (TenantId, BranchDetailId, SettingKey)
 );
 
 -- 4.15 pos_expense — petty-cash / operational expenses

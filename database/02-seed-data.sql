@@ -593,7 +593,7 @@ INSERT IGNORE INTO transactiontypestatus (Id, Name, Active, TenantId, CreatedOn,
 -- shared counter cannot give. Prefix differs from the PART 9b 'Onboarding' row
 -- so UNIQUE(StartCounterNo, Prefix, Format, TenantId) is satisfied; the rendered
 -- number comes from Format, so these read as INV-0001 / EXP-0001.
--- Orders, KOTs and bills have series too. Their numbers used to be minted in the
+-- Orders, KOTs, bills and counter tokens have series too. Their numbers used to be minted in the
 -- browser from Date.now(): ORD-<last 6 digits of epoch ms> wrapped every ~16m40s
 -- and collided with UNIQUE (OrderNo, TenantId), failing the sale, and KotNo was
 -- the raw 13-digit epoch the kitchen display then showed as the ticket number.
@@ -603,7 +603,11 @@ INSERT IGNORE INTO transactiontypeconfig (Id, TenantId, StartCounterNo, Prefix, 
     ('t0000001-ttc0-0000-0000-000000000003', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'EXP',  'EXP-{0000}',  'EXPENSE',   1, NOW(), 'system-seed', 'system-seed'),
     ('t0000001-ttc0-0000-0000-000000000004', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'ORD',  'ORD-{0000}',  'POS_ORDER', 1, NOW(), 'system-seed', 'system-seed'),
     ('t0000001-ttc0-0000-0000-000000000005', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'KOT',  'KOT-{0000}',  'POS_KOT',   1, NOW(), 'system-seed', 'system-seed'),
-    ('t0000001-ttc0-0000-0000-000000000006', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'BILL', 'BILL-{0000}', 'POS_BILL',  1, NOW(), 'system-seed', 'system-seed');
+    ('t0000001-ttc0-0000-0000-000000000006', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'BILL', 'BILL-{0000}', 'POS_BILL',  1, NOW(), 'system-seed', 'system-seed'),
+    -- Counter tokens, for branches configured with 'series' numbering (see
+    -- pos_setting.token.numbering). Branches on the default 'daily' setting
+    -- never touch this row — they count in pos_token_counter instead.
+    ('t0000001-ttc0-0000-0000-000000000007', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'TOK',  'TOK-{0000}',  'POS_TOKEN', 1, NOW(), 'system-seed', 'system-seed');
 
 -- 11c) Document types, each bound to its own series.
 INSERT IGNORE INTO transactiontype (Id, Name, TransactionTypeConfigId, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES

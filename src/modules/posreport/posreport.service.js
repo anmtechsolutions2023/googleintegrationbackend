@@ -99,14 +99,20 @@ class PosReportService {
         [tenantId, days]
       );
 
-      // Recent 10 rounds. Joined to pos_table so the dashboard can name the table
-      // instead of printing a raw uuid, and cancelled rounds are left out —
-      // a voided round is not something that happened at the front desk.
+      // Recent 10 rounds, each with the identifier the customer is actually
+      // holding. The table was already joined; the TOKEN was not, so every
+      // counter order showed a dash in the only column that could have told a
+      // cashier which order it was.
+      //
+      // TableName prefers the round's frozen snapshot and falls back to the
+      // live table, so a renamed table does not blank out yesterday's rows.
       const [recentOrders] = await conn.execute(
         `SELECT o.Id, o.OrderNo, o.OrderType, o.Status, o.Total, o.CreatedOn,
-                o.TableId, t.Name AS TableName
+                o.TableId, COALESCE(o.TableName, t.Name) AS TableName,
+                tk.Id AS TokenId, tk.TokenLabel, tk.Status AS TokenStatus
          FROM pos_order o
          LEFT JOIN pos_table t ON t.Id = o.TableId AND t.TenantId = o.TenantId
+         LEFT JOIN pos_token tk ON tk.OrderId = o.Id AND tk.TenantId = o.TenantId
          WHERE o.TenantId = ?
            AND LOWER(COALESCE(o.Status, '')) <> 'cancelled'
          ORDER BY o.CreatedOn DESC

@@ -37,8 +37,9 @@ describe('provisionPosMasters', () => {
     expect(countBy(conn.inserted, 'expense_category')).toBe(7);
     expect(countBy(conn.inserted, 'asset_category')).toBe(5);
     expect(countBy(conn.inserted, 'pos_food_type')).toBe(3);        // Veg/Vegan/Non-Veg
-    // One numbering series per document type: sales, expenses, orders, KOTs, bills.
-    expect(countBy(conn.inserted, 'transactiontypeconfig')).toBe(5);
+    // One numbering series per document type: sales, expenses, orders, KOTs,
+    // bills, counter tokens.
+    expect(countBy(conn.inserted, 'transactiontypeconfig')).toBe(6);
     // 5 sale transitions + 3 expense transitions.
     expect(countBy(conn.inserted, 'transactiontypebaseconversion')).toBe(8);
   });
@@ -49,10 +50,10 @@ describe('provisionPosMasters', () => {
 
     const configs = paramsOf(conn, 'INSERT INTO transactiontypeconfig');
     expect(configs.map((p) => p[4])).toEqual([
-      'POS_SALE', 'EXPENSE', 'POS_ORDER', 'POS_KOT', 'POS_BILL',
+      'POS_SALE', 'EXPENSE', 'POS_ORDER', 'POS_KOT', 'POS_BILL', 'POS_TOKEN',
     ]);
     expect(configs.map((p) => p[3])).toEqual([
-      'INV-{0000}', 'EXP-{0000}', 'ORD-{0000}', 'KOT-{0000}', 'BILL-{0000}',
+      'INV-{0000}', 'EXP-{0000}', 'ORD-{0000}', 'KOT-{0000}', 'BILL-{0000}', 'TOK-{0000}',
     ]);
   });
 

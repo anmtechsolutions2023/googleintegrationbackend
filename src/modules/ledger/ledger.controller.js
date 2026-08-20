@@ -54,5 +54,6 @@ module.exports = {
   expenseReport: [validateQuery(reportQuerySchema), report(reportService.expenseReport, 'Expense report retrieved')],
   overviewReport: [validateQuery(reportQuerySchema), report(reportService.overviewReport, 'Finance overview retrieved')],
   venueReport: [validateQuery(reportQuerySchema), report(reportService.venueReport, 'Venue report retrieved')],
+  channelReport: [validateQuery(reportQuerySchema), report(reportService.channelReport, 'Channel report retrieved')],
   discountReport: [validateQuery(reportQuerySchema), report(reportService.discountReport, 'Discount report retrieved')],
 };

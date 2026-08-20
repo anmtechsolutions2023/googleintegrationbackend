@@ -287,6 +287,65 @@ const overviewReport = async (query, tenantId) => {
 };
 
 /**
+ * Revenue by SALES CHANNEL: dine-in, counter, delivery.
+ *
+ * Counter sales were always in the totals — a counter bill posts the same ledger
+ * document as any other — but no report could name them, so "how much came over
+ * the counter today?" had no answer and the venue report filed them under
+ * "No table" beside delivery.
+ *
+ * Shares the apportioned bill→round join with the venue report, so the same
+ * bill cannot be counted differently by the two, and shares the channel
+ * expression with it too — one definition of what a counter sale is.
+ *
+ * @param {Object} query - { preset, fromDate, toDate, branchId, floorId, tableId }
+ */
+const channelReport = (query, tenantId) =>
+  withConnection(async (conn) => {
+    const range = resolveRange(query);
+    const params = [tenantId, tenantId, LEDGER.TYPE_POS_SALE, range.from, range.to];
+
+    let sql = QUERIES.LEDGER_REPORT.CHANNEL_REVENUE
+      + weekendPredicate(range.weekendOnly, 'l.TransactionDate');
+    if (query.branchId) { sql += ' AND l.BranchId = ?'; params.push(query.branchId); }
+    // Filtered on the joined round directly — this report already walks to the
+    // round, so the EXISTS indirection venueFilter uses would be redundant.
+    if (query.floorId) { sql += ' AND o.FloorId = ?'; params.push(query.floorId); }
+    if (query.tableId) { sql += ' AND o.TableId = ?'; params.push(query.tableId); }
+
+    sql += ' GROUP BY Channel ORDER BY GrossAmount DESC';
+
+    const [rows] = await conn.execute(sql, params);
+
+    const channels = rows.map((r) => {
+      const c = numeric(r, [
+        'Orders', 'Bills', 'NetAmount', 'DiscountAmount', 'TaxAmount', 'GrossAmount',
+      ]);
+      return {
+        ...c,
+        // What a customer on this channel is worth. A counter that takes half
+        // the bills at a third of the average is a different business from the
+        // dining room, and only this number says so.
+        AvgBillValue: c.Bills > 0 ? round2(c.GrossAmount / c.Bills) : 0,
+      };
+    });
+
+    const totalGross = channels.reduce((s, c) => s + c.GrossAmount, 0);
+
+    return {
+      range,
+      // Share is computed here rather than in SQL: a window function for one
+      // percentage is a MySQL-version dependency this codebase does not take
+      // elsewhere, and the rows are already in hand.
+      channels: channels.map((c) => ({
+        ...c,
+        ShareOfRevenue: totalGross > 0 ? round2((c.GrossAmount / totalGross) * 100) : 0,
+      })),
+      totalGross: round2(totalGross),
+    };
+  });
+
+/**
  * Revenue by floor, and by table within floor.
  *
  * Grouped on the venue SNAPSHOT frozen on each round, not on a live join to
@@ -312,7 +371,7 @@ const venueReport = (query, tenantId) =>
     if (query.floorId) { sql += ' AND o.FloorId = ?'; params.push(query.floorId); }
     if (query.tableId) { sql += ' AND o.TableId = ?'; params.push(query.tableId); }
 
-    sql += ' GROUP BY o.FloorId, FloorName, o.TableId, TableName ORDER BY GrossAmount DESC';
+    sql += QUERIES.LEDGER_REPORT.VENUE_GROUP_BY;
 
     const [rows] = await conn.execute(sql, params);
 
@@ -433,5 +492,6 @@ module.exports = {
   expenseReport,
   overviewReport,
   venueReport,
+  channelReport,
   discountReport,
 };

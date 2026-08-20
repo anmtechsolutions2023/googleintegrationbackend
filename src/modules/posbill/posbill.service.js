@@ -9,8 +9,14 @@ const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const pricingService = require('../pricing/pricing.service');
 const ledgerService = require('../ledger/ledger.service');
+const tokenService = require('../postoken/postoken.service');
 const { issuePosNumber } = require('../posorder/posNumbering');
 const repository = require('./posbill.repository');
+const { logger } = require('../../utils/logger');
+
+// A sale with no table and this order type is a counter sale — the only kind
+// that needs a queue number.
+const POS_ORDER_TYPE_TAKEAWAY = 'takeaway';
 
 /**
  * Normalizes tenders for the ledger.
@@ -45,6 +51,50 @@ const asObject = (v) => {
   if (!v) return null;
   if (typeof v === 'object') return v;
   try { const p = JSON.parse(v); return p && typeof p === 'object' ? p : null; } catch { return null; }
+};
+
+/**
+ * Issues a counter token when the bill is a counter sale, and only then.
+ *
+ * A counter sale is one where every round is takeaway and none sat at a table:
+ * that is precisely the case where the customer has no other handle on their
+ * order. Dine-in is identified by its table and delivery by its address, so
+ * neither gets one.
+ *
+ * Runs INSIDE the settle transaction on purpose — payment and token are one
+ * atomic act, so a dropped follow-up request cannot leave a paying customer
+ * with no number.
+ *
+ * @returns {Promise<Object>} { TokenNumber, TokenLabel, TokenDate } or {}.
+ */
+const issueCounterTokenTx = async (conn, { billId, orderIds, bill }, tenantId, userEmail) => {
+  const orders = await repository.getOrdersMetaTx(conn, orderIds, tenantId);
+  if (orders.length === 0) return {};
+
+  const isCounterSale = orders.every(
+    (o) => !o.TableId && String(o.OrderType || '').toLowerCase() === POS_ORDER_TYPE_TAKEAWAY,
+  );
+  if (!isCounterSale) return {};
+
+  // The bill's branch, falling back to the rounds' own. A token is unique
+  // within a branch, so without one it cannot be numbered at all.
+  const branchId = bill.BranchDetailId || orders.find((o) => o.BranchDetailId)?.BranchDetailId;
+  if (!branchId) {
+    // The sale is already paid and posted. Refusing it now over a missing
+    // branch would undo a completed payment to fix a configuration gap, so the
+    // gap is reported instead and the till carries on.
+    logger.warn('Counter sale settled with no branch — no token issued', { billId, tenantId });
+    return {};
+  }
+
+  const token = await tokenService.issueTokenTx(
+    conn, { branchId, orderId: orders[0].Id }, tenantId, userEmail,
+  );
+  return {
+    TokenNumber: token.TokenNumber,
+    TokenLabel: token.TokenLabel,
+    TokenDate: token.TokenDate,
+  };
 };
 
 /** Normalizes a discount amount into the shape the pricing engine expects. */
@@ -193,10 +243,15 @@ class PosBillService extends BaseCRUDService {
         tenantId,
       ]);
 
+      // ── Counter token ──────────────────────────────────────────────────
+      const token = await issueCounterTokenTx(
+        connection, { billId: id, orderIds, bill: existing }, tenantId, userEmail,
+      );
+
       // Read back on the transaction's own connection, or the caller gets the
       // bill as it looked BEFORE it was settled.
       const bill = await this.getByIdTx(connection, id, tenantId);
-      return { ...bill, ...posted };
+      return { ...bill, ...posted, ...token };
     });
   }
 
