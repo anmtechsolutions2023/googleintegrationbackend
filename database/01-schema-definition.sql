@@ -1164,6 +1164,11 @@ CREATE TABLE pos_customer (
     Visits          INT             NOT NULL DEFAULT 0,
     TotalSpent      DECIMAL(12,2)   NOT NULL DEFAULT 0,
     LoyaltyPoints   INT             NOT NULL DEFAULT 0,
+    -- Stamped when a sale of theirs settles. Visits/TotalSpent/LoyaltyPoints
+    -- above are a PROJECTION maintained by poscustomer.stats.service on the
+    -- settle path — the ledger remains the truth, and these are the answers a
+    -- till needs without aggregating a year of documents at the counter.
+    LastVisitAt     DATETIME        NULL,
     -- The same human as a master contactdetail. pos_customer is the POS-facing
     -- CRM projection (visits, loyalty, spend); contactdetail is the identity the
     -- ledger records. NULL for walk-ins, and only ever set when a phone number
@@ -1188,6 +1193,14 @@ CREATE TABLE pos_feedback (
     CustomerName    VARCHAR(100)   NULL,
     Rating          INT            NULL,
     Comments        VARCHAR(1000)  NULL,
+    -- WHICH VISIT this is about.
+    --
+    -- Feedback with no order behind it is an opinion with no context: it cannot
+    -- be traced to a table, a token, a bill, or the food that was actually
+    -- served. Nullable because a comment card left at the door is still worth
+    -- keeping, and because every row that existed before this column did has
+    -- no order to point at.
+    OrderId         VARCHAR(50)    NULL,
     BranchDetailId  VARCHAR(50)    NULL,
     TenantId        VARCHAR(50)    NOT NULL,
     Active          TINYINT(1)     NOT NULL,
@@ -1196,7 +1209,13 @@ CREATE TABLE pos_feedback (
     UpdatedOn       DATETIME,
     UpdatedBy       VARCHAR(50),
     PRIMARY KEY (Id),
-    FOREIGN KEY (CustomerId) REFERENCES pos_customer(Id)
+    -- One rating per visit. A second card for the same order is an edit of the
+    -- first, not a second opinion, and without this a promotion could be gamed
+    -- by rating the same meal ten times.
+    UNIQUE KEY uq_posfeedback_order (OrderId, TenantId),
+    INDEX idx_posfeedback_customer (TenantId, CustomerId),
+    FOREIGN KEY (CustomerId) REFERENCES pos_customer(Id),
+    FOREIGN KEY (OrderId) REFERENCES pos_order(Id)
 );
 
 -- 4.10 pos_order — a dine-in / takeaway / online order

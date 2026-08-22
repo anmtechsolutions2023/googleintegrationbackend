@@ -1883,6 +1883,7 @@ const swaggerSpec = {
           CustomerId: {"type":"string","format":"uuid"},
           CustomerName: {"type":"string"},
           Rating: {"type":"integer"},
+          OrderId: {"type":"string","format":"uuid", nullable: true, description: 'WHICH VISIT this is about. Optional — a comment card left at the door is still worth keeping — but a rating that names its order can be traced to a table, a token and the food that was served. UNIQUE per order: a second card is an edit of the first, not a second opinion.'},
           Comments: {"type":"string"},
           BranchDetailId: {"type":"string","format":"uuid"},
           Active: {"type":"boolean"},
@@ -1894,6 +1895,7 @@ const swaggerSpec = {
           CustomerId: {"type":"string","format":"uuid"},
           CustomerName: {"type":"string"},
           Rating: {"type":"integer"},
+          OrderId: {"type":"string","format":"uuid", nullable: true, description: 'WHICH VISIT this is about. Optional — a comment card left at the door is still worth keeping — but a rating that names its order can be traced to a table, a token and the food that was served. UNIQUE per order: a second card is an edit of the first, not a second opinion.'},
           Comments: {"type":"string"},
           BranchDetailId: {"type":"string","format":"uuid"},
           Active: {"type":"boolean"},
@@ -1905,6 +1907,7 @@ const swaggerSpec = {
           CustomerId: {"type":"string","format":"uuid"},
           CustomerName: {"type":"string"},
           Rating: {"type":"integer"},
+          OrderId: {"type":"string","format":"uuid", nullable: true, description: 'WHICH VISIT this is about. Optional — a comment card left at the door is still worth keeping — but a rating that names its order can be traced to a table, a token and the food that was served. UNIQUE per order: a second card is an edit of the first, not a second opinion.'},
           Comments: {"type":"string"},
           BranchDetailId: {"type":"string","format":"uuid"},
           Active: {"type":"boolean"},
@@ -2129,6 +2132,51 @@ const swaggerSpec = {
             Bucket: { type: 'string', format: 'date' }, Issued: { type: 'number' },
             Served: { type: 'number' }, AvgWaitMinutes: { type: 'number', nullable: true },
           } } },
+        },
+      },
+
+      PosCustomerProfile: {
+        type: 'object',
+        description: 'One customer and everything they have done here. Visits / TotalSpent / '
+          + 'LoyaltyPoints are a PROJECTION maintained on the settle path — the ledger stays '
+          + 'the record of what was sold, and these are the answers a till needs at the counter '
+          + 'without aggregating a year of documents while somebody waits.',
+        properties: {
+          Customer: { type: 'object', properties: {
+            Id: { type: 'string', format: 'uuid' }, Name: { type: 'string' },
+            Phone: { type: 'string', nullable: true }, Email: { type: 'string', nullable: true },
+            Visits: { type: 'number' }, TotalSpent: { type: 'number' },
+            LoyaltyPoints: { type: 'number', description: 'One point per ₹100 spent.' },
+            LastVisitAt: { type: 'string', format: 'date-time', nullable: true },
+          } },
+          Orders: { type: 'array', items: { type: 'object', properties: {
+            OrderId: { type: 'string', format: 'uuid' }, OrderNo: { type: 'string' },
+            OrderType: { type: 'string' }, Total: { type: 'number' },
+            TableName: { type: 'string', nullable: true },
+            TokenLabel: { type: 'string', nullable: true, description: 'The counter token, when this was a counter sale.' },
+            TransactionNo: { type: 'string', nullable: true, description: 'The invoice, once posted.' },
+            LedgerStatus: { type: 'string', nullable: true },
+          } } },
+          Feedback: { type: 'array', items: { type: 'object', properties: {
+            Id: { type: 'string', format: 'uuid' }, Rating: { type: 'integer' },
+            Comments: { type: 'string', nullable: true },
+            OrderId: { type: 'string', format: 'uuid', nullable: true },
+            OrderNo: { type: 'string', nullable: true },
+          } } },
+          Summary: { type: 'object', properties: {
+            OrdersShown: { type: 'number' },
+            AverageOrderValue: { type: 'number' },
+            AverageRating: { type: 'number', nullable: true, description: 'Null when they have never rated — which is not the same fact as a rating of zero.' },
+            RatingsLeft: { type: 'number' },
+          } },
+        },
+      },
+      PosCustomerSearchResult: {
+        type: 'object',
+        properties: {
+          Id: { type: 'string', format: 'uuid' }, Name: { type: 'string' },
+          Phone: { type: 'string', nullable: true }, Visits: { type: 'number' },
+          TotalSpent: { type: 'number' }, LoyaltyPoints: { type: 'number' },
         },
       },
 
@@ -2496,6 +2544,34 @@ const swaggerSpec = {
         parameters: [idParam],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosBillSettle' } } } },
         responses: { ...singleResponse('PosBill'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/customers/search': {
+      get: {
+        tags: ['PosCustomers'],
+        summary: 'Find a customer at the counter',
+        description: 'Phone or name, capped at ten. Backs a type-ahead beside a till, not an export.',
+        security,
+        parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string', minLength: 2, maxLength: 50 } }],
+        responses: {
+          200: { description: 'Matches', content: { 'application/json': { schema: { type: 'object', properties: {
+            success: { type: 'boolean' }, message: { type: 'string' },
+            data: { type: 'array', items: { $ref: '#/components/schemas/PosCustomerSearchResult' } },
+          } } } } },
+          ...responses.validation, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/pos/customers/{id}/profile': {
+      get: {
+        tags: ['PosCustomers'],
+        summary: 'A customer\'s spend, order history and ratings',
+        security,
+        parameters: [idParam],
+        responses: {
+          ...singleResponse('PosCustomerProfile'),
+          ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
+        },
       },
     },
     '/api/pos/tokens/stats': {

@@ -33,6 +33,10 @@ jest.mock('../../modules/ledger/ledger.service', () => ({
   })),
 }));
 
+jest.mock('../../modules/poscustomer/poscustomer.stats.service', () => ({
+  recordSaleTx: jest.fn(async () => true),
+}));
+
 jest.mock('../../modules/postoken/postoken.service', () => ({
   issueTokenTx: jest.fn(async () => ({
     id: 'tok-1', TokenNumber: 7, TokenLabel: '7', TokenDate: '2026-08-16',
@@ -41,6 +45,7 @@ jest.mock('../../modules/postoken/postoken.service', () => ({
 
 const repository = require('../../modules/posbill/posbill.repository');
 const tokenService = require('../../modules/postoken/postoken.service');
+const customerStats = require('../../modules/poscustomer/poscustomer.stats.service');
 const billService = require('../../modules/posbill/posbill.service');
 
 const TENANT = 'tn';
@@ -136,5 +141,55 @@ describe('everything else gets no token', () => {
     ]);
     await settle();
     expect(tokenService.issueTokenTx).not.toHaveBeenCalled();
+  });
+});
+
+
+// Settling is what turns "somebody ordered" into "this customer visited". The
+// CRM columns existed for the whole life of the table and nothing ever wrote
+// them, because nothing called this.
+describe('the CRM projection', () => {
+  beforeEach(() => {
+    repository.getOrdersMetaTx.mockResolvedValue([
+      { Id: 'o1', OrderType: 'dinein', TableId: 't1', BranchDetailId: 'branch-a' },
+    ]);
+  });
+
+  it('records the visit against the customer the order named', async () => {
+    repository.getSessionCustomerIdTx.mockResolvedValue('cust-1');
+    await settle();
+    expect(customerStats.recordSaleTx).toHaveBeenCalledWith(
+      mockConn, 'cust-1', 100, TENANT, USER,
+    );
+  });
+
+  // A sale that rolls back must take its visit with it, or somebody is credited
+  // for a purchase that never happened.
+  it('records on the settle transaction, not a connection of its own', async () => {
+    repository.getSessionCustomerIdTx.mockResolvedValue('cust-1');
+    await settle();
+    expect(customerStats.recordSaleTx.mock.calls[0][0]).toBe(mockConn);
+  });
+
+  it('records the ROUNDED payable, the figure actually collected', async () => {
+    repository.getSessionCustomerIdTx.mockResolvedValue('cust-1');
+    await settle();
+    // posted.payable, not the pre-round-off gross.
+    expect(customerStats.recordSaleTx.mock.calls[0][2]).toBe(100);
+  });
+
+  it('passes a walk-in through as null rather than skipping the call', async () => {
+    repository.getSessionCustomerIdTx.mockResolvedValue(null);
+    await settle();
+    expect(customerStats.recordSaleTx).toHaveBeenCalledWith(
+      mockConn, null, 100, TENANT, USER,
+    );
+  });
+
+  // One resolution, used by both. Two lookups could disagree about who bought.
+  it('resolves the customer once for the ledger and the CRM alike', async () => {
+    repository.getSessionCustomerIdTx.mockResolvedValue('cust-1');
+    await settle();
+    expect(repository.getSessionCustomerIdTx).toHaveBeenCalledTimes(1);
   });
 });

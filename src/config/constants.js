@@ -930,6 +930,57 @@ module.exports = {
       INSERT: 'INSERT INTO pos_customer (Id, TenantId, Name, Phone, Email, Visits, TotalSpent, LoyaltyPoints, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE: 'UPDATE pos_customer SET Name = ?, Phone = ?, Email = ?, Visits = ?, TotalSpent = ?, LoyaltyPoints = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_customer WHERE Id = ? AND TenantId = ?',
+
+      // The till's lookup: find a regular by the number they give at the
+      // counter, or by name. Phone first because that is what a customer
+      // actually recites, and it is the column with the UNIQUE key.
+      SEARCH: `
+        SELECT Id, Name, Phone, Email, Visits, TotalSpent, LoyaltyPoints, LastVisitAt
+          FROM pos_customer
+         WHERE TenantId = ? AND Active = 1
+           AND (Phone LIKE ? OR Name LIKE ?)
+         ORDER BY (Phone = ?) DESC, LastVisitAt DESC, Name ASC
+         LIMIT 10`,
+      SELECT_BY_PHONE: 'SELECT * FROM pos_customer WHERE Phone = ? AND TenantId = ? LIMIT 1',
+
+      // The CRM projection, incremented on the settle path. See
+      // poscustomer.stats.service for why this increments rather than
+      // recomputes, and why it runs on the settle transaction.
+      RECORD_SALE: `
+        UPDATE pos_customer
+           SET Visits        = Visits + 1,
+               TotalSpent    = TotalSpent + ?,
+               LoyaltyPoints = LoyaltyPoints + ?,
+               LastVisitAt   = NOW(),
+               UpdatedOn     = NOW(),
+               UpdatedBy     = ?
+         WHERE Id = ? AND TenantId = ?`,
+
+      // One customer's history: every round they have ordered, with the token
+      // or table it was served at and the invoice it was billed on. This is
+      // what turns a name in a list into a profile.
+      ORDER_HISTORY: `
+        SELECT o.Id AS OrderId, o.OrderNo, o.OrderType, o.Status, o.Total,
+               o.CreatedOn, o.TableName, tk.TokenLabel,
+               l.TransactionNo, s.Name AS LedgerStatus
+          FROM pos_order o
+          LEFT JOIN pos_token tk ON tk.OrderId = o.Id AND tk.TenantId = o.TenantId
+          LEFT JOIN pos_bill_order bo ON bo.OrderId = o.Id AND bo.TenantId = o.TenantId
+          LEFT JOIN pos_bill b ON b.Id = bo.BillId AND b.TenantId = bo.TenantId
+          LEFT JOIN transactiondetaillog l ON l.Id = b.TransactionDetailLogId
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+         WHERE o.CustomerId = ? AND o.TenantId = ?
+         ORDER BY o.CreatedOn DESC
+         LIMIT 50`,
+
+      // What they said about those visits.
+      FEEDBACK_HISTORY: `
+        SELECT f.Id, f.Rating, f.Comments, f.CreatedOn, f.OrderId, o.OrderNo
+          FROM pos_feedback f
+          LEFT JOIN pos_order o ON o.Id = f.OrderId AND o.TenantId = f.TenantId
+         WHERE f.CustomerId = ? AND f.TenantId = ?
+         ORDER BY f.CreatedOn DESC
+         LIMIT 50`,
     },
 
     POS_ORDER: {
@@ -980,12 +1031,25 @@ module.exports = {
     },
 
     POS_FEEDBACK: {
-      SELECT_ALL: 'SELECT * FROM pos_feedback WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      // The order and the customer are joined in: a rating that cannot name the
+      // visit it describes is an opinion with no context, which is what this
+      // table held before OrderId existed.
+      SELECT_ALL: `
+        SELECT f.*, o.OrderNo, o.OrderType, o.TableName, o.Total AS OrderTotal,
+               tk.TokenLabel, c.Name AS LinkedCustomerName, c.Phone AS CustomerPhone
+          FROM pos_feedback f
+          LEFT JOIN pos_order o    ON o.Id = f.OrderId AND o.TenantId = f.TenantId
+          LEFT JOIN pos_token tk   ON tk.OrderId = o.Id AND tk.TenantId = o.TenantId
+          LEFT JOIN pos_customer c ON c.Id = f.CustomerId AND c.TenantId = f.TenantId
+         WHERE f.TenantId = ? ORDER BY f.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM pos_feedback WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM pos_feedback WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_feedback (Id, TenantId, CustomerId, CustomerName, Rating, Comments, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_feedback SET CustomerId = ?, CustomerName = ?, Rating = ?, Comments = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_feedback (Id, TenantId, CustomerId, CustomerName, Rating, Comments, OrderId, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_feedback SET CustomerId = ?, CustomerName = ?, Rating = ?, Comments = ?, OrderId = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_feedback WHERE Id = ? AND TenantId = ?',
+      // Feedback already left for a round, so the till can offer an edit rather
+      // than a duplicate the UNIQUE key would reject.
+      SELECT_BY_ORDER: 'SELECT * FROM pos_feedback WHERE OrderId = ? AND TenantId = ? LIMIT 1',
     },
 
     POS_TOKEN: {
@@ -1945,6 +2009,11 @@ module.exports = {
   //   SERIES — continuous TOK-0001 from the POS_TOKEN numbering series. That
   //            series lives in transactiontypeconfig, which is TENANT-scoped, so
   //            branches sharing a tenant share the counter.
+  // How spend becomes loyalty. One number, named, because it appears in the
+  // live settle path AND in the rebuild that recomputes the projection from the
+  // ledger — two implementations of "how many points is that?" would drift.
+  LOYALTY: { RUPEES_PER_POINT: 100 },
+
   TOKEN_NUMBERING: { DAILY: 'daily', SERIES: 'series' },
   // Absence of a pos_setting row means DAILY — a branch that has never been
   // configured behaves like a token counter, which is the unsurprising default.

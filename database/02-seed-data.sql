@@ -20,6 +20,8 @@
 --   PART 7 — POS roles (POS_CASHIER, POS_WAITER, POS_KITCHEN_STAFF, POS_MANAGER)
 --   PART 8 — POS role permissions (incl. extending SUPER_ADMIN / TENANT_ADMIN
 --             with all POS features)
+--   PART 8d — Asset register + expense-approval features (ASSET:READ/WRITE,
+--             EXPENSE:APPROVE) — referenced by routes but previously undefined
 --   PART 9 — Baseline master data for onboarding
 --   PART 10 — Application configuration defaults
 --   PART 11 — Accounting ledger masters + document numbering series
@@ -520,6 +522,73 @@ FROM roles r
 CROSS JOIN features f
 WHERE r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
   AND f.feature_short_name = 'AUDIT'
+  AND f.scope = 'READ';
+
+-- =============================================================================
+-- PART 8d — Asset register + expense approval features
+-- =============================================================================
+-- These two were REFERENCED BY ROUTES but never defined, so no role could hold
+-- them and no JWT ever carried them:
+--   /api/assets/*                     requires ASSET:READ / ASSET:WRITE
+--   /api/pos/expenses/:id/approve|reject requires EXPENSE:APPROVE
+-- The Asset Register answered 403 for everyone, including tenant admins, and an
+-- expense could be raised but never approved — the lifecycle had no exit.
+--
+-- Features are GLOBAL (see admin.service.provisionTenantIam); only roles and
+-- role_permissions are per-tenant, so a new tenant picks these up by cloning
+-- the template tenant's grants below.
+INSERT IGNORE INTO features
+    (feature_id, name, feature_short_name, scope, display_name, category, description, is_active)
+VALUES
+    ('f1000008-iam0-0000-0000-000000000001',
+     'Asset Read',  'ASSET', 'READ',
+     'Asset Register — View', 'Assets',
+     'View the equipment register: what the outlet owns, what it cost, and where it is.',
+     1),
+    ('f1000008-iam0-0000-0000-000000000002',
+     'Asset Write', 'ASSET', 'WRITE',
+     'Asset Register — Manage', 'Assets',
+     'Register assets, move them between branches, and change their status.',
+     1),
+    -- Approval is deliberately its OWN scope rather than POS_OPS:WRITE. Raising
+    -- a claim and approving one are different authorities: the cashier who
+    -- spends should not be the person who signs it off.
+    ('f1000009-iam0-0000-0000-000000000001',
+     'Expense Approve', 'EXPENSE', 'APPROVE',
+     'Expenses — Approve / Reject', 'Expenses',
+     'Approve or reject a draft expense claim before it can be settled.',
+     1);
+
+-- Admins get all three. Both roles are cloned into every new tenant, so this
+-- also fixes provisioning going forward.
+INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
+SELECT UUID(), r.id, f.feature_id
+FROM roles r
+CROSS JOIN features f
+WHERE r.name IN ('SUPER_ADMIN','TENANT_ADMIN')
+  AND r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
+  AND f.feature_short_name IN ('ASSET','EXPENSE');
+
+-- The manager runs the outlet's money, so they approve spend and keep the
+-- register. A cashier does neither.
+INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
+SELECT UUID(), r.id, f.feature_id
+FROM roles r
+CROSS JOIN features f
+WHERE r.name = 'POS_MANAGER'
+  AND r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
+  AND f.feature_short_name IN ('ASSET','EXPENSE');
+
+-- Read-only visibility of the register for everyone else, matching PART 8b's
+-- reasoning: seeing what the outlet owns is not a privilege worth withholding,
+-- and an admin can revoke it per-role afterwards. EXPENSE:APPROVE is NOT
+-- granted here — it is an authority, not a view.
+INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
+SELECT UUID(), r.id, f.feature_id
+FROM roles r
+CROSS JOIN features f
+WHERE r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
+  AND f.feature_short_name = 'ASSET'
   AND f.scope = 'READ';
 
 -- =============================================================================

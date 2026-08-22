@@ -30,8 +30,15 @@ const paginationSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).optional().default(10),
 });
 
+// A search needs something to search for. Bounded at both ends: one character
+// would return the whole book, and there is no useful query longer than this.
+const searchQuerySchema = Joi.object({
+  q: Joi.string().min(2).max(50).required().trim(),
+});
+
 const uuidParamSchema = Joi.object({
   id: Joi.string().uuid().required(),
 });
 
-module.exports = { createSchema, updateSchema, paginationSchema, uuidParamSchema };
+module.exports = {
+  searchQuerySchema, createSchema, updateSchema, paginationSchema, uuidParamSchema };

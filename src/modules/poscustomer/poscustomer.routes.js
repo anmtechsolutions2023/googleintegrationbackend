@@ -18,6 +18,17 @@ router.get('/', authenticateToken,
   checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE), audit, ...controller.getAll);
 
 /** GET /:id — get one POS Customer by ID. */
+/**
+ * GET /search?q= — find a customer at the counter, by phone or name.
+ * GET /:id/profile — their spend, order history and ratings.
+ * Both declared BEFORE /:id, or 'search' is parsed as a customer id.
+ */
+router.get('/search', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE), audit, ...controller.search);
+
+router.get('/:id/profile', authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE), audit, ...controller.getProfile);
+
 router.get('/:id', authenticateToken,
   checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE), audit, ...controller.getById);
 

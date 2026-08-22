@@ -2,6 +2,7 @@
 // Controller layer for POS Customer — HTTP request/response handling.
 
 const service = require('./poscustomer.service');
+const profileService = require('./poscustomer.profile.service');
 const { asyncHandler } = require('../../utils/controllerHelper');
 const {
   successResponse,
@@ -19,6 +20,7 @@ const {
   updateSchema,
   paginationSchema,
   uuidParamSchema,
+  searchQuerySchema,
 } = require('./poscustomer.schemas');
 const { logger } = require('../../utils/logger');
 
@@ -36,6 +38,28 @@ const getById = asyncHandler(async (req, res) => {
   logger.info('PosCustomer.getById called', { id, tenantId });
   const record = await service.getById(id, tenantId);
   successResponse(res, record, 'POS Customer retrieved successfully');
+});
+
+// The till's type-ahead: find a regular by the number they recite at the
+// counter. Capped server-side — this backs a lookup beside a queue, not an
+// export.
+const search = asyncHandler(async (req, res) => {
+  const { tid: tenantId } = req.user;
+  const { q } = req.query;
+  logger.info('PosCustomer.search called', { tenantId, q });
+  const results = await profileService.search(q, tenantId);
+  successResponse(res, results, 'Customers found');
+});
+
+// Who they are, what they have spent, every round and every rating. The CRM
+// screen listed three counters that were always zero; this is what makes it a
+// profile rather than a phone book.
+const getProfile = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { tid: tenantId } = req.user;
+  logger.info('PosCustomer.getProfile called', { id, tenantId });
+  const profile = await profileService.getProfile(id, tenantId);
+  successResponse(res, profile, 'Customer profile retrieved');
 });
 
 const create = asyncHandler(async (req, res) => {
@@ -64,6 +88,8 @@ const deleteById = asyncHandler(async (req, res) => {
 module.exports = {
   getAll: [validateQuery(paginationSchema), getAll],
   getById: [validateParams(uuidParamSchema), getById],
+  search: [validateQuery(searchQuerySchema), search],
+  getProfile: [validateParams(uuidParamSchema), getProfile],
   create: [validateBody(createSchema), create],
   update: [validateParams(uuidParamSchema), validateBody(updateSchema), update],
   deleteById: [validateParams(uuidParamSchema), deleteById],

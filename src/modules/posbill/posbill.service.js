@@ -10,6 +10,7 @@ const MESSAGES = require('../../config/messages');
 const pricingService = require('../pricing/pricing.service');
 const ledgerService = require('../ledger/ledger.service');
 const tokenService = require('../postoken/postoken.service');
+const customerStats = require('../poscustomer/poscustomer.stats.service');
 const { issuePosNumber } = require('../posorder/posNumbering');
 const repository = require('./posbill.repository');
 const { logger } = require('../../utils/logger');
@@ -217,6 +218,11 @@ class PosBillService extends BaseCRUDService {
 
       // ── Post to the accounting ledger ──────────────────────────────────
       const lines = await repository.toLedgerLinesTx(connection, recomputed.Lines, tenantId);
+      // Resolved once and used twice: the ledger records WHO bought (as a
+      // contact), and the CRM records THAT they bought (as a visit). Querying
+      // for the same customer twice would let the two disagree.
+      const posCustomerId = await repository.getSessionCustomerIdTx(connection, orderIds, tenantId);
+
       const posted = await ledgerService.postSaleFromBill(
         connection,
         {
@@ -224,11 +230,19 @@ class PosBillService extends BaseCRUDService {
           totals: recomputed,
           lines,
           tenders: normalizeTenders(data, recomputed.Total),
-          posCustomerId: await repository.getSessionCustomerIdTx(connection, orderIds, tenantId),
+          posCustomerId,
           branchId: existing.BranchDetailId,
         },
         tenantId,
         userEmail,
+      );
+
+      // ── CRM ────────────────────────────────────────────────────────────
+      // Visits, spend and loyalty. On this transaction on purpose: a sale that
+      // rolls back must take its visit with it, or a customer is credited for
+      // something that never happened. Walk-ins (no customer) record nothing.
+      await customerStats.recordSaleTx(
+        connection, posCustomerId, posted.payable, tenantId, userEmail,
       );
 
       await connection.execute(this.queries.SETTLE, [
@@ -354,7 +368,11 @@ class PosBillService extends BaseCRUDService {
       toJson(data.LineDiscounts),
       data.Total !== undefined ? data.Total : 0,
       toJson(data.Payments),
-      data.Status ?? null,
+      // NOT NULL in pos_bill. Naming a column in the INSERT suppresses its
+      // column DEFAULT, so an omitted value has to be defaulted here — passing
+      // NULL is rejected outright. A bill is born unpaid; settling is what
+      // changes that. (Same defect that was fixed on pos_order.Status.)
+      data.Status ?? POS_BILL_STATUS.UNPAID,
       data.SettledAt ?? null,
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,

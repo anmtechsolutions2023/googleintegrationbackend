@@ -2,6 +2,12 @@
 // Joi validation schemas for POS Bill operations.
 
 const Joi = require('joi');
+const { POS_BILL_STATUS } = require('../../config/constants');
+
+// Canonical lowercase vocabulary, normalized on write. Status was free text, so
+// a client could store 'Pending' — a value no reader in the codebase compares
+// against, which makes the bill invisible to every status filter.
+const statusField = Joi.string().lowercase().valid(...Object.values(POS_BILL_STATUS));
 
 // Per-item discounts, keyed "<orderId>#<lineIndex>" — the same ref the settle
 // quote builds for each line. Values are validated, but the keys are not
@@ -35,7 +41,7 @@ const createSchema = Joi.object({
   LineDiscounts: lineDiscountsSchema,
   Total: Joi.number().optional().default(0).allow(null),
   Payments: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
-  Status: Joi.string().optional().max(20).allow(null, '').trim(),
+  Status: statusField.optional().allow(null, '').default(POS_BILL_STATUS.UNPAID),
   SettledAt: Joi.date().optional().allow(null),
   BranchDetailId: Joi.string().uuid().optional().allow(null),
   Active: Joi.boolean().optional().default(true),
@@ -50,7 +56,7 @@ const updateSchema = Joi.object({
   LineDiscounts: lineDiscountsSchema,
   Total: Joi.number().optional().allow(null),
   Payments: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
-  Status: Joi.string().optional().max(20).allow(null, '').trim(),
+  Status: statusField.optional().allow(null, ''),
   SettledAt: Joi.date().optional().allow(null),
   BranchDetailId: Joi.string().uuid().optional().allow(null),
   Active: Joi.boolean().optional(),
