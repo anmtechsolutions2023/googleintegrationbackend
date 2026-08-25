@@ -476,15 +476,6 @@ const registry = [
       BranchDetailId: null,
     },
   },
-  {
-    name: 'posstaff',
-    servicePath: '../../modules/posstaff/posstaff.service',
-    httpPath: '/api/pos/staff',
-    exports: POS,
-    createData:  { Name: 'Head Chef', Role: 'Kitchen', Active: true },
-    updateData:  { Role: 'Manager' },
-    existingRow: { Name: 'Head Chef', Role: 'Kitchen', Phone: null, Email: null, BranchDetailId: null },
-  },
 ];
 
 module.exports = registry;

@@ -80,7 +80,23 @@ const listUsersSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20),
 });
 
+// Only the tenant-admin flag is settable. is_super_admin bypasses every scope
+// check and reaches across tenancies, so it stays a deployment decision.
+// The staff details a membership carries. All optional and nullable: clearing a
+// phone number is a legitimate edit, and a person may have no branch.
+const updateUserProfileSchema = Joi.object({
+  fullName: Joi.string().max(100).allow(null, '').trim(),
+  phone: Joi.string().max(20).allow(null, '').trim(),
+  branchDetailId: Joi.string().uuid().allow(null, ''),
+}).min(1);
+
+const setTenantAdminSchema = Joi.object({
+  isAdmin: Joi.boolean().required(),
+});
+
 module.exports = {
+  setTenantAdminSchema,
+  updateUserProfileSchema,
   approveRequestSchema,
   rejectRequestSchema,
   approveOnboardingSchema,

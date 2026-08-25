@@ -15,19 +15,15 @@ const {
   checkScope,
 } = require('../../middleware/authMiddleware');
 const { auditLog } = require('../../middleware/auditLogger');
-const { SCOPES, AUDIT_CATEGORIES } = require('../../config/constants');
+const { SCOPE_SETS, AUDIT_CATEGORIES } = require('../../config/constants');
 const controller = require('./posbranch.controller');
 
+// Every screen with a branch picker reads this, and they are not all POS
+// screens: the asset register, the customer list and the finance reports all
+// show one. Rather than listing scopes here and missing the next screen, this
+// is the shared POS reference set — see config/constants.js.
 router.get('/', authenticateToken,
-  checkScope(
-    SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
-    SCOPES.POS_OPS_READ, SCOPES.POS_OPS_WRITE,
-    SCOPES.POS_CONFIG_READ, SCOPES.POS_CONFIG_WRITE,
-    SCOPES.POS_ORDER_READ, SCOPES.POS_ORDER_WRITE,
-    SCOPES.POS_BILLING_READ, SCOPES.POS_BILLING_WRITE,
-    SCOPES.POS_KITCHEN_READ, SCOPES.POS_KITCHEN_WRITE,
-    SCOPES.ORGANIZATION_READ, SCOPES.ORGANIZATION_WRITE,
-  ),
+  checkScope(...SCOPE_SETS.POS_REFERENCE_READ),
   auditLog(AUDIT_CATEGORIES.POS, 'DEBUG', 'POS branch list viewed'),
   ...controller.getAll);
 

@@ -9,26 +9,43 @@
 --   Run 01-schema-definition.sql first.
 --
 -- What this seeds:
---   PART 1 — Super admin user in user_tenants
---   PART 2 — System roles (SUPER_ADMIN, TENANT_ADMIN, VIEWER, EDITOR,
+--   PART 1  — Super admin user in user_tenants
+--   PART 2  — System roles (SUPER_ADMIN, TENANT_ADMIN, VIEWER, EDITOR,
 --             ACCOUNTS_MANAGER, INVENTORY_MANAGER, OPERATIONS_STAFF) [7 roles]
---   PART 3 — IAM features: 12 rows (6 categories × READ + WRITE)
---   PART 4 — Role permissions (which features each role gets)
---   PART 5 — Assign SUPER_ADMIN role to the super admin user
---   PART 6 — POS (Front Desk) features: 13 rows (6 categories × READ+WRITE,
+--   PART 3  — IAM features: 13 rows (6 categories × READ + WRITE, + AUDIT:READ)
+--   PART 4  — Role permissions (which features each role gets)
+--   PART 5  — Assign SUPER_ADMIN role to the super admin user
+--   PART 6  — POS (Front Desk) features: 13 rows (6 categories × READ+WRITE,
 --             + POS_REPORTS READ)
---   PART 7 — POS roles (POS_CASHIER, POS_WAITER, POS_KITCHEN_STAFF, POS_MANAGER)
---   PART 8 — POS role permissions (incl. extending SUPER_ADMIN / TENANT_ADMIN
+--   PART 7  — POS roles (POS_CASHIER, POS_WAITER, POS_KITCHEN_STAFF, POS_MANAGER)
+--   PART 8  — POS role permissions (incl. extending SUPER_ADMIN / TENANT_ADMIN
 --             with all POS features)
---   PART 8d — Asset register + expense-approval features (ASSET:READ/WRITE,
---             EXPENSE:APPROVE) — referenced by routes but previously undefined
---   PART 9 — Baseline master data for onboarding
+--   PART 8b — Preserve pre-gating read access
+--   PART 8c — Grant AUDIT:READ to every role
+--   PART 8d — Asset register + expense approval (ASSET:READ/WRITE,
+--             EXPENSE:APPROVE) — required by /api/assets and the expense
+--             approve/reject routes
+--   PART 9  — Baseline master data for onboarding
 --   PART 10 — Application configuration defaults
 --   PART 11 — Accounting ledger masters + document numbering series
+--             (POS_SALE, EXPENSE, POS_ORDER, POS_KOT, POS_BILL, POS_TOKEN)
 --   PART 12 — POS food types (Veg / Vegan / Non-Veg)
+--
+-- Verified against an empty database: 39 statements, 29 features, 11 roles,
+-- 133 role permissions, 7 numbering series.
+--
+-- 133, down from 210: PARTs 8b/8c/8d used to grant every role in the tenancy
+-- READ on all twelve categories plus AUDIT and ASSET, which left a POS_CASHIER
+-- holding 16 scopes where its own definition grants 6, and a VIEWER 14. Each
+-- role now carries what its own job needs; the handful of cross-category reads
+-- a till genuinely makes are admitted on those endpoints instead.
 --
 -- All INSERT statements use INSERT IGNORE + fixed UUIDs so this file is
 -- safe to re-run on a database that already has seed data.
+--
+-- These two files are the ONLY source of truth for the database. There is no
+-- migration directory: schema changes are made here, in place, and a rebuild is
+-- a drop-and-recreate.
 --
 -- Tenant: ANM Tech Solutions
 -- Tenant ID: e3845e08-dcc2-11f0-8e78-0242ac110002
@@ -490,37 +507,57 @@ WHERE r.name IN ('SUPER_ADMIN','TENANT_ADMIN')
       ('POS_CONFIG','POS_ORDER','POS_KITCHEN','POS_BILLING','POS_CRM','POS_OPS','POS_REPORTS');
 
 -- =============================================================================
--- PART 8b — Preserve pre-gating read access
+-- PART 8b — Cross-category reads, granted per role
 -- =============================================================================
--- Read (GET) endpoints used to be open to any authenticated user. They are now
--- each gated by their category *_READ (or *_WRITE) scope. To preserve existing
--- access, grant every role the READ feature for each previously-open category so
--- current flows (e.g. POS Billing reading items/branches/menu) keep working.
--- POS_REPORTS is intentionally excluded — its read was already gated before.
--- Admins can revoke any of these per-role from the IAM dashboard afterwards.
--- NOTE: users must re-login to pick up the new scopes in their JWT.
+-- This block used to grant EVERY role in the tenancy READ on all twelve
+-- categories, to preserve access from when GET endpoints were ungated. On a
+-- database built from this script there is nothing to preserve: it only made
+-- every role a near-universal reader. A POS_CASHIER came out with 16 scopes
+-- where its own definition grants 6, a VIEWER with 14 — the role names stopped
+-- meaning anything for reads, and a cashier was shown the whole Master Data
+-- section because they genuinely held MASTER_DATA:READ.
+--
+-- What the blanket grant was really covering is that a few POS screens must
+-- read reference data owned by another category — the till resolves dish names
+-- from itemdetail and tender types from paymentmode. That is now handled where
+-- it belongs, on those endpoints, which admit the POS scope that needs them
+-- (see paymentmode/itemdetail/accounttypebase routes, and /api/pos/branches).
+-- Granting a whole category to reach one lookup is what put Master Data in a
+-- cashier's menu.
+--
+-- So this part now grants only what a role's own job needs beyond its category:
+--
+--   POS_MANAGER  — TRANSACTIONS:READ. They own the day's takings, so the
+--                  ledger and finance screens are part of the job. Read only:
+--                  posting and refunding stay with TRANSACTIONS:WRITE.
+--
+-- Everything else a role can read comes from its own PART 8 / PART 8a grants.
 INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
 SELECT UUID(), r.id, f.feature_id
 FROM roles r
 CROSS JOIN features f
 WHERE r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
-  AND f.scope = 'READ'
-  AND f.feature_short_name IN
-      ('MASTER_DATA','ORGANIZATION','TRANSACTIONS','INVENTORY','CONTACTS','PAYMENTS',
-       'POS_CONFIG','POS_ORDER','POS_KITCHEN','POS_BILLING','POS_CRM','POS_OPS');
+  AND r.name = 'POS_MANAGER'
+  AND f.feature_short_name = 'TRANSACTIONS'
+  AND f.scope = 'READ';
 
 -- =============================================================================
--- PART 8c — Grant AUDIT:READ to every role
+-- PART 8c — AUDIT:READ
 -- =============================================================================
--- Audit log endpoints (/api/audit/*) accept AUDIT:READ or admin:access. Grant
--- AUDIT:READ to every role in the tenant so read-only business users can view
--- the audit trail out of the box. Admins can revoke it per-role from the IAM
--- dashboard afterwards.
+-- The audit trail records who did what across the whole tenancy, so it is an
+-- oversight function rather than a general read. This used to be granted to
+-- every role, which handed a cashier the movements of everybody else.
+--
+-- /api/audit/* admits AUDIT:READ, admin:access, TENANT:ADMIN or a super admin,
+-- and the controller narrows a tenant admin to their own tenancy — so the two
+-- admin roles reach it without a grant. The explicit grant here is for the
+-- roles whose job is oversight without administration.
 INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
 SELECT UUID(), r.id, f.feature_id
 FROM roles r
 CROSS JOIN features f
 WHERE r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
+  AND r.name IN ('SUPER_ADMIN','TENANT_ADMIN','ACCOUNTS_MANAGER')
   AND f.feature_short_name = 'AUDIT'
   AND f.scope = 'READ';
 
@@ -579,15 +616,17 @@ WHERE r.name = 'POS_MANAGER'
   AND r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
   AND f.feature_short_name IN ('ASSET','EXPENSE');
 
--- Read-only visibility of the register for everyone else, matching PART 8b's
--- reasoning: seeing what the outlet owns is not a privilege worth withholding,
--- and an admin can revoke it per-role afterwards. EXPENSE:APPROVE is NOT
+-- Read-only visibility of the register for the roles that account for the
+-- outlet's property. This used to be granted to every role on the reasoning
+-- that seeing what the outlet owns is harmless; it was still one more entry in
+-- a cashier's menu that their job never sends them to. EXPENSE:APPROVE is NOT
 -- granted here — it is an authority, not a view.
 INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
 SELECT UUID(), r.id, f.feature_id
 FROM roles r
 CROSS JOIN features f
 WHERE r.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
+  AND r.name IN ('ACCOUNTS_MANAGER','INVENTORY_MANAGER')
   AND f.feature_short_name = 'ASSET'
   AND f.scope = 'READ';
 

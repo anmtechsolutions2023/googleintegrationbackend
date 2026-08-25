@@ -21,9 +21,9 @@ const { logger } = require('../../utils/logger');
  * Records a settled sale against a customer.
  *
  * Increments rather than recomputing: the live path runs inside the settle
- * transaction and must stay cheap, and an increment cannot scan. A rebuild from
- * the ledger is available separately (see database/upgrades) for the rare case
- * where the two need reconciling.
+ * transaction and must stay cheap, and an increment cannot scan. Because these
+ * columns are a projection, they can always be rebuilt from the ledger if the
+ * two ever need reconciling — the documents remain the record of what was sold.
  *
  * MUST run on the settle transaction's own connection: if the sale rolls back,
  * the visit it recorded has to roll back with it. A customer credited for a

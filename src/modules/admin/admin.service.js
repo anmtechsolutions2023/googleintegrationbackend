@@ -297,6 +297,16 @@ const getUserDetail = (email, tenantId) =>
 
 const updateUserRoles = (email, tenantId, roleIds, adminEmail) =>
   withTransaction(async (conn) => {
+    // An admin must not edit their own roles. Role assignment REPLACES the set,
+    // so one save with the wrong boxes ticked strips their own access to the
+    // business modules — and, unlike suspension, nothing about the resulting
+    // state tells them why. Same family of guard as assertNotSelfSuspend and
+    // assertNotSelfRemove; their tenant-admin access is unaffected either way,
+    // because that comes from the membership flag rather than from a role.
+    if (isSameUser(email, adminEmail)) {
+      throw new HttpError(MESSAGES.ERROR.SELF_ROLE_CHANGE_FORBIDDEN, 403);
+    }
+
     const [check] = await conn.execute(
       'SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
       [email, tenantId]
@@ -372,6 +382,88 @@ const updateUserStatusCrossTenant = async (email, tenantId, status, actorEmail) 
       email,
       tenantId,
     ]);
+  });
+};
+
+/**
+ * Update the staff details on a membership.
+ *
+ * These live on user_tenants because a member of a tenancy IS a staff member —
+ * there is no longer a separate roster to keep in step. They are per-MEMBERSHIP
+ * rather than per-person: the same human may be 'Priya (Head Chef, Central)'
+ * here and 'Priya (Owner)' in another tenancy, and each tenancy owns its own
+ * view of them.
+ *
+ * Deliberately separate from role assignment and from the admin flag: what
+ * somebody is CALLED, what they may DO, and whether they may ADMINISTER are
+ * three different decisions with three different risks. A cashier correcting a
+ * phone number should not go anywhere near a permission.
+ *
+ * @param {string} email
+ * @param {string} tenantId - The caller's own tenancy.
+ * @param {Object} profile - { fullName, phone, branchDetailId }
+ * @param {string} actorEmail
+ */
+const updateUserProfile = (email, tenantId, profile, actorEmail) =>
+  withConnection(async (conn) => {
+    const [rows] = await conn.execute(
+      'SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
+      [email, tenantId],
+    );
+    if (rows.length === 0) throw new HttpError('User not found in tenant.', 404);
+
+    const { fullName = null, phone = null, branchDetailId = null } = profile || {};
+    await conn.execute(QUERIES.ADMIN_USERS.UPDATE_PROFILE, [
+      fullName, phone, branchDetailId, email, tenantId,
+    ]);
+    logger.info('Staff profile updated', { email, tenantId, actorEmail });
+  });
+
+/**
+ * Grant or withdraw tenant-administrator access for one membership.
+ *
+ * Exists because TENANT:ADMIN is derived from user_tenants.is_admin at login and
+ * NEVER from a role. Assigning a role named 'TENANT_ADMIN' or 'SUPER_ADMIN'
+ * grants that role's feature scopes and nothing more — which is why a user
+ * could hold the SUPER_ADMIN role, gain all 29 business scopes, and still be
+ * refused the Access Control screen.
+ *
+ * Deriving the flag from role NAMES was the alternative and is rejected: roles
+ * are per-tenant and freely renamable, so a tenant renaming its 'SUPER_ADMIN'
+ * role would silently revoke administration for everyone holding it.
+ *
+ * is_super_admin is deliberately NOT settable here. It bypasses every scope
+ * check in checkScope and reaches across tenancies, so it stays a deployment
+ * decision made in the seed, not something an API can hand out.
+ *
+ * @param {string} email - The member whose access is changing.
+ * @param {string} tenantId - Always the caller's own tenancy.
+ * @param {boolean} isAdmin
+ * @param {string} actorEmail
+ */
+const setTenantAdmin = async (email, tenantId, isAdmin, actorEmail) => {
+  // Same reasoning as assertNotSelfSuspend: an admin who withdraws their own
+  // access has no way to restore it.
+  if (!isAdmin && isSameUser(email, actorEmail)) {
+    throw new HttpError(MESSAGES.ERROR.SELF_DEMOTE_FORBIDDEN, 403);
+  }
+
+  return withConnection(async (conn) => {
+    const [rows] = await conn.execute(
+      'SELECT is_super_admin FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
+      [email, tenantId],
+    );
+    if (rows.length === 0) throw new HttpError('User not found in tenant.', 404);
+    // A super admin already passes every check via the bypass; toggling their
+    // tenant-admin flag would be meaningless at best and misleading at worst.
+    if (rows[0].is_super_admin) {
+      throw new HttpError(MESSAGES.ERROR.SUPER_ADMIN_IMMUTABLE, 403);
+    }
+
+    await conn.execute(QUERIES.ADMIN_USERS.SET_ADMIN_FLAG, [
+      isAdmin ? 1 : 0, email, tenantId,
+    ]);
+    logger.info('Tenant admin access changed', { email, tenantId, isAdmin, actorEmail });
   });
 };
 
@@ -523,6 +615,8 @@ module.exports = {
   updateUserStatus,
   updateUserStatusCrossTenant,
   removeUser,
+  setTenantAdmin,
+  updateUserProfile,
   listRoles,
   createRole,
   updateRole,

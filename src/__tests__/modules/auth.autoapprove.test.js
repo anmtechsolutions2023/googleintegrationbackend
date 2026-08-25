@@ -20,6 +20,13 @@ jest.mock('../../modules/appconfig/appconfig.service', () => ({
 jest.mock('../../modules/admin/admin.service', () => ({
   autoApproveOnboarding: jest.fn(),
 }));
+// Invitation claiming runs first on every login, but it is a collaborator here
+// rather than the subject — mocked for the same reason as the setup lookup
+// below, so it does not consume an entry from the sequenced queue. Its own
+// behaviour is covered in invitation.service.test.js and auth.invite.test.js.
+jest.mock('../../modules/invitation/invitation.service', () => ({
+  acceptPendingTx: jest.fn(async () => []),
+}));
 // Setup-state lookup is a collaborator here, not the subject. Mocked so it does
 // not consume entries from the sequenced mockConn.execute queue below.
 jest.mock('../../modules/mastersetup/mastersetup.repository', () => ({

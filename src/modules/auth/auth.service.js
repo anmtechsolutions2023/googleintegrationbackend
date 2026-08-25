@@ -14,6 +14,7 @@ const { QUERIES, STATUSES, SCOPES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('
 const { GOOGLE_CLIENT_ID, JWT_SECRET } = require('../../config/envConfig');
 const appConfig = require('../appconfig/appconfig.service');
 const adminService = require('../admin/admin.service');
+const invitationService = require('../invitation/invitation.service');
 // Repository, not the service: mastersetup.service pulls in ~14 CRUD services.
 // This file only needs the setup flag.
 const setupRepository = require('../mastersetup/mastersetup.repository');
@@ -92,14 +93,40 @@ const findAndGetPermissions = async (req, userData) => {
   try {
     const { email, name, googleId } = userData;
 
+    // ── Claim invitations FIRST ────────────────────────────────────────────
+    // Before memberships are read, and unconditionally — not inside the
+    // "unknown email" branch below. An existing user who has been invited to a
+    // second tenancy already passes the provisioned path, so a claim placed
+    // further down would never run for them. Running it here means one path
+    // serves both "new person joins your tenancy" and "existing person gains
+    // another".
+    //
+    // A failure must not cost the user their login: the invitation stays
+    // PENDING and is claimed on the next attempt. This mirrors how the
+    // auto-approval path below degrades to manual review.
+    try {
+      await invitationService.acceptPendingTx(connection, email);
+    } catch (inviteErr) {
+      logger.error('Invitation claim failed; continuing sign-in', inviteErr);
+    }
+
     const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS.SELECT, [
       email,
     ]);
 
-    // ── Provisioned user path (existing behaviour, unchanged) ──────────────
+    // ── Provisioned user path ──────────────────────────────────────────────
+    // Now includes anything just claimed above, which is how an invited user
+    // reaches their new tenancy on their very first sign-in without ever being
+    // auto-provisioned one of their own.
     if (tenantRows.length > 0) {
+      // USER_TENANTS.SELECT orders by last_active_at, so a member of several
+      // tenancies resumes where they left off. This used to be row [0] of an
+      // unordered query — arbitrary, and liable to change between logins.
       const selectedTenant = tenantRows[0];
       const tenantId = selectedTenant.tenant_id;
+
+      // Remember where they are, so the next sign-in returns here.
+      await connection.execute(QUERIES.USER_TENANTS.TOUCH_ACTIVE, [email, tenantId]);
 
       const permissions = await getScopesForTenant(connection, tenantId, email);
 

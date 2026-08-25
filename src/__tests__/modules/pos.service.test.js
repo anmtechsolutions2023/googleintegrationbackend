@@ -41,8 +41,8 @@ const POS_MODULES = MODULE_REGISTRY.filter((m) => m.name.startsWith('pos'));
 beforeEach(() => jest.clearAllMocks());
 
 describe('POS module registry', () => {
-  it('registers all 15 POS modules', () => {
-    expect(POS_MODULES).toHaveLength(15);
+  it('registers all 14 POS modules', () => {
+    expect(POS_MODULES).toHaveLength(14);
   });
 });
 

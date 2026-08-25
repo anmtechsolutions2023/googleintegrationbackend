@@ -2180,6 +2180,51 @@ const swaggerSpec = {
         },
       },
 
+      Invitation: {
+        type: 'object',
+        description: 'A tenancy asking a person to join it — the counterpart to an onboarding '
+          + 'request. A request is raised BY a person and carries no tenant until an admin picks '
+          + 'one; an invitation is raised BY a tenancy and carries its tenant and roles from '
+          + 'creation. Claimed at login: an invited email joins the INVITING tenancy instead of '
+          + 'being auto-provisioned a tenancy of its own.',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          tenant_id: { type: 'string', format: 'uuid', description: 'Always the inviter\'s own tenancy — taken from the token, never the request body.' },
+          email: { type: 'string', format: 'email', description: 'Stored lower-cased; matched case-insensitively at login.' },
+          is_admin: { type: 'integer', enum: [0, 1], description: 'TENANT:ADMIN derives from user_tenants.is_admin, not from a role, so this is the only way to invite a co-admin.' },
+          status: { type: 'string', enum: ['PENDING', 'ACCEPTED', 'REVOKED', 'EXPIRED'] },
+          invited_by: { type: 'string', format: 'email' },
+          expires_at: { type: 'string', format: 'date-time', nullable: true },
+          accepted_at: { type: 'string', format: 'date-time', nullable: true },
+          role_names: { type: 'string', nullable: true, description: 'Comma-separated, resolved server-side so a list needs no second round trip.' },
+          role_count: { type: 'integer' },
+        },
+      },
+      InvitationCreate: {
+        type: 'object',
+        required: ['email'],
+        description: 'The tenancy is NOT accepted here — it comes from the caller\'s token, so a '
+          + 'tenant admin can only invite into their own.',
+        properties: {
+          email: { type: 'string', format: 'email', maxLength: 255 },
+          roleIds: {
+            type: 'array', items: { type: 'string', format: 'uuid' },
+            description: 'Roles granted on acceptance. Must belong to the inviting tenancy. '
+              + 'May be empty — the membership is still created, and the acceptance path warns.',
+          },
+          isAdmin: { type: 'boolean', default: false, description: 'Invite them as a tenant admin.' },
+          fullName: {
+            type: 'string', maxLength: 100,
+            description: 'Staff details, stamped onto the membership when the invitation is '
+              + 'claimed. Adding a staff member IS inviting them — a membership of a tenancy is '
+              + 'the staff record — so these travel with the invite rather than needing a second '
+              + 'edit once the person first signs in.',
+          },
+          phone: { type: 'string', maxLength: 20 },
+          branchDetailId: { type: 'string', format: 'uuid', description: 'Home branch.' },
+        },
+      },
+
       PosSettings: {
         // Per-branch POS preferences. Every known key is always present —
         // defaults are filled in for keys the branch has never saved.
@@ -2221,39 +2266,6 @@ const swaggerSpec = {
           Description: {"type":"string"},
           Amount: {"type":"number"},
           ExpenseDate: {"type":"string","format":"date-time"},
-          BranchDetailId: {"type":"string","format":"uuid"},
-          Active: {"type":"boolean"},
-        },
-      },
-      PosStaffCreate: {
-        type: 'object', required: ["Name"],
-        properties: {
-          Name: {"type":"string"},
-          Role: {"type":"string"},
-          Phone: {"type":"string"},
-          Email: {"type":"string"},
-          BranchDetailId: {"type":"string","format":"uuid"},
-          Active: {"type":"boolean"},
-        },
-      },
-      PosStaffUpdate: {
-        type: 'object',
-        properties: {
-          Name: {"type":"string"},
-          Role: {"type":"string"},
-          Phone: {"type":"string"},
-          Email: {"type":"string"},
-          BranchDetailId: {"type":"string","format":"uuid"},
-          Active: {"type":"boolean"},
-        },
-      },
-      PosStaff: {
-        type: 'object',
-        properties: { ...auditFields,
-          Name: {"type":"string"},
-          Role: {"type":"string"},
-          Phone: {"type":"string"},
-          Email: {"type":"string"},
           BranchDetailId: {"type":"string","format":"uuid"},
           Active: {"type":"boolean"},
         },
@@ -2514,7 +2526,6 @@ const swaggerSpec = {
     ...crudPaths('PosFeedback', '/api/pos/feedback', 'PosFeedbackCreate', 'PosFeedbackUpdate', 'PosFeedback', false),
     ...crudPaths('PosTokens', '/api/pos/tokens', 'PosTokenCreate', 'PosTokenUpdate', 'PosToken', false),
     ...crudPaths('PosExpenses', '/api/pos/expenses', 'PosExpenseCreate', 'PosExpenseUpdate', 'PosExpense', false),
-    ...crudPaths('PosStaff', '/api/pos/staff', 'PosStaffCreate', 'PosStaffUpdate', 'PosStaff', false),
 
     // POS domain actions (beyond CRUD)
     '/api/pos/orders/{id}/fire-kot': {
@@ -2544,6 +2555,130 @@ const swaggerSpec = {
         parameters: [idParam],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosBillSettle' } } } },
         responses: { ...singleResponse('PosBill'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/users/{email}/profile': {
+      put: {
+        tags: ['AdminUsers'],
+        summary: 'Update a member\'s staff details (name, phone, branch)',
+        description: 'Staff and users are ONE entity: a membership of a tenancy IS a staff record, '
+          + 'so these details live on user_tenants and there is no separate roster to keep in step. '
+          + '(The old pos_staff table and /api/pos/staff are retired.) They are per-MEMBERSHIP, not '
+          + 'per-person: the same Google account can be "Priya, Head Chef, Central" here and hold a '
+          + 'different name and branch in another tenancy. '
+          + 'Deliberately separate from roles and from the admin flag — what somebody is CALLED, '
+          + 'what they may DO and whether they may ADMINISTER are three decisions carrying three '
+          + 'different risks, and correcting a phone number should not go near a permission.',
+        security,
+        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object', minProperties: 1,
+            properties: {
+              fullName: { type: 'string', maxLength: 100, nullable: true },
+              phone: { type: 'string', maxLength: 20, nullable: true },
+              branchDetailId: { type: 'string', format: 'uuid', nullable: true, description: 'Home branch. Null for someone who is not tied to one.' },
+            },
+          } } },
+        },
+        responses: {
+          200: { description: 'Staff details updated' },
+          ...responses.validation, ...responses.notFound,
+          ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/admin/users/{email}/admin': {
+      put: {
+        tags: ['AdminUsers'],
+        summary: 'Grant or withdraw tenant-administrator access',
+        description: 'TENANT:ADMIN is derived from user_tenants.is_admin at login and NEVER from '
+          + 'a role — assigning a role NAMED "TENANT_ADMIN" or "SUPER_ADMIN" grants that role\'s '
+          + 'feature scopes and nothing more, which is why such a user could still be refused the '
+          + 'admin screens. Deriving the flag from role names is deliberately not done: roles are '
+          + 'per-tenant and freely renamable, so a rename would silently revoke administration. '
+          + 'is_super_admin is NOT settable here — it bypasses every scope check and reaches '
+          + 'across tenancies, so it stays a deployment decision. '
+          + 'Scopes live in the JWT, so the affected user must sign in again for this to take effect.',
+        security,
+        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object', required: ['isAdmin'],
+            properties: { isAdmin: { type: 'boolean' } },
+          } } },
+        },
+        responses: {
+          200: { description: 'Access updated' },
+          403: { description: 'Self-demotion, or the target is a super admin' },
+          ...responses.validation, ...responses.notFound,
+          ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/admin/users/{email}': {
+      delete: {
+        tags: ['AdminUsers'],
+        summary: 'Remove a user from THIS tenancy',
+        description: 'Membership-scoped, never a global delete. There is no users table — identity '
+          + 'is the Google account — so this ends the membership and its role grants for the '
+          + 'caller\'s tenancy only. A person who belongs to other tenancies keeps those; a person '
+          + 'left with none becomes an unprovisioned email and starts fresh on their next sign-in '
+          + '(a new onboarding request, or a new tenancy if auto-approval is on). '
+          + 'Use PUT /users/{email}/status to suspend reversibly instead.',
+        security,
+        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        responses: {
+          200: { description: 'Removed from this tenancy' },
+          403: { description: 'You cannot remove your own account' },
+          ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/admin/invitations': {
+      get: {
+        tags: ['Invitations'],
+        summary: 'Invitations this tenancy has raised',
+        description: 'Scoped to the caller\'s own tenancy. Tenant admins and super admins.',
+        security,
+        responses: {
+          200: { description: 'Success', content: { 'application/json': { schema: { type: 'object', properties: {
+            success: { type: 'boolean' }, message: { type: 'string' },
+            data: { type: 'array', items: { $ref: '#/components/schemas/Invitation' } },
+          } } } } },
+          ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+      post: {
+        tags: ['Invitations'],
+        summary: 'Invite an email into this tenancy',
+        description: 'The invitee joins on their next sign-in, with the roles named here. Works '
+          + 'whether or not they already have an account, and whether or not onboarding '
+          + 'auto-approval is enabled — an invitation is itself the authorization.',
+        security,
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/InvitationCreate' } } } },
+        responses: {
+          ...singleResponse('Invitation', 201),
+          409: { description: 'Already a member of this tenancy, or an invitation is already pending for that email' },
+          ...responses.validation, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/admin/invitations/{id}': {
+      delete: {
+        tags: ['Invitations'],
+        summary: 'Withdraw a pending invitation',
+        description: 'Marked REVOKED rather than deleted — who invited whom, and who changed '
+          + 'their mind, stays answerable. The email may then be re-invited.',
+        security,
+        parameters: [idParam],
+        responses: {
+          ...responses.noContent,
+          404: { description: 'No pending invitation with that id in this tenancy' },
+          ...responses.unauthorized, ...responses.forbidden,
+        },
       },
     },
     '/api/pos/customers/search': {

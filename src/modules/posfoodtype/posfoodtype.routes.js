@@ -10,16 +10,15 @@ const {
   checkScope,
 } = require('../../middleware/authMiddleware');
 const { auditLogCrud } = require('../../middleware/auditLogger');
-const { SCOPES, AUDIT_CATEGORIES } = require('../../config/constants');
+const { SCOPES, SCOPE_SETS, AUDIT_CATEGORIES } = require('../../config/constants');
 const controller = require('./posfoodtype.controller');
 
 const audit = auditLogCrud('POS Food Type', AUDIT_CATEGORIES.POS);
 
 // Viewing requires READ or WRITE on POS config (admins bypass).
-const readAccess = checkScope(
-  SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
-  SCOPES.POS_CONFIG_READ, SCOPES.POS_CONFIG_WRITE,
-);
+// Shared POS reference data — the menu editor reads it, and so does anything
+// that has to label a dish. See SCOPE_SETS.POS_REFERENCE_READ.
+const readAccess = checkScope(...SCOPE_SETS.POS_REFERENCE_READ);
 // Mutating requires WRITE on POS config (admins bypass).
 const writeAccess = checkScope(
   SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CONFIG_WRITE,

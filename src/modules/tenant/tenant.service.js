@@ -45,6 +45,20 @@ const switchTenantPermissions = async (
     if (targetTenant.is_admin) {
       permissions.push(SCOPES.TENANT_ADMIN);
     }
+    // Mirrors the login path. Without this a super admin who switched tenancy
+    // silently lost TENANT:SUPER_ADMIN — and with it the checkScope bypass —
+    // until they logged in again, so cross-tenant screens went 403 mid-session.
+    if (targetTenant.is_super_admin) {
+      permissions.push(SCOPES.TENANT_SUPER_ADMIN);
+    }
+
+    // Remember the choice: login orders memberships by last_active_at, so the
+    // next sign-in resumes the tenancy they switched to rather than an
+    // arbitrary one.
+    await connection.execute(QUERIES.USER_TENANTS.TOUCH_ACTIVE, [
+      userEmail,
+      targetTenantId,
+    ]);
 
     logger.info('Tenant switch successful', { userEmail, targetTenantId });
     return {

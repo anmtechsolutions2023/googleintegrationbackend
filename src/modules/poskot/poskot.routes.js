@@ -14,12 +14,26 @@ const controller = require('./poskot.controller');
 const audit = auditLogCrud('POS KOT', AUDIT_CATEGORIES.POS);
 
 /** GET / — list all POS KOT records for the tenant. */
+// Reading the tickets is part of taking an order, not only of cooking: the till
+// shows which rounds have been fired before it will let another go, so Billing
+// loads this list on every open. Gating the read on POS_KITCHEN alone meant a
+// cashier's main screen 403'd unless they were also handed kitchen access.
+//
+// WRITE stays with POS_KITCHEN below — marking a ticket ready is the cook's
+// call. Firing one is POS_ORDER:WRITE, on the order routes where it belongs.
+const READ = [
+  SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+  SCOPES.POS_KITCHEN_READ, SCOPES.POS_KITCHEN_WRITE,
+  SCOPES.POS_ORDER_READ, SCOPES.POS_ORDER_WRITE,
+  SCOPES.POS_BILLING_READ, SCOPES.POS_BILLING_WRITE,
+];
+
 router.get('/', authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_KITCHEN_READ, SCOPES.POS_KITCHEN_WRITE), audit, ...controller.getAll);
+  checkScope(...READ), audit, ...controller.getAll);
 
 /** GET /:id — get one POS KOT by ID. */
 router.get('/:id', authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_KITCHEN_READ, SCOPES.POS_KITCHEN_WRITE), audit, ...controller.getById);
+  checkScope(...READ), audit, ...controller.getById);
 
 /** POST / — create a POS KOT. */
 router.post(

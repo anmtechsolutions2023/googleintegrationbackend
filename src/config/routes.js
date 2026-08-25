@@ -8,6 +8,7 @@ const authRoutes = require('../modules/auth/auth.routes');
 const onboardingRoutes = require('../modules/onboarding/onboarding.routes');
 const adminRoutes = require('../modules/admin/admin.routes');
 const appconfigRoutes = require('../modules/appconfig/appconfig.routes');
+const invitationRoutes = require('../modules/invitation/invitation.routes');
 const tenantRoutes = require('../modules/tenant/tenant.routes');
 const reportsRoutes = require('../modules/reports/reports.routes');
 const dataRoutes = require('../modules/data/data.routes');
@@ -70,7 +71,6 @@ const postokenRoutes = require('../modules/postoken/postoken.routes');
 const possettingRoutes = require('../modules/possetting/possetting.routes');
 const posbranchRoutes = require('../modules/posbranch/posbranch.routes');
 const posexpenseRoutes = require('../modules/posexpense/posexpense.routes');
-const posstaffRoutes = require('../modules/posstaff/posstaff.routes');
 const posreportRoutes = require('../modules/posreport/posreport.routes');
 
 /**
@@ -93,6 +93,10 @@ const registerRoutes = (app) => {
   // Application Configuration - super-admin global settings (mounted before the
   // broader /api/admin router so this more specific path wins).
   app.use('/api/admin/app-config', appconfigRoutes);
+
+  // Tenant invitations — mounted BEFORE the broader /api/admin router so this
+  // more specific path wins, matching how app-config is mounted above.
+  app.use('/api/admin/invitations', invitationRoutes);
 
   // Admin module - IAM panel (onboarding approval, user/role/feature management)
   app.use('/api/admin', adminRoutes);
@@ -255,7 +259,6 @@ const registerRoutes = (app) => {
   app.use('/api/pos/settings', possettingRoutes);
   app.use('/api/pos/branches', posbranchRoutes);
   app.use('/api/pos/expenses', posexpenseRoutes);
-  app.use('/api/pos/staff', posstaffRoutes);
   app.use('/api/pos/reports', posreportRoutes);
 
   // Health check / root endpoint
@@ -340,7 +343,6 @@ const registerRoutes = (app) => {
         { name: 'pos-feedback', path: '/api/pos/feedback' },
         { name: 'pos-tokens', path: '/api/pos/tokens' },
         { name: 'pos-expenses', path: '/api/pos/expenses' },
-        { name: 'pos-staff', path: '/api/pos/staff' },
         { name: 'pos-reports', path: '/api/pos/reports' },
       ],
     });

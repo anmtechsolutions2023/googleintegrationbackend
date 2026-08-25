@@ -12,7 +12,8 @@ const service = require('./admin.service');
 const schemas = require('./admin.schemas');
 const MESSAGES = require('../../config/messages');
 const { captureAudit } = require('../../utils/logger');
-const { STATUSES, AUDIT_CATEGORIES } = require('../../config/constants');
+const { HttpError } = require('../../middleware/errorHandler');
+const { STATUSES, AUDIT_CATEGORIES, SCOPES } = require('../../config/constants');
 
 // ─── ONBOARDING ───────────────────────────────────────────────────────────────
 
@@ -25,12 +26,35 @@ const listRequests = [
   }),
 ];
 
+/**
+ * The tenancy an approval may target.
+ *
+ * A SUPER admin legitimately places users into any tenancy — that is the job.
+ * Anyone else may only act on their own, so a body value that disagrees with
+ * their token is refused rather than silently honoured. Before this, the body
+ * was trusted outright; it was safe only because no tenant admin could reach
+ * the route at all.
+ *
+ * @param {Object} req
+ * @param {string} requestedTenantId - The tenant named in the request body.
+ * @returns {string} The tenant id to provision into.
+ */
+const resolveTargetTenant = (req, requestedTenantId) => {
+  const { tid: callerTenantId, scopes = [] } = req.user;
+  if (scopes.includes(SCOPES.TENANT_SUPER_ADMIN)) return requestedTenantId;
+  if (requestedTenantId && requestedTenantId !== callerTenantId) {
+    throw new HttpError(MESSAGES.ERROR.CROSS_TENANT_FORBIDDEN, 403);
+  }
+  return callerTenantId;
+};
+
 const approveRequest = [
   validateUuidParam('requestId'),
   validateBody(schemas.approveRequestSchema),
   asyncHandler(async (req, res) => {
     const { userEmail: email, tenantId } = extractUserContext(req);
-    const { tenantId: targetTenantId, roleIds } = req.validatedBody;
+    const { tenantId: requestedTenantId, roleIds } = req.validatedBody;
+    const targetTenantId = resolveTargetTenant(req, requestedTenantId);
     const result = await service.approveRequest(req.params.requestId, targetTenantId, roleIds, email);
 
     await captureAudit(req, tenantId, email,
@@ -72,7 +96,8 @@ const approveOnboarding = [
   validateBody(schemas.approveOnboardingSchema),
   asyncHandler(async (req, res) => {
     const { userEmail: email, tenantId } = extractUserContext(req);
-    const { tenantId: targetTenantId, roleIds } = req.validatedBody;
+    const { tenantId: requestedTenantId, roleIds } = req.validatedBody;
+    const targetTenantId = resolveTargetTenant(req, requestedTenantId);
     const result = await service.approveRequest(req.params.id, targetTenantId, roleIds, email);
 
     await captureAudit(req, tenantId, email,
@@ -200,6 +225,44 @@ const updateUserStatusCrossTenant = [
       email);
 
     successResponse(res, MESSAGES.SUCCESS.USER_STATUS_UPDATED);
+  }),
+];
+
+// The staff details on a membership. Separate from roles and from the admin
+// flag because what somebody is CALLED, what they may DO and whether they may
+// ADMINISTER are three different decisions carrying three different risks.
+const updateUserProfile = [
+  validateBody(schemas.updateUserProfileSchema),
+  asyncHandler(async (req, res) => {
+    const { userEmail: adminEmail, tenantId } = extractUserContext(req);
+    await service.updateUserProfile(req.params.email, tenantId, req.validatedBody, adminEmail);
+
+    await captureAudit(req, tenantId, adminEmail,
+      'USER_PROFILE_UPDATED', STATUSES.SUCCESS,
+      AUDIT_CATEGORIES.USER_MGMT, 'INFO', req.params.email);
+
+    successResponse(res, 'Staff details updated');
+  }),
+];
+
+// Grant or withdraw tenant-administrator access. Separate from role assignment
+// on purpose: TENANT:ADMIN comes from the membership flag, not from any role,
+// so conflating the two is exactly what made "assign the SUPER_ADMIN role" look
+// like it should work and then not.
+const setTenantAdmin = [
+  validateBody(schemas.setTenantAdminSchema),
+  asyncHandler(async (req, res) => {
+    const { userEmail: adminEmail, tenantId } = extractUserContext(req);
+    const { isAdmin } = req.validatedBody;
+    await service.setTenantAdmin(req.params.email, tenantId, isAdmin, adminEmail);
+
+    await captureAudit(req, tenantId, adminEmail,
+      isAdmin ? 'USER_GRANTED_ADMIN' : 'USER_REVOKED_ADMIN', STATUSES.SUCCESS,
+      AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.email);
+
+    successResponse(res, isAdmin
+      ? 'Tenant administrator access granted'
+      : 'Tenant administrator access withdrawn');
   }),
 ];
 
@@ -360,6 +423,8 @@ module.exports = {
   updateUserRoles,
   updateUserStatus,
   updateUserStatusCrossTenant,
+  setTenantAdmin,
+  updateUserProfile,
   removeUser,
   listRoles,
   createRole,

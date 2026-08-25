@@ -97,6 +97,14 @@ const viewerToken = () =>
     TEST_SECRET
   );
 
+// Platform owner. checkScope admits them everywhere via its bypass.
+const superAdminToken = () =>
+  'Bearer ' +
+  jwt.sign(
+    { tid: TENANT_ID, email: 'super@test.com', scopes: ['TENANT:SUPER_ADMIN'] },
+    TEST_SECRET
+  );
+
 const iamAdminToken = () =>
   'Bearer ' +
   jwt.sign(
@@ -108,6 +116,23 @@ const guestToken = () =>
   'Bearer ' +
   jwt.sign(
     { tid: null, email: 'guest@test.com', scopes: ['guest:explore'] },
+    TEST_SECRET
+  );
+
+// A POS_CASHIER exactly as the seed defines it: order and billing work, plus
+// read of the customer list and the POS config. Nothing else — no kitchen, no
+// reports, no master data. Before the seed was tightened this role also carried
+// READ on all twelve categories, which is what put Master Data in a cashier's
+// menu.
+const CASHIER_SCOPES = [
+  'POS_ORDER:READ', 'POS_ORDER:WRITE',
+  'POS_BILLING:READ', 'POS_BILLING:WRITE',
+  'POS_CRM:READ', 'POS_CONFIG:READ',
+];
+const cashierToken = () =>
+  'Bearer ' +
+  jwt.sign(
+    { tid: TENANT_ID, email: 'cashier@test.com', scopes: CASHIER_SCOPES },
     TEST_SECRET
   );
 
@@ -470,7 +495,6 @@ const MODULES = [
   // Category is a master (expense_category), not free text, so spend reports
   // can group by id instead of by spelling.
   { path: '/api/pos/expenses', body: { ExpenseCategoryId: UUID_1, Amount: 500, Active: true }, updateBody: { Amount: 600 } },
-  { path: '/api/pos/staff', body: { Name: 'Head Chef', Role: 'Kitchen', Active: true }, updateBody: { Role: 'Manager' } },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1199,6 +1223,89 @@ describe('Audit routes — AUDIT:READ / admin:access gating', () => {
       const res = await request(server).get(p).set('Authorization', iamAdminToken());
       expect(res.status).toBe(200);
     });
+
+    // A tenant admin has full access within their own tenancy, and the
+    // controller already narrows what they see to it. The guard used to refuse
+    // them unless a role happened to carry AUDIT:READ as well.
+    it(`GET ${p} — tenant admin → 200, scoped to their own tenancy`, async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      mockConnection.query.mockImplementation(defaultQueryImpl);
+      const res = await request(server).get(p).set('Authorization', adminToken());
+      expect(res.status).toBe(200);
+    });
+  });
+});
+
+// Reports are tenant-scoped, so administration of a tenancy includes them. The
+// menu offered the link on TENANT:ADMIN while the API required REPORTS:READ.
+// What a till must reach, and what it must not.
+//
+// Some reference data belongs to another category but is needed to work a
+// counter: the dish name that goes on the KOT, the tender types on the settle
+// screen, the tickets already fired. Those reads admit the POS scopes, because
+// the alternative — handing a cashier MASTER_DATA:READ or INVENTORY:READ to
+// reach one lookup — is what gave every role the run of the system.
+describe('A cashier, with only the scopes their role grants', () => {
+  const ok = async (path) => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    mockConnection.query.mockImplementation(defaultQueryImpl);
+    const res = await request(server).get(path).set('Authorization', cashierToken());
+    expect(res.status).not.toBe(403);
+  };
+  const refused = async (path) => {
+    const res = await request(server).get(path).set('Authorization', cashierToken());
+    expect(res.status).toBe(403);
+  };
+
+  // Billing loads all of these on open; any one of them 403ing breaks the till.
+  it('reads the tender types, to take a payment', () => ok('/api/paymentmodes'));
+  it('reads catalogue items, so the KOT carries a dish name and not a uuid', () =>
+    ok('/api/itemdetails'));
+  it('reads the tickets already fired, which the till checks before firing another', () =>
+    ok('/api/pos/kots'));
+  it('reads its branch list', () => ok('/api/pos/branches'));
+  it('reads orders and the menu', async () => {
+    await ok('/api/pos/orders');
+    await ok('/api/pos/item-meta');
+  });
+
+  // The other half of the bargain: reading one lookup is not the category.
+  it('cannot write master data', async () => {
+    const res = await request(server).post('/api/paymentmodes')
+      .set('Authorization', cashierToken()).send({ Name: 'Crypto', Active: true });
+    expect(res.status).toBe(403);
+  });
+  it('cannot create a catalogue item', async () => {
+    const res = await request(server).post('/api/itemdetails')
+      .set('Authorization', cashierToken()).send({ Name: 'X' });
+    expect(res.status).toBe(403);
+  });
+  it('cannot mark a ticket ready — that is the cook\'s call', async () => {
+    const res = await request(server).put(`/api/pos/kots/${RECORD_ID}`)
+      .set('Authorization', cashierToken()).send({ Status: 'ready' });
+    expect(res.status).toBe(403);
+  });
+  it('cannot read the takings', () => refused('/api/pos/reports'));
+  it('cannot browse the organization master', () => refused('/api/organizations'));
+  it('cannot read the asset register', () => refused('/api/assets'));
+  it('cannot read the audit trail', () => refused('/api/audit/logs'));
+});
+
+describe('Reports — who may read them', () => {
+  it('GET /api/reports — no token → 401', async () => {
+    expect((await request(server).get('/api/reports')).status).toBe(401);
+  });
+
+  it('GET /api/reports — tenant admin → not refused', async () => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    mockConnection.query.mockImplementation(defaultQueryImpl);
+    const res = await request(server).get('/api/reports').set('Authorization', adminToken());
+    expect(res.status).toBe(200);
+  });
+
+  it('GET /api/reports — a user with neither REPORTS:READ nor administration → 403', async () => {
+    const res = await request(server).get('/api/reports').set('Authorization', guestToken());
+    expect(res.status).toBe(403);
   });
 });
 
@@ -1927,12 +2034,21 @@ describe('Onboarding guest endpoints', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Admin IAM endpoints — auth guards', () => {
-  const ADMIN_PATHS = [
-    '/api/admin/onboarding-requests',
+  // Tenant-scoped administration. Every service behind these filters by
+  // req.user.tid, so a tenant admin may use them on their own tenancy.
+  const TENANT_ADMIN_PATHS = [
     '/api/admin/users',
     '/api/admin/roles',
     '/api/admin/features',
   ];
+  // Not tenant-scoped at all: the onboarding queue has no tenant_id until a
+  // request is approved, so it cannot be filtered per tenant.
+  const SUPER_ADMIN_PATHS = [
+    '/api/admin/onboarding-requests',
+    '/api/admin/onboarding',
+    '/api/admin/users/all',
+  ];
+  const ADMIN_PATHS = [...TENANT_ADMIN_PATHS, ...SUPER_ADMIN_PATHS];
 
   ADMIN_PATHS.forEach((p) => {
     it(`GET ${p} — no token → 401`, async () => {
@@ -1940,14 +2056,44 @@ describe('Admin IAM endpoints — auth guards', () => {
       expect(res.status).toBe(401);
     });
 
-    it(`GET ${p} — no admin:access scope → 403`, async () => {
-      const res = await request(server)
-        .get(p)
-        .set('Authorization', adminToken()); // has TENANT:ADMIN, not admin:access
+    // The real negative case. This used to be asserted with a TENANT:ADMIN
+    // token, which encoded the defect: 'admin:access' is granted to nobody, so
+    // a tenant admin was locked out of administering their own tenancy.
+    it(`GET ${p} — ordinary business user → 403`, async () => {
+      const res = await request(server).get(p).set('Authorization', viewerToken());
+      expect(res.status).toBe(403);
+    });
+  });
+
+  TENANT_ADMIN_PATHS.forEach((p) => {
+    it(`GET ${p} — tenant admin → 200`, async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      mockConnection.query.mockImplementation(defaultQueryImpl);
+      const res = await request(server).get(p).set('Authorization', adminToken());
+      expect(res.status).toBe(200);
+    });
+  });
+
+  SUPER_ADMIN_PATHS.forEach((p) => {
+    // Widening these to tenant admins would expose every pending signup on the
+    // platform, and let one tenancy's admin edit the global feature catalogue.
+    it(`GET ${p} — tenant admin refused → 403`, async () => {
+      const res = await request(server).get(p).set('Authorization', adminToken());
       expect(res.status).toBe(403);
     });
 
-    it(`GET ${p} — admin:access token → 200`, async () => {
+    it(`GET ${p} — super admin → 200`, async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      mockConnection.query.mockImplementation(defaultQueryImpl);
+      const res = await request(server).get(p).set('Authorization', superAdminToken());
+      expect(res.status).toBe(200);
+    });
+  });
+
+  // 'admin:access' is retained in the tenant-admin guard for backward
+  // compatibility, so a legacy token carrying it still reaches these.
+  TENANT_ADMIN_PATHS.forEach((p) => {
+    it(`GET ${p} — legacy admin:access token → 200`, async () => {
       mockConnection.execute.mockImplementation(defaultExecuteImpl);
       mockConnection.query.mockImplementation(defaultQueryImpl);
       const res = await request(server)
@@ -2005,7 +2151,7 @@ describe('Admin IAM endpoints — feature management', () => {
   it('POST /api/admin/features — missing required fields → 400', async () => {
     const res = await request(server)
       .post('/api/admin/features')
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({ displayName: 'Reports' }); // featureShortName and scope missing
     expect(res.status).toBe(400);
   });
@@ -2016,10 +2162,56 @@ describe('Admin IAM endpoints — feature management', () => {
       .mockResolvedValueOnce([[{ feature_id: RECORD_ID, scope: 'READ' }]]);
     const res = await request(server)
       .post('/api/admin/features')
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({ featureShortName: 'REPORTS', scope: 'READ', displayName: 'Reports Read' });
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
+  });
+});
+
+// Staff and users are one entity: the membership row IS the staff record, so
+// name, phone and branch are edited through the admin API rather than through a
+// pos_staff CRUD screen (retired along with /api/pos/staff).
+describe('Admin IAM endpoints — staff details on a membership', () => {
+  const PATH = '/api/admin/users/staff@test.com/profile';
+
+  it('PUT — no token → 401', async () => {
+    expect((await request(server).put(PATH).send({ fullName: 'X' })).status).toBe(401);
+  });
+
+  it('PUT — a tenant admin may edit them → 200', async () => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    const res = await request(server).put(PATH)
+      .set('Authorization', adminToken())
+      .send({ fullName: 'Priya R', phone: '9876543210' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('PUT — an empty body is refused, so a no-op cannot look like a save', async () => {
+    const res = await request(server).put(PATH)
+      .set('Authorization', adminToken()).send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('PUT — a branch id must be a uuid → 400', async () => {
+    const res = await request(server).put(PATH)
+      .set('Authorization', adminToken()).send({ branchDetailId: 'not-a-uuid' });
+    expect(res.status).toBe(400);
+  });
+
+  it('PUT — a user with no administration → 403', async () => {
+    const res = await request(server).put(PATH)
+      .set('Authorization', viewerToken()).send({ fullName: 'X' });
+    expect(res.status).toBe(403);
+  });
+});
+
+// /api/pos/staff is gone: a staff member is a membership now.
+describe('The retired staff roster', () => {
+  it('GET /api/pos/staff → 404, not a second place to keep people', async () => {
+    const res = await request(server).get('/api/pos/staff').set('Authorization', adminToken());
+    expect(res.status).toBe(404);
   });
 });
 
@@ -2125,7 +2317,7 @@ describe('Admin IAM — GET /api/admin/onboarding', () => {
   it('admin:access token, default status PENDING → 200 with data + pagination', async () => {
     const res = await request(server)
       .get('/api/admin/onboarding')
-      .set('Authorization', iamAdminToken());
+      .set('Authorization', superAdminToken());
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body).toHaveProperty('data');
@@ -2135,7 +2327,7 @@ describe('Admin IAM — GET /api/admin/onboarding', () => {
   it('?status=ALL → 200', async () => {
     const res = await request(server)
       .get('/api/admin/onboarding?status=ALL')
-      .set('Authorization', iamAdminToken());
+      .set('Authorization', superAdminToken());
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
@@ -2143,14 +2335,14 @@ describe('Admin IAM — GET /api/admin/onboarding', () => {
   it('?status=APPROVED → 200', async () => {
     const res = await request(server)
       .get('/api/admin/onboarding?status=APPROVED')
-      .set('Authorization', iamAdminToken());
+      .set('Authorization', superAdminToken());
     expect(res.status).toBe(200);
   });
 
   it('invalid status value → 400', async () => {
     const res = await request(server)
       .get('/api/admin/onboarding?status=UNKNOWN')
-      .set('Authorization', iamAdminToken());
+      .set('Authorization', superAdminToken());
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
   });
@@ -2175,7 +2367,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
   it('invalid UUID in :id → 400', async () => {
     const res = await request(server)
       .put('/api/admin/onboarding/not-a-valid-uuid/approve')
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({ tenantId: TENANT_ID });
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
@@ -2184,7 +2376,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
   it('missing tenantId in body → 400', async () => {
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({});
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
@@ -2194,7 +2386,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
     mockConnection.execute.mockResolvedValueOnce([[]]); // no matching PENDING row
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({ tenantId: TENANT_ID });
     expect(res.status).toBe(404);
   });
@@ -2205,7 +2397,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
       .mockResolvedValueOnce([[{ id: UUID_1 }]]); // user already provisioned
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({ tenantId: TENANT_ID });
     expect(res.status).toBe(409);
   });
@@ -2217,7 +2409,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
       .mockResolvedValue([[{ affectedRows: 1 }]]); // INSERT user_tenants, UPDATE onboarding_requests
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({ tenantId: TENANT_ID }); // roleIds omitted — Joi defaults to []
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -2231,7 +2423,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
       .mockResolvedValue([[{ affectedRows: 1 }]]);
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({ tenantId: TENANT_ID, roleIds: [UUID_1] });
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -2258,7 +2450,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
   it('invalid UUID in :id → 400', async () => {
     const res = await request(server)
       .put('/api/admin/onboarding/not-a-uuid/reject')
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({ rejectionReason: 'Not eligible' });
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
@@ -2267,7 +2459,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
   it('missing rejectionReason → 400', async () => {
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({});
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
@@ -2277,7 +2469,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
     mockConnection.execute.mockResolvedValueOnce([[]]); // no PENDING row
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({ rejectionReason: 'Not eligible' });
     expect(res.status).toBe(404);
   });
@@ -2288,7 +2480,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
       .mockResolvedValueOnce([[{ affectedRows: 1 }]]); // UPDATE status
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
-      .set('Authorization', iamAdminToken())
+      .set('Authorization', superAdminToken())
       .send({ rejectionReason: 'Not eligible at this time' });
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -2311,7 +2503,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reopen', () => {
   it('invalid UUID in :id → 400', async () => {
     const res = await request(server)
       .put('/api/admin/onboarding/not-a-uuid/reopen')
-      .set('Authorization', iamAdminToken());
+      .set('Authorization', superAdminToken());
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
   });
@@ -2320,7 +2512,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reopen', () => {
     mockConnection.execute.mockResolvedValueOnce([[]]); // no REJECTED row
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reopen`)
-      .set('Authorization', iamAdminToken());
+      .set('Authorization', superAdminToken());
     expect(res.status).toBe(404);
   });
 
@@ -2330,7 +2522,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reopen', () => {
       .mockResolvedValueOnce([[{ affectedRows: 1 }]]); // UPDATE back to PENDING
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reopen`)
-      .set('Authorization', iamAdminToken());
+      .set('Authorization', superAdminToken());
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
@@ -2342,7 +2534,7 @@ describe('Admin IAM — onboarding list status filter', () => {
     mockConnection.query.mockImplementation(defaultQueryImpl);
     const res = await request(server)
       .get('/api/admin/onboarding?status=ALL')
-      .set('Authorization', iamAdminToken());
+      .set('Authorization', superAdminToken());
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
@@ -2352,14 +2544,14 @@ describe('Admin IAM — onboarding list status filter', () => {
     mockConnection.query.mockImplementation(defaultQueryImpl);
     const res = await request(server)
       .get('/api/admin/onboarding?status=CANCELLED')
-      .set('Authorization', iamAdminToken());
+      .set('Authorization', superAdminToken());
     expect(res.status).toBe(200);
   });
 
   it('unknown status → 400', async () => {
     const res = await request(server)
       .get('/api/admin/onboarding?status=BOGUS')
-      .set('Authorization', iamAdminToken());
+      .set('Authorization', superAdminToken());
     expect(res.status).toBe(400);
   });
 });
@@ -2370,11 +2562,23 @@ describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
     expect(res.status).toBe(401);
   });
 
-  it('no admin:access scope → 403', async () => {
+  it('ordinary business user → 403', async () => {
+    const res = await request(server)
+      .get('/api/admin/users/user@test.com/roles')
+      .set('Authorization', viewerToken());
+    expect(res.status).toBe(403);
+  });
+
+  // A tenant admin reads roles WITHIN their own tenancy — the service filters
+  // on req.user.tid. This used to 403, which is what made the IAM screen
+  // unusable for the role it was built for.
+  it('tenant admin → 200', async () => {
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    mockConnection.query.mockImplementation(defaultQueryImpl);
     const res = await request(server)
       .get('/api/admin/users/user@test.com/roles')
       .set('Authorization', adminToken());
-    expect(res.status).toBe(403);
+    expect([200, 404]).toContain(res.status);
   });
 
   it('user not found in tenant → 404', async () => {

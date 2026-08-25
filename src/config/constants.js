@@ -69,8 +69,13 @@ module.exports = {
   QUERIES: {
     // User & Tenant Queries
     USER_TENANTS: {
+      // Ordered by last_active_at so a member of several tenancies resumes
+      // where they left off. Previously unordered, so tenantRows[0] — which
+      // login uses as the active tenancy — could differ between logins.
       SELECT:
-        'SELECT tenant_id, is_admin, is_super_admin FROM user_tenants WHERE user_email = ? AND is_active = TRUE',
+        'SELECT tenant_id, is_admin, is_super_admin, last_active_at FROM user_tenants WHERE user_email = ? AND is_active = TRUE ORDER BY last_active_at IS NULL, last_active_at DESC, tenant_id ASC',
+      TOUCH_ACTIVE:
+        'UPDATE user_tenants SET last_active_at = NOW() WHERE user_email = ? AND tenant_id = ?',
     },
 
     // Permissions Queries
@@ -1279,14 +1284,9 @@ module.exports = {
       DELETE: 'DELETE FROM pos_cash_session WHERE Id = ? AND TenantId = ?',
     },
 
-    POS_STAFF: {
-      SELECT_ALL: 'SELECT * FROM pos_staff WHERE TenantId = ? ORDER BY CreatedOn DESC',
-      COUNT: 'SELECT COUNT(*) as total FROM pos_staff WHERE TenantId = ?',
-      SELECT_BY_ID: 'SELECT * FROM pos_staff WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_staff (Id, TenantId, Name, Role, Phone, Email, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_staff SET Name = ?, Role = ?, Phone = ?, Email = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
-      DELETE: 'DELETE FROM pos_staff WHERE Id = ? AND TenantId = ?',
-    },
+    // POS_STAFF — RETIRED. A staff member is a MEMBERSHIP now: user_tenants
+    // carries full_name / phone / branch_detail_id, and user_roles carries what
+    // they may do. See ADMIN_USERS below.
 
     // Role-based scope resolution (Path A) — UNIONed with PERMISSIONS.SELECT in auth.service
     ROLE_SCOPES: {
@@ -1311,6 +1311,55 @@ module.exports = {
         'UPDATE onboarding_requests SET request_note = ?, updated_at = NOW() WHERE email = ? AND status = "PENDING"',
       UPDATE_STATUS:
         'UPDATE onboarding_requests SET status = ?, rejection_reason = ?, reviewed_by = ?, reviewed_at = NOW(), tenant_id = ?, updated_at = NOW() WHERE id = ?',
+    },
+
+    // Invitation Queries
+    //
+    // The counterpart to ONBOARDING_REQUESTS: a request is raised BY a person
+    // wanting in and has no tenant until approved; an invitation is raised BY a
+    // tenancy and carries its tenant and roles from creation.
+    INVITATIONS: {
+      INSERT:
+        'INSERT INTO tenant_invitations (id, tenant_id, email, is_admin, full_name, phone, branch_detail_id, invited_by, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      INSERT_ROLE:
+        'INSERT INTO tenant_invitation_roles (invitation_id, role_id) VALUES (?, ?)',
+      // One tenancy's invitations, newest first, with the role names resolved
+      // so a list can be read without a second round trip per row.
+      SELECT_BY_TENANT: `
+        SELECT i.*,
+               GROUP_CONCAT(r.name ORDER BY r.name SEPARATOR ', ') AS role_names,
+               COUNT(ir.role_id) AS role_count
+          FROM tenant_invitations i
+          LEFT JOIN tenant_invitation_roles ir ON ir.invitation_id = i.id
+          LEFT JOIN roles r ON r.id = ir.role_id
+         WHERE i.tenant_id = ?
+         GROUP BY i.id
+         ORDER BY i.created_at DESC`,
+      SELECT_BY_ID:
+        'SELECT * FROM tenant_invitations WHERE id = ? AND tenant_id = ?',
+      // Live invitations for one email, across every tenancy. Expiry is applied
+      // in SQL so a lapsed invitation is simply not claimed, with no sweep job
+      // needed to keep the claim path correct.
+      SELECT_CLAIMABLE: `
+        SELECT id, tenant_id, email, is_admin, full_name, phone, branch_detail_id
+          FROM tenant_invitations
+         WHERE email = ? AND status = 'PENDING'
+           AND (expires_at IS NULL OR expires_at > NOW())`,
+      SELECT_ROLE_IDS:
+        'SELECT role_id FROM tenant_invitation_roles WHERE invitation_id = ?',
+      MARK_ACCEPTED:
+        "UPDATE tenant_invitations SET status = 'ACCEPTED', accepted_at = NOW() WHERE id = ?",
+      REVOKE:
+        "UPDATE tenant_invitations SET status = 'REVOKED' WHERE id = ? AND tenant_id = ? AND status = 'PENDING'",
+      // Guard for the "already a member" case — an invitation is a membership
+      // request, so re-inviting an existing member is an error rather than a
+      // silent role edit.
+      SELECT_EXISTING_MEMBERSHIP:
+        'SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
+      // Roles must belong to the inviting tenancy. Without this an admin could
+      // name a role id from another tenant and grant its permissions.
+      SELECT_ROLES_IN_TENANT:
+        'SELECT id FROM roles WHERE tenant_id = ? AND is_active = 1',
     },
 
     // Role Queries
@@ -1361,16 +1410,21 @@ module.exports = {
 
     // Admin User Management Queries
     ADMIN_USERS: {
+      // One row per person: who they are (the profile that used to live in
+      // pos_staff), what they may do (roles), and whether they can administer.
       SELECT_ALL: `
         SELECT ut.user_email, ut.tenant_id, ut.is_admin, ut.is_super_admin,
                ut.is_active, ut.status,
+               ut.full_name, ut.phone, ut.branch_detail_id,
+               b.BranchName AS branch_name,
                GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
         FROM user_tenants ut
         LEFT JOIN user_roles ur ON ut.user_email = ur.user_email AND ut.tenant_id = ur.tenant_id
         LEFT JOIN roles r ON ur.role_id = r.id
+        LEFT JOIN branchdetail b ON b.Id = ut.branch_detail_id AND b.TenantId = ut.tenant_id
         WHERE ut.tenant_id = ?
         GROUP BY ut.user_email, ut.tenant_id
-        ORDER BY ut.user_email ASC`,
+        ORDER BY ut.full_name IS NULL, ut.full_name ASC, ut.user_email ASC`,
       // Cross-tenant listing for super admins only. No tenant_id filter; each row
       // carries its tenant_id (plus a best-effort organization name for display).
       // setup_status is per TENANT, so every row of the same tenant carries the
@@ -1413,6 +1467,15 @@ module.exports = {
         'UPDATE user_tenants SET is_active = ?, status = ?, updated_at = NOW() WHERE user_email = ? AND tenant_id = ?',
       DELETE:
         'DELETE FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
+      // TENANT:ADMIN is derived from this flag at login, never from a role.
+      // Assigning a role NAMED 'TENANT_ADMIN' or 'SUPER_ADMIN' grants that
+      // role's feature scopes and nothing else — which is why a user could hold
+      // the SUPER_ADMIN role and still be refused the Access Control screen.
+      SET_ADMIN_FLAG:
+        'UPDATE user_tenants SET is_admin = ?, updated_at = NOW() WHERE user_email = ? AND tenant_id = ?',
+      // The staff details, on the membership they belong to.
+      UPDATE_PROFILE:
+        'UPDATE user_tenants SET full_name = ?, phone = ?, branch_detail_id = ?, updated_at = NOW() WHERE user_email = ? AND tenant_id = ?',
     },
 
     // Feature / Scope Management Queries
@@ -2012,6 +2075,11 @@ module.exports = {
   // How spend becomes loyalty. One number, named, because it appears in the
   // live settle path AND in the rebuild that recomputes the projection from the
   // ledger — two implementations of "how many points is that?" would drift.
+  // Invitations. A fortnight is long enough for somebody to get around to
+  // signing in, and short enough that a forgotten invitation to an ex-employee
+  // does not stay live indefinitely.
+  INVITATION: { EXPIRY_DAYS: 14 },
+
   LOYALTY: { RUPEES_PER_POINT: 100 },
 
   TOKEN_NUMBERING: { DAILY: 'daily', SERIES: 'series' },
@@ -2231,4 +2299,82 @@ module.exports = {
     ASSET_READ: 'ASSET:READ',
     ASSET_WRITE: 'ASSET:WRITE',
   },
-}
+};
+
+// ─── Shared scope sets ────────────────────────────────────────────────────────
+// Named unions used by more than one route module, so a rule is stated once
+// instead of being copied — and so widening one is a reviewable edit in a single
+// place rather than a guess made module by module.
+//
+// Declared after module.exports is assembled because they are built FROM
+// SCOPES above.
+const { SCOPES } = module.exports;
+
+module.exports.SCOPE_SETS = {
+  /**
+   * POS reference data: the branches, floor plan, tables, menu, variants,
+   * channels and food types that a Front Desk screen needs to draw itself.
+   *
+   * The rule this encodes: **a read follows the capability that needs it, not
+   * the module that owns it.** The floor plan is POS config, but a till cannot
+   * render its table grid without it, so gating it on POS_CONFIG alone meant
+   * Billing was offered to POS_ORDER:READ and then refused its own contents.
+   * The same held for the KDS, the Tables screen and Finance's venue report.
+   *
+   * This is NOT a return to granting whole categories per role — the failure
+   * that PART 8b of the seed used to cause. That handed every ROLE READ on
+   * twelve categories; this admits specific capabilities on specific ENDPOINTS,
+   * for reads only. WRITE on every one of these stays POS_CONFIG:WRITE, so a
+   * waiter can see the floor plan and still cannot edit it.
+   *
+   * Non-POS scopes are here for named reasons: TRANSACTIONS labels revenue by
+   * venue on Finance, ASSET draws the branch picker on the register, and
+   * ORGANIZATION covers master-data users reaching the same lists.
+   */
+  POS_REFERENCE_READ: [
+    SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.POS_CONFIG_READ, SCOPES.POS_CONFIG_WRITE,
+    SCOPES.POS_ORDER_READ, SCOPES.POS_ORDER_WRITE,
+    SCOPES.POS_BILLING_READ, SCOPES.POS_BILLING_WRITE,
+    SCOPES.POS_KITCHEN_READ, SCOPES.POS_KITCHEN_WRITE,
+    SCOPES.POS_OPS_READ, SCOPES.POS_OPS_WRITE,
+    SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE,
+    SCOPES.POS_REPORTS_READ,
+    SCOPES.TRANSACTIONS_READ, SCOPES.TRANSACTIONS_WRITE,
+    SCOPES.ASSET_READ, SCOPES.ASSET_WRITE,
+    SCOPES.ORGANIZATION_READ, SCOPES.ORGANIZATION_WRITE,
+  ],
+
+  /**
+   * Reading an ORDER, for screens that already display a reference to one.
+   *
+   * The order-link modal is reached from the token queue, the customer profile,
+   * the ledger and the dashboard — none of which is gated on POS_ORDER. Opening
+   * the order behind a ticket, an invoice or a customer's history is a read of a
+   * record that screen is already showing; creating or voiding one is not, and
+   * stays on POS_ORDER:WRITE.
+   */
+  POS_ORDER_REFERENCE_READ: [
+    SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.POS_ORDER_READ, SCOPES.POS_ORDER_WRITE,
+    SCOPES.POS_KITCHEN_READ, SCOPES.POS_KITCHEN_WRITE,
+    SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE,
+    SCOPES.POS_OPS_READ, SCOPES.POS_OPS_WRITE,
+    SCOPES.POS_BILLING_READ, SCOPES.POS_BILLING_WRITE,
+    SCOPES.POS_REPORTS_READ,
+    SCOPES.TRANSACTIONS_READ, SCOPES.TRANSACTIONS_WRITE,
+  ],
+
+  /**
+   * Looking a CUSTOMER up, for screens that attach one to something.
+   *
+   * The picker on the till searches this list; putting a customer on a bill is
+   * part of taking the order. Editing the CRM record itself stays POS_CRM.
+   */
+  POS_CUSTOMER_LOOKUP_READ: [
+    SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE,
+    SCOPES.POS_ORDER_READ, SCOPES.POS_ORDER_WRITE,
+    SCOPES.POS_BILLING_READ, SCOPES.POS_BILLING_WRITE,
+  ],
+};

@@ -4,8 +4,15 @@
 -- This is the SINGLE schema file — core auth, IAM, business domain, and POS
 -- ("Front Desk") tables. All historical migrations are collapsed in.
 --
--- How to run:
---   mysql -u <user> -p <database_name> < 01-schema-definition.sql
+-- How to run (a rebuild is a drop-and-recreate — there is no migration path):
+--   mysql -u <user> -p -e "DROP DATABASE IF EXISTS <db>; CREATE DATABASE <db>;"
+--   mysql -u <user> -p <db> < database/01-schema-definition.sql
+--   mysql -u <user> -p <db> < database/02-seed-data.sql
+--
+-- These two files are the ONLY source of truth for the database. Schema changes
+-- are made HERE, in place; no ALTER scripts and no migration directory.
+--
+-- Verified against an empty database: 149 statements, 66 tables.
 --
 -- This script:
 --   - Drops and recreates every application table in dependency order
@@ -44,6 +51,27 @@ CREATE TABLE user_tenants (
     is_super_admin  BOOLEAN                        NOT NULL DEFAULT FALSE,
     is_active       BOOLEAN                        NOT NULL DEFAULT TRUE,
     status          ENUM('ACTIVE','SUSPENDED')     NOT NULL DEFAULT 'ACTIVE',
+    -- Which tenancy to resume. Stamped on login and on tenant switch; login
+    -- picks the most recent. Without it, a user belonging to two tenancies
+    -- landed wherever MySQL happened to return first, and it could differ
+    -- between logins.
+    last_active_at  DATETIME                       NULL,
+
+    -- ── Staff profile ────────────────────────────────────────────────────
+    -- A member of a tenancy IS a staff member: one entity, one row. These
+    -- three columns are what the separate pos_staff table used to hold.
+    --
+    -- Keeping them here rather than in a side table is the point of the
+    -- unification: two tables meant a person could exist on the rota with no
+    -- way to log in, or hold a login with no record of who they were, and
+    -- nothing reconciled the two. They are per-MEMBERSHIP, not per-person:
+    -- the same human may be 'Priya (Head Chef, Central)' in one tenancy and
+    -- 'Priya (Owner)' in another, and each tenancy owns its own view of them.
+    full_name       VARCHAR(100)                   NULL,
+    phone           VARCHAR(20)                    NULL,
+    -- Which outlet they work at. No FK: branchdetail is created later in this
+    -- script, and a membership must survive a branch being retired.
+    branch_detail_id VARCHAR(50)                   NULL,
     updated_at      TIMESTAMP                      NOT NULL DEFAULT CURRENT_TIMESTAMP
                                                    ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -134,6 +162,8 @@ CREATE TABLE audit_logs (
 
 DROP TABLE IF EXISTS user_roles;
 DROP TABLE IF EXISTS role_permissions;
+DROP TABLE IF EXISTS tenant_invitation_roles;
+DROP TABLE IF EXISTS tenant_invitations;
 DROP TABLE IF EXISTS roles;
 DROP TABLE IF EXISTS onboarding_requests;
 
@@ -169,6 +199,67 @@ CREATE TABLE app_settings (
     updated_by     VARCHAR(255)  NULL,
     updated_at     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (setting_key)
+);
+
+-- 2.1b tenant_invitations — a tenant admin asking a person to join THEIR tenancy
+--
+-- The missing counterpart to onboarding_requests. A request is raised BY a
+-- person who wants in and has no tenant until an admin picks one; an invitation
+-- is raised BY a tenancy for a person who may not have an account yet, and
+-- carries the tenancy and the roles from the moment it is created.
+--
+-- Claimed at login: auth resolves pending invitations for the verified Google
+-- email before anything else, so an invited person joins the inviting tenancy
+-- instead of being auto-provisioned a tenancy of their own.
+--
+-- Email is a sufficient key because sign-in is Google OAuth — the address is
+-- verified by Google before it reaches us, so nobody can present one they do
+-- not control. A link nonce would add little until non-federated login exists.
+CREATE TABLE tenant_invitations (
+    id           VARCHAR(50)   NOT NULL,
+    tenant_id    VARCHAR(50)   NOT NULL,
+    email        VARCHAR(255)  NOT NULL,
+    -- TENANT:ADMIN is derived from user_tenants.is_admin, never from a role, so
+    -- without this column you could not invite a co-admin at all.
+    is_admin     TINYINT(1)    NOT NULL DEFAULT 0,
+    -- The staff details the invitation was raised with, copied onto the
+    -- membership when it is claimed. Adding a staff member IS inviting them, so
+    -- the person arrives with a name and a branch rather than as a bare email
+    -- somebody has to identify afterwards.
+    full_name    VARCHAR(100)  NULL,
+    phone        VARCHAR(20)   NULL,
+    branch_detail_id VARCHAR(50) NULL,
+    status       ENUM('PENDING','ACCEPTED','REVOKED','EXPIRED') NOT NULL DEFAULT 'PENDING',
+    invited_by   VARCHAR(255)  NOT NULL,
+    expires_at   DATETIME      NULL,
+    accepted_at  DATETIME      NULL,
+    created_at   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    -- 1 while PENDING, NULL otherwise. MySQL treats NULLs as DISTINCT in a
+    -- unique index, so this yields a PARTIAL unique index: exactly one live
+    -- invitation per (tenant, email), with unlimited closed history beside it.
+    -- A plain UNIQUE(tenant_id, email, status) would permit only one REVOKED
+    -- row ever and so break re-invitation after a revoke.
+    is_pending   TINYINT(1) AS (IF(status = 'PENDING', 1, NULL)) STORED,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_invite_live (tenant_id, email, is_pending),
+    -- The login claim reads by email; the admin list reads by tenant.
+    INDEX idx_invite_claim (email, status),
+    INDEX idx_invite_tenant (tenant_id, status)
+);
+
+-- 2.1c tenant_invitation_roles — which roles the invitee gets on acceptance
+-- A join table rather than a JSON column, so a role deleted before the invitee
+-- ever logs in cannot leave a dangling id behind (ON DELETE CASCADE removes it,
+-- and acceptance simply grants whatever survives).
+CREATE TABLE tenant_invitation_roles (
+    invitation_id  VARCHAR(50)  NOT NULL,
+    role_id        VARCHAR(50)  NOT NULL,
+    PRIMARY KEY (invitation_id, role_id),
+    FOREIGN KEY (invitation_id) REFERENCES tenant_invitations(id) ON DELETE CASCADE,
+    FOREIGN KEY (role_id)       REFERENCES roles(id)              ON DELETE CASCADE
 );
 
 -- 2.2 roles
@@ -1001,7 +1092,6 @@ DROP TABLE IF EXISTS pos_token;
 DROP TABLE IF EXISTS pos_token_counter;
 DROP TABLE IF EXISTS pos_setting;
 DROP TABLE IF EXISTS pos_expense;
-DROP TABLE IF EXISTS pos_staff;
 
 -- 4.1 pos_floor — dining floors/sections within a branch
 CREATE TABLE pos_floor (
@@ -1490,23 +1580,17 @@ CREATE TABLE pos_expense (
     FOREIGN KEY (BranchDetailId)         REFERENCES branchdetail(Id)
 );
 
--- 4.16 pos_staff — front-desk / kitchen staff roster
-CREATE TABLE pos_staff (
-    Id              VARCHAR(50)   NOT NULL,
-    Name            VARCHAR(100)  NOT NULL,
-    Role            VARCHAR(50)   NULL,
-    Phone           VARCHAR(20)   NULL,
-    Email           VARCHAR(100)  NULL,
-    BranchDetailId  VARCHAR(50)   NULL,
-    TenantId        VARCHAR(50)   NOT NULL,
-    Active          TINYINT(1)    NOT NULL,
-    CreatedOn       DATETIME,
-    CreatedBy       VARCHAR(50),
-    UpdatedOn       DATETIME,
-    UpdatedBy       VARCHAR(50),
-    PRIMARY KEY (Id),
-    UNIQUE (Email, TenantId)
-);
+-- pos_staff — RETIRED.
+--
+-- Staff and users were two objects for the same people: a pos_staff row held a
+-- name, phone, role-as-free-text and branch with no way to sign in, while a
+-- user_tenants row held a login with no idea who the person was. Nothing
+-- reconciled them, and 'Role' being free text meant the rota's idea of what
+-- somebody did never matched what they could actually do.
+--
+-- A staff member is now a MEMBERSHIP: see full_name / phone / branch_detail_id
+-- on user_tenants (§1.1), and user_roles for what they may do. Adding a staff
+-- member is inviting them (tenant_invitations, §2.1b).
 
 SET FOREIGN_KEY_CHECKS = 1;
 
@@ -1534,8 +1618,8 @@ DROP TABLE IF EXISTS pos_cash_session;
 CREATE TABLE pos_cash_session (
     Id              VARCHAR(50)    NOT NULL,
     BranchDetailId  VARCHAR(50)    NOT NULL,
-    -- Who is accountable. Email rather than an FK to pos_staff: the person who
-    -- closes a till is an application user, and the roster is optional.
+    -- Who is accountable, by email — the same key user_tenants is addressed by,
+    -- now that a staff member IS a membership.
     CashierEmail    VARCHAR(100)   NOT NULL,
     ShiftLabel      VARCHAR(50)    NULL COMMENT 'Morning / Evening / Night',
     OpeningFloat    DECIMAL(18,4)  NOT NULL DEFAULT 0,
