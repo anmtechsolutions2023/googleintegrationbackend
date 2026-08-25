@@ -160,6 +160,26 @@ const listAllUsers = [
   }),
 ];
 
+// Every tenancy, with its totals. Super admin only — see the route guard.
+const listTenants = [
+  validateQuery(schemas.listUsersSchema),
+  asyncHandler(async (req, res) => {
+    const { page, limit } = req.validatedQuery;
+    const result = await service.listTenants(page, limit);
+    paginatedResponse(res, result.data, result.pagination, 'Tenancies retrieved');
+  }),
+];
+
+// The people inside one tenancy, for the directory above. The tenancy comes
+// from the PATH here rather than from the token, which is exactly why this sits
+// behind the super-admin guard.
+const listUsersInTenant = [
+  asyncHandler(async (req, res) => {
+    const users = await service.listUsersInTenant(req.params.tenantId);
+    successResponse(res, 'Tenancy users retrieved', users);
+  }),
+];
+
 const getUserDetail = [
   asyncHandler(async (req, res) => {
     const { tenantId } = extractUserContext(req);
@@ -418,6 +438,8 @@ module.exports = {
   reopenOnboarding,
   listUsers,
   listAllUsers,
+  listTenants,
+  listUsersInTenant,
   getUserDetail,
   getUserRoles,
   updateUserRoles,

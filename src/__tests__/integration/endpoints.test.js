@@ -2169,6 +2169,82 @@ describe('Admin IAM endpoints — feature management', () => {
   });
 });
 
+// Seeing every tenancy is a super-admin job by definition: the questions it
+// answers — which tenancies exist, which have nobody who can administer them —
+// are invisible from inside any single one.
+describe('The cross-tenant directory', () => {
+  const OTHER_TENANT = '545f929e-ef76-4d53-bdd7-b64830ba9e32';
+
+  describe('GET /api/admin/tenants', () => {
+    it('no token → 401', async () => {
+      expect((await request(server).get('/api/admin/tenants')).status).toBe(401);
+    });
+
+    it('a super admin may list every tenancy', async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      mockConnection.query.mockImplementation(defaultQueryImpl);
+      const res = await request(server).get('/api/admin/tenants')
+        .set('Authorization', superAdminToken());
+      expect(res.status).toBe(200);
+    });
+
+    // The boundary that matters. A tenant admin administers ONE tenancy; this
+    // route would hand them the shape of every other business on the platform.
+    it('a tenant admin may not → 403', async () => {
+      const res = await request(server).get('/api/admin/tenants')
+        .set('Authorization', adminToken());
+      expect(res.status).toBe(403);
+    });
+
+    it('admin:access is not enough either', async () => {
+      const res = await request(server).get('/api/admin/tenants')
+        .set('Authorization', iamAdminToken());
+      expect(res.status).toBe(403);
+    });
+
+    it('is paginated by tenancy, and refuses an over-large page', async () => {
+      const res = await request(server).get('/api/admin/tenants?limit=500')
+        .set('Authorization', superAdminToken());
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('GET /api/admin/tenants/:tenantId/users', () => {
+    const path = `/api/admin/tenants/${OTHER_TENANT}/users`;
+
+    it('no token → 401', async () => {
+      expect((await request(server).get(path)).status).toBe(401);
+    });
+
+    it('a super admin may read any tenancy\'s people', async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      const res = await request(server).get(path).set('Authorization', superAdminToken());
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    // The tenancy is taken from the PATH, so without this guard a tenant admin
+    // could read somebody else's staff list by typing their id.
+    it('a tenant admin may not read another tenancy this way → 403', async () => {
+      const res = await request(server).get(path).set('Authorization', adminToken());
+      expect(res.status).toBe(403);
+    });
+
+    it('nor a cashier', async () => {
+      const res = await request(server).get(path).set('Authorization', cashierToken());
+      expect(res.status).toBe(403);
+    });
+
+    // Read-only by design: role assignment stays scoped to the caller's own
+    // tenancy, so there is no cross-tenant write to pair with this read.
+    it('offers no way to write to another tenancy', async () => {
+      const put = await request(server).put(path)
+        .set('Authorization', superAdminToken()).send({ roleIds: [] });
+      expect([403, 404, 405]).toContain(put.status);
+    });
+  });
+});
+
 // Staff and users are one entity: the membership row IS the staff record, so
 // name, phone and branch are edited through the admin API rather than through a
 // pos_staff CRUD screen (retired along with /api/pos/staff).

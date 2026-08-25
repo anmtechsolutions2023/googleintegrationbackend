@@ -2200,6 +2200,25 @@ const swaggerSpec = {
           role_count: { type: 'integer' },
         },
       },
+      TenantMember: {
+        type: 'object',
+        description: 'A membership: the person, what they may do, and their staff details. '
+          + 'Staff and users are one entity — the membership row IS the staff record.',
+        properties: {
+          user_email: { type: 'string', format: 'email' },
+          tenant_id: { type: 'string', format: 'uuid' },
+          full_name: { type: 'string', nullable: true, description: 'Null until somebody sets it; fall back to the email.' },
+          phone: { type: 'string', nullable: true },
+          branch_detail_id: { type: 'string', format: 'uuid', nullable: true },
+          branch_name: { type: 'string', nullable: true },
+          roles: { type: 'string', nullable: true, description: 'Comma-joined role names.' },
+          is_admin: { type: 'integer', description: 'Tenant administrator. Derived from the membership flag, never from a role.' },
+          is_super_admin: { type: 'integer' },
+          is_active: { type: 'integer' },
+          status: { type: 'string', enum: ['ACTIVE', 'SUSPENDED'] },
+          last_active_at: { type: 'string', format: 'date-time', nullable: true },
+        },
+      },
       InvitationCreate: {
         type: 'object',
         required: ['email'],
@@ -2555,6 +2574,71 @@ const swaggerSpec = {
         parameters: [idParam],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosBillSettle' } } } },
         responses: { ...singleResponse('PosBill'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/tenants': {
+      get: {
+        tags: ['AdminUsers'],
+        summary: 'Every tenancy on the platform, with its own totals',
+        description: 'SUPER ADMIN ONLY. One row per tenancy rather than per membership — '
+          + '/api/admin/users/all pages the flat membership list, which cannot be grouped for '
+          + 'display because a page boundary can fall inside a tenancy and split its people '
+          + 'across two pages. Counts use COUNT(DISTINCT CASE …) rather than SUM: joining '
+          + 'user_roles multiplies a membership by the roles it holds, so SUM(is_admin) would '
+          + 'report an admin holding three roles as three admins. '
+          + 'admin_count = 0 is worth surfacing — nobody in that tenancy can invite staff, '
+          + 'assign a role or open Access & Staff, and only a super admin can see it.',
+        security,
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+        ],
+        responses: {
+          200: { description: 'Success', content: { 'application/json': { schema: { type: 'object', properties: {
+            success: { type: 'boolean' }, message: { type: 'string' },
+            data: { type: 'array', items: {
+              type: 'object',
+              properties: {
+                tenant_id: { type: 'string', format: 'uuid' },
+                tenant_name: { type: 'string', nullable: true, description: 'First organisation on the tenancy. Null when none has been created — render a fallback rather than a blank.' },
+                user_count: { type: 'integer' },
+                admin_count: { type: 'integer' },
+                super_admin_count: { type: 'integer' },
+                suspended_count: { type: 'integer' },
+                branch_count: { type: 'integer' },
+                last_active_at: { type: 'string', format: 'date-time', nullable: true },
+                setup_status: { type: 'string', enum: ['COMPLETED', 'PENDING'] },
+                setup_completed_at: { type: 'string', format: 'date-time', nullable: true },
+                roles: { type: 'string', nullable: true, description: 'Distinct role names in use in that tenancy, comma-joined.' },
+              },
+            } },
+            pagination: { type: 'object' },
+          } } } } },
+          ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/admin/tenants/{tenantId}/users': {
+      get: {
+        tags: ['AdminUsers'],
+        summary: 'The people in one tenancy — any tenancy',
+        description: 'SUPER ADMIN ONLY, and read-only. The tenancy comes from the PATH rather '
+          + 'than from the token, which is the whole difference between this and GET /users and '
+          + 'the reason for the guard: a tenant admin passing another tenancy id here would be '
+          + 'reading somebody else\'s staff list. '
+          + 'Returns the same shape as GET /users, staff profile included. An empty array means '
+          + 'the tenancy has no members — an answer, not a 404. '
+          + 'There is deliberately no matching write: role assignment stays scoped to the '
+          + 'caller\'s own tenancy.',
+        security,
+        parameters: [{ name: 'tenantId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: { description: 'Success', content: { 'application/json': { schema: { type: 'object', properties: {
+            success: { type: 'boolean' }, message: { type: 'string' },
+            data: { type: 'array', items: { $ref: '#/components/schemas/TenantMember' } },
+          } } } } },
+          ...responses.unauthorized, ...responses.forbidden,
+        },
       },
     },
     '/api/admin/users/{email}/profile': {

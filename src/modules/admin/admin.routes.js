@@ -63,6 +63,19 @@ router.put('/onboarding/:id/reject',
 router.put('/onboarding/:id/reopen',
   ...superAdminOnly, auditLog(AUDIT_CATEGORIES.ONBOARDING, 'INFO', AUDIT_ACTIONS.REOPEN_ONBOARDING), ...c.reopenOnboarding);
 
+// ── Cross-tenant directory ───────────────────────────────────────────────────
+// SUPER ADMIN ONLY. Both take a tenancy that is NOT the caller's own — the
+// first lists every tenancy on the platform, the second reads the staff list of
+// one of them from the path rather than from the token. A tenant admin must
+// never reach either: their own people are at GET /users, scoped to req.user.tid.
+//
+// Declared before '/users' so neither path is captured by a :param route below.
+router.get('/tenants',
+  ...superAdminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USERS), ...c.listTenants);
+
+router.get('/tenants/:tenantId/users',
+  ...superAdminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USERS), ...c.listUsersInTenant);
+
 // ── User management ───────────────────────────────────────────────────────────
 router.get('/users',
   ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USERS), ...c.listUsers);

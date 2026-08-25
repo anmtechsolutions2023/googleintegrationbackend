@@ -159,6 +159,13 @@ const SCREENS = [
     loads: ['/api/admin/users', '/api/admin/roles', '/api/admin/features',
       '/api/admin/invitations', '/api/pos/branches'],
   },
+  {
+    // The fourth tab on the same screen, and the only one that is not about the
+    // caller's own tenancy — hence a different authority from the three above.
+    screen: 'People & Access — All Tenants',
+    shownTo: ['TENANT:SUPER_ADMIN'],
+    loads: ['/api/admin/tenants', '/api/admin/tenants/TENANT_ID/users'],
+  },
 ];
 
 module.exports = { SCREENS };

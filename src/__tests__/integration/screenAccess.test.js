@@ -83,7 +83,7 @@ const tokenWith = (...scopes) =>
   'Bearer ' + jwt.sign({ tid: TENANT, email: 'screen@test.com', scopes }, SECRET);
 
 const resolve = (path) =>
-  path.replace('ORDER_ID', ORDER_ID).replace('BRANCH_ID', BRANCH_ID);
+  path.replace('ORDER_ID', ORDER_ID).replace('BRANCH_ID', BRANCH_ID).replace('TENANT_ID', TENANT);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Every screen loads for everyone it is offered to

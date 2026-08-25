@@ -281,6 +281,53 @@ const listAllUsers = (page = 1, limit = 20) =>
     return { data: rows, pagination: getPaginationMetadata(total, pageNum, limitNum) };
   });
 
+/**
+ * Every tenancy on the platform, one row each, with its own totals.
+ *
+ * Super admin only. This is the only view that can answer questions which are
+ * invisible from inside a single tenancy — most usefully "which tenancies have
+ * no admin at all", where nobody there can invite staff, assign a role or open
+ * Access & Staff, and only somebody outside can see it.
+ *
+ * Paginated by TENANCY, not by membership. listAllUsers below pages the flat
+ * membership list, which cannot be grouped for display: a page boundary can
+ * fall inside a tenancy and split its people across two pages.
+ *
+ * @param {number} [page]
+ * @param {number} [limit]
+ * @returns {Promise<{data: Array, pagination: Object}>}
+ */
+const listTenants = (page = 1, limit = 20) =>
+  withConnection(async (conn) => {
+    const { pageNum, limitNum, offset } = calculatePagination(page, limit);
+    const [[{ total }]] = await conn.execute(QUERIES.ADMIN_USERS.COUNT_TENANTS);
+    const [rows] = await conn.query(
+      `${QUERIES.ADMIN_USERS.SELECT_TENANT_DIRECTORY} LIMIT ${limitNum} OFFSET ${offset}`
+    );
+    return { data: rows, pagination: getPaginationMetadata(total, pageNum, limitNum) };
+  });
+
+/**
+ * The people in ONE tenancy, named, for the cross-tenant directory.
+ *
+ * Super admin only, and deliberately read-only: it takes the tenancy as an
+ * argument rather than reading req.user.tid, which every other user query does.
+ * That is the whole difference between this and listUsers, and it is why the
+ * route is on the super-admin guard — a tenant admin passing another tenancy's
+ * id here would be reading somebody else's staff list.
+ *
+ * Returns an empty array for a tenancy with no memberships rather than a 404:
+ * "this tenancy has nobody in it" is an answer, and one worth seeing.
+ *
+ * @param {string} tenantId
+ * @returns {Promise<Array>}
+ */
+const listUsersInTenant = (tenantId) =>
+  withConnection(async (conn) => {
+    const [rows] = await conn.execute(QUERIES.ADMIN_USERS.SELECT_BY_TENANT, [tenantId]);
+    return rows;
+  });
+
 const getUserDetail = (email, tenantId) =>
   withConnection(async (conn) => {
     const [rows] = await conn.execute(QUERIES.ADMIN_USERS.SELECT_BY_EMAIL, [
@@ -609,6 +656,8 @@ module.exports = {
   reopenRequest,
   listUsers,
   listAllUsers,
+  listTenants,
+  listUsersInTenant,
   getUserDetail,
   getUserRoles,
   updateUserRoles,

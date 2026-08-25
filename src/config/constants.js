@@ -1446,6 +1446,57 @@ module.exports = {
         GROUP BY ut.user_email, ut.tenant_id, ts.status, ts.completed_at
         ORDER BY ut.tenant_id ASC, ut.user_email ASC`,
       COUNT_ALL_TENANTS: 'SELECT COUNT(*) as total FROM user_tenants',
+
+      // ── Cross-tenant directory (super admin) ─────────────────────────────
+      // One row per TENANCY rather than per membership. The flat listing above
+      // cannot be grouped for display, because a page boundary can fall in the
+      // middle of a tenancy and split its people across two pages.
+      //
+      // Every count is COUNT(DISTINCT CASE …) rather than SUM(): joining
+      // user_roles multiplies a membership by the number of roles it holds, so
+      // a plain SUM(is_admin) would report an admin with three roles as three
+      // admins. The DISTINCT is on user_email, which is what is actually being
+      // counted.
+      SELECT_TENANT_DIRECTORY: `
+        SELECT ut.tenant_id,
+               (SELECT o.Name FROM organizationdetail o
+                  WHERE o.TenantId = ut.tenant_id
+                  ORDER BY o.CreatedOn ASC LIMIT 1) AS tenant_name,
+               COUNT(DISTINCT ut.user_email) AS user_count,
+               COUNT(DISTINCT CASE WHEN ut.is_admin = 1 THEN ut.user_email END) AS admin_count,
+               COUNT(DISTINCT CASE WHEN ut.is_super_admin = 1 THEN ut.user_email END) AS super_admin_count,
+               COUNT(DISTINCT CASE WHEN ut.status = 'SUSPENDED' THEN ut.user_email END) AS suspended_count,
+               MAX(ut.last_active_at) AS last_active_at,
+               (SELECT COUNT(*) FROM branchdetail b WHERE b.TenantId = ut.tenant_id) AS branch_count,
+               COALESCE(ts.status, 'PENDING') AS setup_status,
+               ts.completed_at AS setup_completed_at,
+               GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
+          FROM user_tenants ut
+          LEFT JOIN user_roles ur ON ur.user_email = ut.user_email AND ur.tenant_id = ut.tenant_id
+          LEFT JOIN roles r ON r.id = ur.role_id
+          LEFT JOIN tenant_setup ts ON ts.tenant_id = ut.tenant_id
+         GROUP BY ut.tenant_id, ts.status, ts.completed_at
+         ORDER BY tenant_name IS NULL, tenant_name ASC, ut.tenant_id ASC`,
+
+      COUNT_TENANTS: 'SELECT COUNT(DISTINCT tenant_id) as total FROM user_tenants',
+
+      // The people in ONE tenancy, named. Same shape as SELECT_ALL — the staff
+      // profile included — but for a tenancy the caller is not signed in to, so
+      // it takes the tenant id rather than reading it from the token. Only the
+      // super-admin routes reach it.
+      SELECT_BY_TENANT: `
+        SELECT ut.user_email, ut.tenant_id, ut.is_admin, ut.is_super_admin,
+               ut.is_active, ut.status, ut.last_active_at,
+               ut.full_name, ut.phone, ut.branch_detail_id,
+               b.BranchName AS branch_name,
+               GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
+          FROM user_tenants ut
+          LEFT JOIN user_roles ur ON ut.user_email = ur.user_email AND ut.tenant_id = ur.tenant_id
+          LEFT JOIN roles r ON ur.role_id = r.id
+          LEFT JOIN branchdetail b ON b.Id = ut.branch_detail_id AND b.TenantId = ut.tenant_id
+         WHERE ut.tenant_id = ?
+         GROUP BY ut.user_email, ut.tenant_id
+         ORDER BY ut.full_name IS NULL, ut.full_name ASC, ut.user_email ASC`,
       // Membership flags for a single (email, tenant) pair — used by the super-admin
       // cross-tenant status change to verify existence and guard super admins.
       SELECT_FLAGS_BY_EMAIL_TENANT:

@@ -12,11 +12,25 @@ jest.mock('../../utils/logger', () => ({
 
 let state;
 const executed = [];
+const record = (sql, params) => {
+  executed.push({ sql: String(sql), params });
+  if (/SELECT is_super_admin/.test(String(sql))) return [state.member];
+  if (/SELECT id FROM user_tenants/.test(String(sql))) return [state.member];
+  if (/COUNT\(DISTINCT tenant_id\)/.test(String(sql))) return [[{ total: state.tenants.length }]];
+  if (/FROM user_tenants ut/.test(String(sql))) return [state.tenants];
+  return [{ affectedRows: 1 }];
+};
+
 const mockConn = {
+  // The directory list interpolates LIMIT rather than binding it, so it goes
+  // through query() while everything else uses execute(). Both answer here.
+  query: jest.fn(record),
   execute: jest.fn(async (sql, params) => {
     executed.push({ sql: String(sql), params });
     if (/SELECT is_super_admin/.test(String(sql))) return [state.member];
     if (/SELECT id FROM user_tenants/.test(String(sql))) return [state.member];
+    if (/COUNT\(DISTINCT tenant_id\)/.test(String(sql))) return [[{ total: state.tenants.length }]];
+    if (/FROM user_tenants ut/.test(String(sql))) return [state.tenants];
     return [{ affectedRows: 1 }];
   }),
 };
@@ -33,7 +47,8 @@ const ACTOR = 'admin@x.com';
 beforeEach(() => {
   executed.length = 0;
   mockConn.execute.mockClear();
-  state = { member: [{ is_super_admin: 0 }] };
+  mockConn.query.mockClear();
+  state = { member: [{ is_super_admin: 0 }], tenants: [] };
 });
 
 const flagUpdate = () => executed.find((e) => /SET is_admin/.test(e.sql));
@@ -166,5 +181,74 @@ describe('the staff details on a membership', () => {
   it('an admin may correct their own', async () => {
     await expect(service.updateUserProfile(ACTOR, TENANT, { phone: '999' }, ACTOR))
       .resolves.toBeUndefined();
+  });
+});
+
+// The cross-tenant directory. What makes it worth its own screen is the
+// arithmetic: totals per tenancy, computed in SQL, that nobody inside a single
+// tenancy can see.
+describe('listing every tenancy', () => {
+  const TENANCY = {
+    tenant_id: 'tenant-a', tenant_name: 'ANM', user_count: 6, admin_count: 2,
+    super_admin_count: 0, suspended_count: 1, branch_count: 3,
+    setup_status: 'COMPLETED', roles: 'POS_CASHIER, TENANT_ADMIN',
+  };
+
+  it('returns one row per tenancy, with its totals', async () => {
+    state.tenants = [TENANCY];
+    const { data } = await service.listTenants();
+    expect(data).toHaveLength(1);
+    expect(data[0]).toMatchObject({ tenant_name: 'ANM', user_count: 6, admin_count: 2 });
+  });
+
+  it('paginates by tenancy, not by membership', async () => {
+    state.tenants = [TENANCY, { ...TENANCY, tenant_id: 'tenant-b' }];
+    const { pagination } = await service.listTenants(1, 20);
+    // 2 tenancies, not the 12 memberships inside them — a page boundary must
+    // never fall in the middle of a tenancy and split its people.
+    expect(pagination.total).toBe(2);
+    expect(executed.some((e) => /COUNT\(DISTINCT tenant_id\)/.test(e.sql))).toBe(true);
+  });
+
+  // Joining user_roles multiplies a membership by the roles it holds. A plain
+  // SUM(is_admin) would count an admin with three roles as three admins, and
+  // the "no admin" warning this screen exists for would never fire.
+  it('counts people, not joined rows', async () => {
+    state.tenants = [TENANCY];
+    await service.listTenants();
+    const sql = executed.find((e) => /FROM user_tenants ut/.test(e.sql)).sql;
+    expect(sql).toMatch(/COUNT\(DISTINCT CASE WHEN ut\.is_admin = 1 THEN ut\.user_email END\)/);
+    expect(sql).not.toMatch(/SUM\(ut\.is_admin\)/);
+  });
+
+  it('orders unnamed tenancies last rather than hiding them', async () => {
+    state.tenants = [TENANCY];
+    await service.listTenants();
+    const sql = executed.find((e) => /FROM user_tenants ut/.test(e.sql)).sql;
+    expect(sql).toMatch(/ORDER BY tenant_name IS NULL/);
+  });
+});
+
+describe('reading one tenancy\'s people', () => {
+  it('takes the tenancy as an argument — never from the caller\'s token', async () => {
+    state.tenants = [{ user_email: 'a@b.com', full_name: 'Priya R', roles: 'TENANT_ADMIN' }];
+    const rows = await service.listUsersInTenant('some-other-tenant');
+    expect(rows[0].full_name).toBe('Priya R');
+    const read = executed.find((e) => /FROM user_tenants ut/.test(e.sql));
+    expect(read.params).toEqual(['some-other-tenant']);
+  });
+
+  // "Nobody is in this tenancy" is an answer worth seeing, not an error.
+  it('returns an empty list for a tenancy with no members', async () => {
+    state.tenants = [];
+    await expect(service.listUsersInTenant('empty-tenant')).resolves.toEqual([]);
+  });
+
+  it('carries the staff profile, so people show up named', async () => {
+    state.tenants = [];
+    await service.listUsersInTenant('t');
+    const sql = executed.find((e) => /FROM user_tenants ut/.test(e.sql)).sql;
+    expect(sql).toMatch(/ut\.full_name/);
+    expect(sql).toMatch(/b\.BranchName AS branch_name/);
   });
 });
