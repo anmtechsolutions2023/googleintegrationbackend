@@ -286,6 +286,53 @@ class BaseCRUDService {
   }
 
   /**
+   * Update a record on a caller-supplied connection WITHOUT managing the
+   * connection or transaction — the mirror of createTx above.
+   *
+   * Exists so an update can be composed into a transaction that spans several
+   * modules, which is what a bulk import does: re-pricing an item means writing
+   * a new cost info and re-pointing the item at it, and half of that pair
+   * committing would leave a price nobody chose.
+   *
+   * update() above is deliberately untouched and does not delegate here: it is
+   * on the hot path of every CRUD screen in the app, and this method exists to
+   * add a capability, not to refactor one.
+   *
+   * @param {Object} connection - Active DB connection (typically inside withTransaction)
+   * @param {string} id - Record ID
+   * @param {Object} data - Fields to change
+   * @param {string} tenantId - Tenant ID
+   * @param {string} userEmail - User email
+   * @returns {Promise<Object>} { id, ...data }
+   */
+  async updateTx(connection, id, data, tenantId, userEmail) {
+    const [existingRows] = await connection.execute(this.queries.SELECT_BY_ID, [id, tenantId])
+    if (!existingRows || existingRows.length === 0) {
+      throw new HttpError(
+        `${this.entityName} not found`,
+        MESSAGES.HTTP_STATUS.NOT_FOUND,
+      )
+    }
+
+    const params = this.prepareUpdateParams(
+      data,
+      existingRows[0],
+      userEmail,
+      id,
+      tenantId,
+    )
+    // Same sanitising as update(): mysql2 throws on undefined, and a partial
+    // payload legitimately leaves fields out.
+    await connection.execute(
+      this.queries.UPDATE,
+      params.map((param) => (param === undefined ? null : param)),
+    )
+
+    logger.info(`${this.entityName} updated in transaction`, { id, tenantId })
+    return { id, ...data }
+  }
+
+  /**
    * Delete a record.
    * @param {string} id - Record ID
    * @param {string} tenantId - Tenant ID

@@ -33,6 +33,9 @@ class TaxGroupTaxTypeMapperService extends BaseCRUDService {
 
 const service = new TaxGroupTaxTypeMapperService();
 module.exports = {
+  // Exposed for the bulk import — see taxtype.service.js.
+  createTx: (conn, data, tenantId, userEmail) =>
+    service.createTx(conn, data, tenantId, userEmail),
   getAll: (tenantId, page, limit, expand) => service.getAll(tenantId, page, limit, expand),
   getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),
   create: (data, tenantId, userEmail) =>

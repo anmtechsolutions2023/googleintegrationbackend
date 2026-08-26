@@ -2169,6 +2169,113 @@ describe('Admin IAM endpoints — feature management', () => {
   });
 });
 
+// Bulk import: a TENANT ADMIN act, and only that.
+//
+// Deliberately narrower than the scopes the individual screens use. One request
+// creates categories, units, tax groups, items and menu entries across a whole
+// tenancy, so the blast radius of a bad file is the catalogue rather than a row.
+// A POS manager can edit a menu item; they cannot rewrite the menu.
+describe('Bulk import — who may run one', () => {
+  const ITEMS = { rows: [{ name: 'Mango Lassi', category: 'Lassi', unit: 'Glass',
+    price: 80, taxGroup: 'GST 5%' }] };
+
+  const post = (path, token, body) =>
+    request(server).post(path).set('Authorization', token).send(body);
+
+  describe('POST /api/import/items', () => {
+    it('no token → 401', async () => {
+      expect((await request(server).post('/api/import/items').send(ITEMS)).status).toBe(401);
+    });
+
+    it('a tenant admin may → not refused', async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      const res = await post('/api/import/items', adminToken(), ITEMS);
+      expect(res.status).not.toBe(403);
+    });
+
+    it('a super admin may, through the bypass', async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      const res = await post('/api/import/items', superAdminToken(), ITEMS);
+      expect(res.status).not.toBe(403);
+    });
+
+    // The boundary you asked for. Every one of these can edit an item through
+    // the ordinary screens; none of them may rewrite the catalogue in bulk.
+    it('a cashier may not → 403', async () => {
+      expect((await post('/api/import/items', cashierToken(), ITEMS)).status).toBe(403);
+    });
+
+    it('MASTER_DATA:WRITE alone is not enough → 403', async () => {
+      const token = 'Bearer ' + jwt.sign(
+        { tid: TENANT_ID, email: 'editor@test.com',
+          scopes: ['MASTER_DATA:READ', 'MASTER_DATA:WRITE'] }, TEST_SECRET);
+      expect((await post('/api/import/items', token, ITEMS)).status).toBe(403);
+    });
+
+    it('INVENTORY:WRITE alone is not enough → 403', async () => {
+      const token = 'Bearer ' + jwt.sign(
+        { tid: TENANT_ID, email: 'stock@test.com',
+          scopes: ['INVENTORY:READ', 'INVENTORY:WRITE'] }, TEST_SECRET);
+      expect((await post('/api/import/items', token, ITEMS)).status).toBe(403);
+    });
+
+    it('POS_CONFIG:WRITE alone is not enough → 403', async () => {
+      const token = 'Bearer ' + jwt.sign(
+        { tid: TENANT_ID, email: 'posmgr@test.com',
+          scopes: ['POS_CONFIG:READ', 'POS_CONFIG:WRITE'] }, TEST_SECRET);
+      expect((await post('/api/import/items', token, ITEMS)).status).toBe(403);
+    });
+  });
+
+  describe('POST /api/import/menu-entries', () => {
+    const MENU = { branchDetailId: UUID_1, items: [{ name: 'Mango Lassi' }] };
+
+    it('no token → 401', async () => {
+      expect((await request(server).post('/api/import/menu-entries').send(MENU)).status).toBe(401);
+    });
+
+    it('a tenant admin may → not refused', async () => {
+      mockConnection.execute.mockImplementation(defaultExecuteImpl);
+      expect((await post('/api/import/menu-entries', adminToken(), MENU)).status).not.toBe(403);
+    });
+
+    it('a POS manager may not → 403', async () => {
+      const token = 'Bearer ' + jwt.sign(
+        { tid: TENANT_ID, email: 'posmgr@test.com',
+          scopes: ['POS_CONFIG:WRITE', 'POS_ORDER:WRITE'] }, TEST_SECRET);
+      expect((await post('/api/import/menu-entries', token, MENU)).status).toBe(403);
+    });
+  });
+
+  describe('what the payload must look like', () => {
+    it('refuses a file with no rows', async () => {
+      expect((await post('/api/import/items', adminToken(), { rows: [] })).status).toBe(400);
+    });
+
+    // 500 bounds one request without a paging protocol. Larger than that is a
+    // data migration, not a menu.
+    it('refuses more rows than one request should carry', async () => {
+      const rows = Array.from({ length: 501 }, (_, i) => ({
+        name: `Item ${i}`, category: 'Tea', unit: 'Glass', price: 10, taxGroup: 'GST 5%',
+      }));
+      expect((await post('/api/import/items', adminToken(), { rows })).status).toBe(400);
+    });
+
+    it('refuses a price that is not a number — the 1O9 case', async () => {
+      const res = await post('/api/import/items', adminToken(),
+        { rows: [{ name: 'Butterfly', category: 'Mocktail Mania', unit: 'Glass',
+          price: '1O9', taxGroup: 'GST 5%' }] });
+      expect(res.status).toBe(400);
+    });
+
+    it('refuses an unknown duplicate policy', async () => {
+      const res = await post('/api/import/items', adminToken(),
+        { ...ITEMS, onDuplicate: 'overwrite-everything' });
+      expect(res.status).toBe(400);
+    });
+  });
+});
+
 // Seeing every tenancy is a super-admin job by definition: the questions it
 // answers — which tenancies exist, which have nobody who can administer them —
 // are invisible from inside any single one.

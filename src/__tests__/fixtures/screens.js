@@ -166,6 +166,18 @@ const SCREENS = [
     shownTo: ['TENANT:SUPER_ADMIN'],
     loads: ['/api/admin/tenants', '/api/admin/tenants/TENANT_ID/users'],
   },
+  {
+    // Bulk import lives on Master Data → Items behind an Import button. Its
+    // endpoints are POSTs, so they sit in `actions` rather than `loads` — there
+    // is nothing for this screen to fetch that Items does not already fetch.
+    screen: 'Items — bulk import',
+    shownTo: ['TENANT:ADMIN'],
+    loads: ['/api/itemdetails'],
+    actions: [
+      { verb: 'post', path: '/api/import/items', needs: 'TENANT:ADMIN' },
+      { verb: 'post', path: '/api/import/menu-entries', needs: 'TENANT:ADMIN' },
+    ],
+  },
 ];
 
 module.exports = { SCREENS };

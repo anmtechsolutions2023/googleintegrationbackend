@@ -36,6 +36,7 @@ const branchusergroupmapperRoutes = require('../modules/branchusergroupmapper/br
 const batchdetailRoutes = require('../modules/batchdetail/batchdetail.routes');
 const itemdetailRoutes = require('../modules/itemdetail/itemdetail.routes');
 const mastersetupRoutes = require('../modules/mastersetup/mastersetup.routes');
+const importRoutes = require('../modules/import/import.routes');
 const pricingRoutes = require('../modules/pricing/pricing.routes');
 const ledgerRoutes = require('../modules/ledger/ledger.routes');
 const poscashsessionRoutes = require('../modules/poscashsession/poscashsession.routes');
@@ -133,6 +134,10 @@ const registerRoutes = (app) => {
 
   // Master-data setup — first-time transactional bootstrap (org + branch + item)
   app.use('/api/master-data', mastersetupRoutes);
+  // Bulk import. Its own prefix because one run writes across master data AND
+  // the POS menu, so it belongs to neither — and a new mount cannot be
+  // swallowed by a ':id' route in a router that already exists.
+  app.use('/api/import', importRoutes);
 
   // Pricing — stateless tax/price calculation over the costinfo → taxgroup →
   // mapper → TaxTypes chain. Shared by master data, POS and billing.

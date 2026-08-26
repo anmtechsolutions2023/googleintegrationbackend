@@ -109,6 +109,10 @@ module.exports = {
 
     // Tax Type Queries
     TAX_TYPES: {
+      // Bulk import resolves a tax type by name before creating one: a whole
+      // menu naming 'CGST' must produce a single CGST row, not one per item.
+      SELECT_BY_NAME:
+        'SELECT * FROM TaxTypes WHERE Name = ? AND TenantId = ? LIMIT 1',
       SELECT_ALL:
         'SELECT * FROM TaxTypes WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM TaxTypes WHERE TenantId = ?',
@@ -122,6 +126,9 @@ module.exports = {
 
     // UOM (Unit of Measure) Queries
     UOM: {
+      // Same get-or-create as CATEGORY above, keyed on UnitName.
+      SELECT_BY_NAME:
+        'SELECT * FROM UOM WHERE UnitName = ? AND TenantId = ? LIMIT 1',
       SELECT_ALL:
         'SELECT * FROM UOM WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM UOM WHERE TenantId = ?',
@@ -135,6 +142,10 @@ module.exports = {
 
     // Category Queries
     CATEGORY: {
+      // Bulk import resolves a category by the name in the CSV before creating
+      // one — 56 rows naming 'Tea' must produce a single category.
+      SELECT_BY_NAME:
+        'SELECT * FROM categorydetail WHERE Name = ? AND TenantId = ? LIMIT 1',
       SELECT_ALL:
         'SELECT * FROM categorydetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM categorydetail WHERE TenantId = ?',
@@ -242,6 +253,13 @@ module.exports = {
 
     // Tax Group Queries
     TAX_GROUP: {
+      // A tax group resolved by name may exist with NO tax types mapped to it,
+      // which computes 0% tax and looks like a working setup. The import
+      // reports that back rather than silently pricing a menu at zero.
+      SELECT_BY_NAME:
+        'SELECT * FROM taxgroup WHERE Name = ? AND TenantId = ? LIMIT 1',
+      COUNT_TYPES_IN_GROUP:
+        'SELECT COUNT(*) AS total FROM taxgrouptaxtypemapper WHERE TaxGroupId = ? AND TenantId = ? AND Active = 1',
       SELECT_ALL:
         'SELECT * FROM taxgroup WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM taxgroup WHERE TenantId = ?',
@@ -255,6 +273,18 @@ module.exports = {
 
     // Tax Group Tax Type Mapper Queries
     TAX_GROUP_TAX_TYPE_MAPPER: {
+      // Guards the import against mapping the same type into the same group
+      // twice — there is no unique key on the pair, so nothing else would.
+      SELECT_BY_GROUP_AND_TYPE:
+        'SELECT Id FROM taxgrouptaxtypemapper WHERE TaxGroupId = ? AND TaxTypeId = ? AND TenantId = ? LIMIT 1',
+      // The rates a group actually holds, so an import can tell "you already
+      // configured this, carry on" apart from "you are asking for something
+      // different" — the difference between a re-run working and 56 rows failing.
+      SELECT_COMPONENTS_OF_GROUP: `
+        SELECT tt.Name, tt.Value
+          FROM taxgrouptaxtypemapper m
+          JOIN TaxTypes tt ON tt.Id = m.TaxTypeId
+         WHERE m.TaxGroupId = ? AND m.TenantId = ? AND m.Active = 1`,
       SELECT_ALL:
         'SELECT * FROM taxgrouptaxtypemapper WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `
@@ -511,6 +541,10 @@ module.exports = {
 
     // Item Detail Queries
     ITEM_DETAIL: {
+      // itemdetail.Name is UNIQUE per tenancy, so this decides skip-vs-update
+      // on a re-run instead of letting the insert fail on the constraint.
+      SELECT_BY_NAME:
+        'SELECT * FROM itemdetail WHERE Name = ? AND TenantId = ? LIMIT 1',
       SELECT_ALL:
         'SELECT * FROM itemdetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
       SELECT_ALL_WITH_DETAILS: `SELECT t.*, cat.Name AS CategoryName, u.UnitName AS UOMName, ci.Amount AS CostAmount, ci.IsTaxIncluded AS CostIsTaxIncluded, tg.Name AS CostTaxGroupName FROM itemdetail t LEFT JOIN categorydetail cat ON t.CategoryId = cat.Id AND cat.TenantId = t.TenantId LEFT JOIN UOM u ON t.UOMId = u.Id AND u.TenantId = t.TenantId LEFT JOIN costinfo ci ON t.CostInfoId = ci.Id AND ci.TenantId = t.TenantId LEFT JOIN taxgroup tg ON ci.TaxGroupId = tg.Id AND tg.TenantId = t.TenantId WHERE t.TenantId = ?`,
@@ -867,6 +901,16 @@ module.exports = {
     },
 
     POS_FOOD_TYPE: {
+      // The CSV names a food type by CODE (VEG / VEGAN / NONVEG), which is
+      // the column UNIQUE (Code, TenantId) is on.
+      SELECT_BY_CODE:
+        'SELECT * FROM pos_food_type WHERE Code = ? AND TenantId = ? LIMIT 1',
+      // A CSV says 'Non-Veg' (the NAME) where the code is 'NONVEG'. Matching on
+      // code alone silently failed for exactly that value, so both columns are
+      // fetched and compared after punctuation is stripped, in JS — SQL cannot
+      // normalise the two sides consistently across collations.
+      SELECT_ALL_FOR_TENANT:
+        'SELECT Id, Name, Code FROM pos_food_type WHERE TenantId = ? AND Active = 1',
       SELECT_ALL: 'SELECT * FROM pos_food_type WHERE TenantId = ? ORDER BY SortOrder ASC, CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM pos_food_type WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM pos_food_type WHERE Id = ? AND TenantId = ?',
@@ -876,6 +920,11 @@ module.exports = {
     },
 
     POS_ITEM_META: {
+      // UNIQUE (ItemDetailId, BranchDetailId, TenantId) — the publish pass
+      // checks this so a re-run reports 'already on the menu' rather than
+      // failing on the constraint.
+      SELECT_BY_ITEM_BRANCH:
+        'SELECT Id FROM pos_item_meta WHERE ItemDetailId = ? AND BranchDetailId = ? AND TenantId = ? LIMIT 1',
       // SELECT_ALL/SELECT_BY_ID aggregate linked channel/variant ids and the
       // linked costinfo amount so the client can pre-select and price.
       SELECT_ALL: `SELECT im.*,
@@ -2081,6 +2130,10 @@ module.exports = {
   STATUSES: {
     SUCCESS: 'SUCCESS',
     FAILED: 'FAILED',
+    // A bulk operation where some rows succeeded and some did not. Neither
+    // SUCCESS nor FAILED is true of it, and the audit trail should not have
+    // to round one way or the other.
+    PARTIAL: 'PARTIAL',
     DENIED: 'DENIED',
     LOGIN_SUCCESS: 'LOGIN_SUCCESS',
     LOGIN_ATTEMPT: 'LOGIN_ATTEMPT',
@@ -2306,6 +2359,24 @@ module.exports = {
       '/api-docs',
     ],
   },
+  // Bulk import limits. 500 bounds one request without a paging protocol; a
+  // menu larger than that is a data migration, not a menu, and should not be
+  // arriving through a form in somebody's browser.
+  IMPORT: {
+    MAX_ROWS: 500,
+    ON_DUPLICATE: { SKIP: 'skip', UPDATE: 'update' },
+    // When a row names a tax group but states no components, these are applied.
+    // A deliberate product decision: an Indian restaurant menu is 5% GST split
+    // CGST/SGST intra-state, and a menu that silently prices at 0% is the worse
+    // failure. The preview says how many rows this will touch, so it is never
+    // applied without being announced — and any row that states its own
+    // components overrides it entirely.
+    DEFAULT_TAX_COMPONENTS: [
+      { name: 'CGST', value: '2.5' },
+      { name: 'SGST', value: '2.5' },
+    ],
+  },
+
   SCOPES: {
     TENANT_ADMIN: 'TENANT:ADMIN',
     TENANT_SUPER_ADMIN: 'TENANT:SUPER_ADMIN',

@@ -124,6 +124,10 @@ class TaxTypeService extends BaseCRUDService {
 const taxTypeService = new TaxTypeService();
 
 module.exports = {
+  // Exposed for the bulk import, which creates a tax type and maps it into a
+  // group inside one transaction with the item that needs it.
+  createTx: (conn, data, tenantId, userEmail) =>
+    taxTypeService.createTx(conn, data, tenantId, userEmail),
   getAllTaxTypes: (tenantId, page, limit) =>
     taxTypeService.getAllTaxTypes(tenantId, page, limit),
   getTaxTypeById: (id, tenantId) => taxTypeService.getTaxTypeById(id, tenantId),

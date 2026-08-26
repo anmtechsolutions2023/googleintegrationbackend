@@ -65,6 +65,10 @@ class ItemDetailService extends BaseCRUDService {
 const service = new ItemDetailService();
 module.exports = {
   createTx: (conn, data, tenantId, userEmail) => service.createTx(conn, data, tenantId, userEmail),
+  // Exposed for the bulk import's update mode, which re-points an item at a new
+  // cost info inside one transaction. Same wrapper shape as createTx above.
+  updateTx: (conn, id, data, tenantId, userEmail) =>
+    service.updateTx(conn, id, data, tenantId, userEmail),
   getAll: (tenantId, page, limit, expand) =>
     service.getAll(tenantId, page, limit, expand),
   getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),

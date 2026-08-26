@@ -2200,6 +2200,120 @@ const swaggerSpec = {
           role_count: { type: 'integer' },
         },
       },
+      ItemImportRequest: {
+        type: 'object', required: ['rows'],
+        properties: {
+          onDuplicate: {
+            type: 'string', enum: ['skip', 'update'], default: 'skip',
+            description: 'Item names are unique per tenancy, so a second upload hits every row. '
+              + 'skip (the default) leaves existing items completely alone — a re-run at the wrong '
+              + 'moment must not silently reset prices somebody has since corrected by hand. '
+              + 'update re-points the item at a NEW cost info rather than editing the old one, '
+              + 'because a settled ledger line references the cost info it was priced from.',
+          },
+          rows: {
+            type: 'array', minItems: 1, maxItems: 500,
+            items: {
+              type: 'object', required: ['name', 'category', 'unit', 'price', 'taxGroup'],
+              properties: {
+                name: { type: 'string', maxLength: 200, description: 'Unique per tenancy.' },
+                category: { type: 'string', maxLength: 50, description: 'By name; created if new.' },
+                unit: { type: 'string', maxLength: 50, description: 'By name; created if new.' },
+                price: { type: 'number', minimum: 0 },
+                taxGroup: { type: 'string', maxLength: 50, description: 'By name; created if new.' },
+                taxComponents: {
+                  type: 'array', maxItems: 6,
+                  description: 'The rates that make the group mean something — a group on its own '
+                    + 'holds no rate and prices at 0%. Stated rather than inferred from the '
+                    + 'group NAME: splitting 5% into CGST and SGST is an Indian intra-state rule, '
+                    + 'not arithmetic, and a group called "Standard" carries no rate at all. '
+                    + 'WHEN OMITTED the server applies IMPORT.DEFAULT_TAX_COMPONENTS — CGST 2.5 + '
+                    + 'SGST 2.5 — on the basis that a menu silently priced at 0% is the worse '
+                    + 'failure. The import UI announces how many rows that will touch before it '
+                    + 'runs. A row that states its own components overrides the default entirely; '
+                    + 'they are never combined, which would double the tax. '
+                    + 'Idempotent: an existing tax type is reused by name and an existing mapping '
+                    + 'is left alone — there is no unique key on (group, type), so nothing else '
+                    + 'would stop a second run doubling the rate.',
+                  items: {
+                    type: 'object', required: ['name', 'value'],
+                    properties: {
+                      name: { type: 'string', maxLength: 50, example: 'CGST' },
+                      value: { type: 'number', minimum: 0, maximum: 100, example: 2.5 },
+                    },
+                  },
+                },
+                taxIncluded: { type: 'boolean', default: true, description: 'Defaults true: a board price is what the customer hands over.' },
+                code: { type: 'string', maxLength: 50, nullable: true },
+                description: { type: 'string', maxLength: 1000, nullable: true },
+                foodType: { type: 'string', maxLength: 50, nullable: true, description: 'Used by the publish pass only; carried here so one file drives both.' },
+              },
+            },
+          },
+        },
+      },
+      MenuImportRequest: {
+        type: 'object', required: ['branchDetailId', 'items'],
+        properties: {
+          branchDetailId: { type: 'string', format: 'uuid' },
+          defaultFoodType: { type: 'string', default: 'VEG', description: 'A FALLBACK for rows that name no food type — not an override. A row\'s own foodType always wins; sending one default for the whole file is what published every item on a mixed menu as Veg.' },
+          channelIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+          variantIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+          items: {
+            type: 'array', minItems: 1, maxItems: 500,
+            items: {
+              type: 'object', required: ['name'],
+              properties: {
+                name: { type: 'string', description: 'Matched against itemdetail.Name.' },
+                foodType: {
+                  type: 'string', nullable: true,
+                  description: 'Matched against the food type NAME or CODE, ignoring case and '
+                    + 'punctuation — Non-Veg, non veg, NONVEG and Non_Veg all reach the same row, '
+                    + 'and the exact value the template asks for used to be the one that failed. '
+                    + 'Matching is exact after normalising, never a prefix, so VEG does not match '
+                    + 'VEGAN. An unmatched value is reported per row NAMING the food types the '
+                    + 'tenancy actually has.',
+                },
+              },
+            },
+          },
+        },
+      },
+      ImportResult: {
+        type: 'object',
+        description: 'Per-row outcomes. The caller never has to infer what happened from an error string.',
+        properties: {
+          summary: {
+            type: 'object',
+            properties: {
+              total: { type: 'integer' }, created: { type: 'integer' },
+              updated: { type: 'integer' }, skipped: { type: 'integer' },
+              failed: { type: 'integer' },
+            },
+          },
+          created: {
+            type: 'object',
+            description: 'Masters brought into existence along the way.',
+            properties: {
+              categories: { type: 'integer' }, units: { type: 'integer' }, taxGroups: { type: 'integer' },
+            },
+          },
+          rows: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                row: { type: 'integer', description: 'Numbered from 1, the way the file is.' },
+                name: { type: 'string' },
+                status: { type: 'string', enum: ['created', 'updated', 'skipped', 'failed'] },
+                reason: { type: 'string', description: 'Present on skipped and failed.' },
+                itemId: { type: 'string', format: 'uuid' },
+                menuItemId: { type: 'string', format: 'uuid' },
+              },
+            },
+          },
+        },
+      },
       TenantMember: {
         type: 'object',
         description: 'A membership: the person, what they may do, and their staff details. '
@@ -2574,6 +2688,97 @@ const swaggerSpec = {
         parameters: [idParam],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosBillSettle' } } } },
         responses: { ...singleResponse('PosBill'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/import/items': {
+      post: {
+        tags: ['Import'],
+        summary: 'Bulk-create catalogue items from a parsed CSV',
+        description: 'TENANT ADMIN ONLY, deliberately narrower than the scopes the individual '
+          + 'screens use: one request creates categories, units, tax groups, items and cost info '
+          + 'across the whole tenancy, so the blast radius of a bad file is the catalogue rather '
+          + 'than a row. MASTER_DATA:WRITE, INVENTORY:WRITE or POS_CONFIG:WRITE on their own are '
+          + 'all refused. '
+          + 'The CSV is parsed in the BROWSER and posted as JSON — there is no upload endpoint, no '
+          + 'multipart handling and no new dependency, and the person sees the parse before '
+          + 'anything is sent. '
+          + 'Categories, units and tax groups are resolved by name and created only when missing, '
+          + 'so 56 rows naming eight categories produce eight categories. '
+          + 'Every record is written through the same createTx the ordinary forms call, so an '
+          + 'imported item is an ORDINARY item — it edits in Master Data → Items and publishes in '
+          + 'Menu Master like any other, and carries no import marker of any kind. '
+          + 'ALWAYS answers 200: one transaction per ROW, so a bad row 37 does not discard the 36 '
+          + 'before it, and the response reports the outcome of every row.',
+        security,
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ItemImportRequest' } } },
+        },
+        responses: {
+          200: { description: 'Finished — check the per-row outcomes',
+            content: { 'application/json': { schema: { type: 'object', properties: {
+              success: { type: 'boolean' }, message: { type: 'string' },
+              data: { $ref: '#/components/schemas/ImportResult' },
+            } } } } },
+          ...responses.validation, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/import/menu-entries': {
+      post: {
+        tags: ['Import'],
+        summary: 'Publish catalogue items onto one branch’s menu',
+        description: 'TENANT ADMIN ONLY. The second half of an import, and the half people forget: '
+          + 'items are tenancy-wide, and nothing sells until it exists as a menu entry against a '
+          + 'branch. Takes item NAMES rather than ids so the same file drives both passes. '
+          + 'UNIQUE (ItemDetailId, BranchDetailId, TenantId) means a re-run reports "already on '
+          + 'this branch\'s menu" instead of failing. '
+          + 'Menu entries are created through positemmeta\'s ordinary create(), which already '
+          + 'opens its own transaction and syncs the channel and variant links — so that module '
+          + 'is untouched by this feature.',
+        security,
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/MenuImportRequest' } } },
+        },
+        responses: {
+          200: { description: 'Finished — check the per-row outcomes',
+            content: { 'application/json': { schema: { type: 'object', properties: {
+              success: { type: 'boolean' }, message: { type: 'string' },
+              data: { $ref: '#/components/schemas/ImportResult' },
+            } } } } },
+          ...responses.validation, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/import/preview': {
+      post: {
+        tags: ['Import'],
+        summary: 'Checks the browser cannot make for itself',
+        description: 'TENANT ADMIN ONLY. Writes nothing. Returns which of the named tax groups '
+          + 'hold no tax types — a group with none computes 0% tax and looks like a perfectly '
+          + 'working setup, which is the failure mode that silently prices a whole menu at zero. '
+          + 'A group that does not exist yet counts as empty, because the import would create it '
+          + 'empty. Reported as a warning rather than an error: a genuinely zero-rated group is '
+          + 'legitimate.',
+        security,
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object', required: ['taxGroups'],
+            properties: { taxGroups: { type: 'array', items: { type: 'string' }, maxItems: 50 } },
+          } } },
+        },
+        responses: {
+          200: { description: 'Checks complete',
+            content: { 'application/json': { schema: { type: 'object', properties: {
+              success: { type: 'boolean' },
+              data: { type: 'object', properties: {
+                emptyTaxGroups: { type: 'array', items: { type: 'string' } },
+              } },
+            } } } } },
+          ...responses.validation, ...responses.unauthorized, ...responses.forbidden,
+        },
       },
     },
     '/api/admin/tenants': {
