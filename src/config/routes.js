@@ -68,6 +68,10 @@ const posorderRoutes = require('../modules/posorder/posorder.routes');
 const poskotRoutes = require('../modules/poskot/poskot.routes');
 const posbillRoutes = require('../modules/posbill/posbill.routes');
 const posonlineorderRoutes = require('../modules/posonlineorder/posonlineorder.routes');
+const posportalRoutes = require('../modules/posportal/posportal.routes');
+// The one router that is NOT behind authenticateToken — a portal has no user.
+// Its signature check is its authentication; see poswebhook.auth.js.
+const poswebhookRoutes = require('../modules/poswebhook/poswebhook.routes');
 const posfeedbackRoutes = require('../modules/posfeedback/posfeedback.routes');
 const postokenRoutes = require('../modules/postoken/postoken.routes');
 const possettingRoutes = require('../modules/possetting/possetting.routes');
@@ -261,6 +265,11 @@ const registerRoutes = (app) => {
   app.use('/api/pos/kots', poskotRoutes);
   app.use('/api/pos/bills', posbillRoutes);
   app.use('/api/pos/online-orders', posonlineorderRoutes);
+  app.use('/api/pos/portals', posportalRoutes);
+  // Mounted alongside the rest, but deliberately outside the tenant-JWT model:
+  // it authenticates each request against the portal's own shared secret and
+  // resolves the tenant FROM that credential, never from the payload.
+  app.use('/api/pos/portal-webhooks', poswebhookRoutes);
   app.use('/api/pos/feedback', posfeedbackRoutes);
   app.use('/api/pos/tokens', postokenRoutes);
   app.use('/api/pos/settings', possettingRoutes);
@@ -340,6 +349,7 @@ const registerRoutes = (app) => {
         { name: 'pos-tables', path: '/api/pos/tables' },
         { name: 'pos-item-meta', path: '/api/pos/item-meta' },
         { name: 'pos-channels', path: '/api/pos/channels' },
+        { name: 'pos-portals', path: '/api/pos/portals' },
         { name: 'pos-variants', path: '/api/pos/variants' },
         { name: 'pos-food-types', path: '/api/pos/food-types' },
         { name: 'pos-customers', path: '/api/pos/customers' },

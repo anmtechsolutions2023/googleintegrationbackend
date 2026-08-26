@@ -32,6 +32,13 @@ const ACCOUNTS = [
   ['Bank', 'ASSET'],
   ['Wallet', 'ASSET'],
   ['Expenses', 'EXPENSE'],
+  // An aggregator has already taken the customer's money and owes us the
+  // balance weeks later. Settling that as Cash would put money in a till that
+  // never saw it and break the cash session, so it lands in a receivable.
+  ['Aggregator Receivable', 'ASSET'],
+  // What the portal keeps. Its own account so per-portal margin is answerable
+  // without unpicking it from general expenses.
+  ['Portal Commission', 'EXPENSE'],
 ];
 const STATUSES = ['DRAFT', 'PARTIALLY_PAID', 'SETTLED', 'CANCELLED', 'REFUNDED'];
 
@@ -40,6 +47,28 @@ const EXPENSE_CATEGORIES = [
 ];
 const ASSET_CATEGORIES = [
   'Kitchen Equipment', 'Furniture', 'IT Equipment', 'Fixtures', 'Vehicle',
+];
+
+// [Name, Code, SortOrder] — the sales channels. Nothing seeded these before, so
+// pos_item_meta_channel had nothing to point at and pos_portal has no parent.
+// A channel answers HOW something was sold; a portal answers WHO sold it.
+const CHANNELS = [
+  ['Dine In', 'DINEIN', 1],
+  ['Takeaway', 'TAKEAWAY', 2],
+  ['Online', 'ONLINE', 3],
+];
+
+// [Name, Code, ColorHex, ShortCode, CommissionPct] — the aggregators.
+//
+// Seeded on the MANUAL adapter deliberately: orders are keyed in by hand until
+// somebody configures that portal's credentials, and everything downstream
+// (accept → order → KOT → bill → ledger) works identically either way. Colour
+// and monogram are DATA so the order queue can tell portals apart without a
+// stylesheet edit or a switch on a platform name.
+const PORTALS = [
+  ['Zomato', 'ZOMATO', '#E23744', 'ZO', 18.0],
+  ['Swiggy', 'SWIGGY', '#F58220', 'SW', 17.0],
+  ['District', 'DISTRICT', '#5A6472', 'DI', 15.0],
 ];
 
 // [Name, Code, IsVeg, SortOrder] — pos_item_meta.FoodTypeId is NOT NULL, so a
@@ -143,11 +172,26 @@ const provisionPosMasters = async (conn, { tenantId }, userEmail) => {
   }
 
   // Tender types, each mapped to the account it lands in.
+  const modeId = {};
   for (const [Type, account] of MODES) {
-    await ensureByName(
+    modeId[Type] = await ensureByName(
       conn, 'paymentmode', 'Type', Type, tenantId,
       'INSERT INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?, ?)',
       (id) => [id, Type, accountId[account] ?? null, tenantId, by, by],
+    );
+  }
+
+  // One settlement tender PER PORTAL, all booking to the receivable.
+  //
+  // Per portal rather than one shared "Aggregator" tender because reconciling a
+  // payout statement means answering "what does Swiggy owe us", and a single
+  // tender would merge all three into one number nobody can check.
+  for (const [Name] of PORTALS) {
+    const Type = `${Name} Settlement`;
+    modeId[Type] = await ensureByName(
+      conn, 'paymentmode', 'Type', Type, tenantId,
+      'INSERT INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?, ?)',
+      (id) => [id, Type, accountId['Aggregator Receivable'] ?? null, tenantId, by, by],
     );
   }
 
@@ -185,6 +229,37 @@ const provisionPosMasters = async (conn, { tenantId }, userEmail) => {
       conn, 'pos_food_type', 'Code', Code, tenantId,
       'INSERT INTO pos_food_type (Id, Name, Code, Description, SortOrder, IsVeg, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, NULL, ?, ?, ?, 1, NOW(), ?, ?)',
       (id) => [id, Name, Code, SortOrder, IsVeg, tenantId, by, by],
+    );
+  }
+
+  // Sales channels. Nothing seeded these before, which is why
+  // pos_item_meta_channel had nothing to point at and Billing's channel filter
+  // had no data to filter on.
+  const channelId = {};
+  for (const [Name, Code, SortOrder] of CHANNELS) {
+    channelId[Code] = await ensureByName(
+      conn, 'pos_channel', 'Code', Code, tenantId,
+      'INSERT INTO pos_channel (Id, Name, Code, Description, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, NULL, ?, ?, 1, NOW(), ?, ?)',
+      (id) => [id, Name, Code, SortOrder, tenantId, by, by],
+    );
+  }
+
+  // The aggregators, as children of the ONLINE channel. Each arrives on the
+  // 'manual' adapter, already wired to its own settlement tender and to the
+  // commission account, so an order accepted on day one settles correctly
+  // without anyone configuring accounting first.
+  for (const [Name, Code, ColorHex, ShortCode, CommissionPct] of PORTALS) {
+    await ensureByName(
+      conn, 'pos_portal', 'Code', Code, tenantId,
+      'INSERT INTO pos_portal (Id, Name, Code, ChannelId, Adapter, ColorHex, ShortCode, CommissionPct, '
+      + 'CommissionAccountTypeBaseId, SettlementPaymentModeId, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) '
+      + "VALUES (?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)",
+      (id) => [
+        id, Name, Code, channelId.ONLINE ?? null, ColorHex, ShortCode, CommissionPct,
+        accountId['Portal Commission'] ?? null,
+        modeId[`${Name} Settlement`] ?? null,
+        0, tenantId, by, by,
+      ],
     );
   }
 
@@ -250,4 +325,6 @@ module.exports = {
   EXPENSE_CATEGORIES,
   ASSET_CATEGORIES,
   FOOD_TYPES,
+  CHANNELS,
+  PORTALS,
 };

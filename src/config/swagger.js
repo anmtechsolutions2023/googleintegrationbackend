@@ -14,6 +14,14 @@ const responses = {
   notFound:     { 404: { description: 'Not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } } },
   noContent:    { 204: { description: 'Deleted successfully — no content' } },
   validation:   { 400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } } },
+  // A legal request refused because of the state the record is in — an illegal
+  // status move, a listing for an item that is not sold on the channel, a
+  // portal that still has orders against it. Distinct from 400: nothing about
+  // the request is malformed.
+  conflict:     { 409: { description: 'Conflict — the request is well-formed but not allowed from the record\'s current state', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } } },
+  // Plain 200 for endpoints whose payload is a small ad-hoc result object
+  // rather than a named schema (a bulk-update count, a publish outcome).
+  success:      { 200: { description: 'Success' } },
 };
 
 function paginatedResponse(schemaName) {
@@ -43,6 +51,26 @@ function singleResponse(schemaName, status = 200) {
           success: { type: 'boolean', example: true },
           message: { type: 'string' },
           data: { $ref: `#/components/schemas/${schemaName}` },
+        },
+      }}},
+    },
+  };
+}
+
+// A plain array under `data`, with no pagination envelope — what the endpoints
+// that return a whole working set answer with (the expo queue, a portal's store
+// mappings, a portal's catalogue). Those are read in full by one screen, so
+// paginating them would only make the screen fetch pages back together.
+function listResponse(schemaName) {
+  return {
+    200: {
+      description: 'Success',
+      content: { 'application/json': { schema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string' },
+          data: { type: 'array', items: { $ref: `#/components/schemas/${schemaName}` } },
         },
       }}},
     },
@@ -1844,13 +1872,210 @@ const swaggerSpec = {
           Active: {"type":"boolean"},
         },
       },
+      // ── Portals ─────────────────────────────────────────────────────────
+      // A CHANNEL answers "how was this sold"; a PORTAL answers "who sold it
+      // for us". A portal is a seller ON a channel, which is why it carries a
+      // ChannelId rather than being one.
+      PosPortalCreate: {
+        type: 'object', required: ["Name", "Code"],
+        properties: {
+          Name: {"type":"string","example":"Zomato"},
+          Code: {"type":"string","example":"ZOMATO"},
+          ChannelId: {"type":"string","format":"uuid","description":"Defaults to the tenant's ONLINE channel when omitted"},
+          Adapter: {"type":"string","enum":["manual","zomato.v1","swiggy.v1","district.v1"],"default":"manual","description":"Which dialect translator handles this portal. 'manual' means orders are keyed in by hand — everything downstream behaves identically."},
+          ColorHex: {"type":"string","example":"#E23744","description":"The order queue paints the portal's rail from this, so adding a portal needs no stylesheet change"},
+          ShortCode: {"type":"string","maxLength":4,"example":"ZO","description":"Monogram shown beside the colour, so colour never carries the meaning alone"},
+          CommissionPct: {"type":"number","format":"float","example":18.0},
+          CommissionAccountTypeBaseId: {"type":"string","format":"uuid","description":"EXPENSE account the portal's cut books to"},
+          SettlementPaymentModeId: {"type":"string","format":"uuid","description":"Tender an accepted order settles against — a receivable, never cash"},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosPortalUpdate: {
+        type: 'object',
+        properties: {
+          Name: {"type":"string"},
+          Code: {"type":"string"},
+          ChannelId: {"type":"string","format":"uuid"},
+          Adapter: {"type":"string","enum":["manual","zomato.v1","swiggy.v1","district.v1"]},
+          ColorHex: {"type":"string"},
+          ShortCode: {"type":"string","maxLength":4},
+          CommissionPct: {"type":"number","format":"float"},
+          CommissionAccountTypeBaseId: {"type":"string","format":"uuid"},
+          SettlementPaymentModeId: {"type":"string","format":"uuid"},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosPortal: {
+        type: 'object',
+        properties: { ...auditFields,
+          Name: {"type":"string"},
+          Code: {"type":"string"},
+          ChannelId: {"type":"string","format":"uuid"},
+          ChannelName: {"type":"string","readOnly":true},
+          Adapter: {"type":"string"},
+          ColorHex: {"type":"string"},
+          ShortCode: {"type":"string"},
+          CommissionPct: {"type":"number","format":"float"},
+          CommissionAccountTypeBaseId: {"type":"string","format":"uuid"},
+          SettlementPaymentModeId: {"type":"string","format":"uuid"},
+          SortOrder: {"type":"integer"},
+          ListingCount: {"type":"integer","readOnly":true},
+          UnsyncedCount: {"type":"integer","readOnly":true,"description":"Listings the portal has not been told about yet"},
+          OpenOrderCount: {"type":"integer","readOnly":true},
+          Active: {"type":"boolean"},
+        },
+      },
+      // Write-only. There is deliberately NO GET counterpart anywhere: the
+      // response is a receipt that the portal is configured, never the secrets.
+      PosPortalCredential: {
+        type: 'object',
+        properties: {
+          WebhookSecret: {"type":"string","writeOnly":true,"description":"Shared secret the inbound signature is verified against"},
+          ApiKey: {"type":"string","writeOnly":true},
+          ApiSecret: {"type":"string","writeOnly":true},
+          ApiBaseUrl: {"type":"string","format":"uri"},
+          TokenExpiresOn: {"type":"string","format":"date-time"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosPortalBranchCreate: {
+        type: 'object', required: ["PortalId", "BranchDetailId"],
+        properties: {
+          PortalId: {"type":"string","format":"uuid"},
+          BranchDetailId: {"type":"string","format":"uuid"},
+          ExternalStoreId: {"type":"string","description":"The portal's own id for this outlet — how an inbound order finds its branch"},
+          IsOnline: {"type":"boolean","default":true},
+          PausedUntil: {"type":"string","format":"date-time"},
+          PauseReason: {"type":"string"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosPortalBranchUpdate: {
+        type: 'object',
+        properties: {
+          ExternalStoreId: {"type":"string"},
+          IsOnline: {"type":"boolean"},
+          PausedUntil: {"type":"string","format":"date-time"},
+          PauseReason: {"type":"string"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosPortalBranch: {
+        type: 'object',
+        properties: { ...auditFields,
+          PortalId: {"type":"string","format":"uuid"},
+          BranchDetailId: {"type":"string","format":"uuid"},
+          BranchName: {"type":"string","readOnly":true},
+          ExternalStoreId: {"type":"string"},
+          IsOnline: {"type":"boolean"},
+          PausedUntil: {"type":"string","format":"date-time"},
+          PauseReason: {"type":"string"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosPortalSetOnline: {
+        type: 'object', required: ["IsOnline"],
+        properties: {
+          IsOnline: {"type":"boolean"},
+          PauseMinutes: {"type":"integer","minimum":1,"maximum":1440,"description":"Advisory only — records when someone MEANT to reopen so the queue can count down. Nothing auto-resumes."},
+          PauseReason: {"type":"string"},
+        },
+      },
+      PosPortalListingCreate: {
+        type: 'object', required: ["PortalId", "ItemMetaId"],
+        properties: {
+          PortalId: {"type":"string","format":"uuid"},
+          ItemMetaId: {"type":"string","format":"uuid"},
+          ExternalItemId: {"type":"string","description":"The portal's own id for this dish — how an inbound line finds our menu item"},
+          ListedName: {"type":"string"},
+          ListedDescription: {"type":"string"},
+          PriceOverrideCostInfoId: {"type":"string","format":"uuid","description":"A COSTINFO ROW, never a bare price: it carries its own tax group and IsTaxIncluded flag, which aggregator pricing genuinely needs. NULL inherits the branch price."},
+          Available: {"type":"boolean","default":true},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosPortalListingUpdate: {
+        type: 'object',
+        properties: {
+          ExternalItemId: {"type":"string"},
+          ListedName: {"type":"string"},
+          ListedDescription: {"type":"string"},
+          PriceOverrideCostInfoId: {"type":"string","format":"uuid"},
+          Available: {"type":"boolean"},
+          SortOrder: {"type":"integer"},
+          SyncStatus: {"type":"string","enum":["pending","synced","failed"]},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosPortalListing: {
+        type: 'object',
+        properties: { ...auditFields,
+          PortalId: {"type":"string","format":"uuid"},
+          ItemMetaId: {"type":"string","format":"uuid"},
+          ItemName: {"type":"string","readOnly":true},
+          ExternalItemId: {"type":"string"},
+          ListedName: {"type":"string"},
+          ListedDescription: {"type":"string"},
+          PriceOverrideCostInfoId: {"type":"string","format":"uuid"},
+          EffectiveCostInfoId: {"type":"string","format":"uuid","readOnly":true,"description":"What the price actually resolved to"},
+          PriceSource: {"type":"string","enum":["override","branch","none"],"readOnly":true},
+          TaxBreakdown: { $ref: '#/components/schemas/TaxBreakdown' },
+          Available: {"type":"boolean"},
+          SyncStatus: {"type":"string","enum":["pending","synced","failed"]},
+          LastSyncedOn: {"type":"string","format":"date-time"},
+          SyncError: {"type":"string"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosPortalBulkAvailability: {
+        type: 'object', required: ["ListingIds", "Available"],
+        properties: {
+          ListingIds: {"type":"array","items":{"type":"string","format":"uuid"},"maxItems":500},
+          Available: {"type":"boolean"},
+        },
+      },
+
+      // ── Online orders ───────────────────────────────────────────────────
+      PosOnlineOrderLine: {
+        type: 'object',
+        description: 'One line as ingest resolved it. An unmapped line is KEPT with the portal\'s own name and price and the order is flagged — one unrecognised item must never reject a whole order.',
+        properties: {
+          unmapped: {"type":"boolean"},
+          externalItemId: {"type":"string"},
+          ItemMetaId: {"type":"string","format":"uuid"},
+          CostInfoId: {"type":"string","format":"uuid"},
+          PriceSource: {"type":"string","enum":["override","branch","none"]},
+          name: {"type":"string"},
+          qty: {"type":"number"},
+          unitPrice: {"type":"number","format":"float"},
+          netAmount: {"type":"number","format":"float"},
+          taxAmount: {"type":"number","format":"float"},
+          grossAmount: {"type":"number","format":"float"},
+          notes: {"type":"string"},
+        },
+      },
       PosOnlineOrderCreate: {
         type: 'object', required: ["Platform"],
         properties: {
-          Platform: {"type":"string"},
+          PortalId: {"type":"string","format":"uuid"},
+          Platform: {"type":"string","description":"The portal's name AS IT WAS — a snapshot, so renaming or retiring a portal never rewrites what past orders say they came from"},
           ExternalRef: {"type":"string"},
-          Status: {"type":"string"},
-          Payload: {"type":"object"},
+          Status: {"type":"string","enum":["new","accepted","processing","out for delivery","delivered","cancelled"],"default":"new"},
+          Payload: {"type":"object","description":"The raw envelope exactly as the portal sent it"},
+          OrderLines: {"type":"array","items":{ $ref: '#/components/schemas/PosOnlineOrderLine' }},
+          CustomerName: {"type":"string"},
+          CustomerPhone: {"type":"string"},
+          ItemsTotal: {"type":"number","format":"float"},
+          GrossAmount: {"type":"number","format":"float"},
+          CommissionAmount: {"type":"number","format":"float"},
+          NetPayout: {"type":"number","format":"float"},
+          IsPrepaid: {"type":"boolean"},
+          PlacedOn: {"type":"string","format":"date-time"},
+          PromisedOn: {"type":"string","format":"date-time","description":"Drives the accept-SLA countdown on the queue"},
           BranchDetailId: {"type":"string","format":"uuid"},
           Active: {"type":"boolean"},
         },
@@ -1858,10 +2083,16 @@ const swaggerSpec = {
       PosOnlineOrderUpdate: {
         type: 'object',
         properties: {
+          PortalId: {"type":"string","format":"uuid"},
           Platform: {"type":"string"},
           ExternalRef: {"type":"string"},
-          Status: {"type":"string"},
+          Status: {"type":"string","enum":["new","accepted","processing","out for delivery","delivered","cancelled"]},
           Payload: {"type":"object"},
+          OrderLines: {"type":"array","items":{ $ref: '#/components/schemas/PosOnlineOrderLine' }},
+          CustomerName: {"type":"string"},
+          CustomerPhone: {"type":"string"},
+          RiderName: {"type":"string"},
+          RiderPhone: {"type":"string"},
           BranchDetailId: {"type":"string","format":"uuid"},
           Active: {"type":"boolean"},
         },
@@ -1869,12 +2100,67 @@ const swaggerSpec = {
       PosOnlineOrder: {
         type: 'object',
         properties: { ...auditFields,
+          PortalId: {"type":"string","format":"uuid"},
           Platform: {"type":"string"},
+          PortalName: {"type":"string","readOnly":true},
+          ColorHex: {"type":"string","readOnly":true},
+          ShortCode: {"type":"string","readOnly":true},
+          OrderId: {"type":"string","format":"uuid","readOnly":true,"description":"The pos_order this became on accept. NULL until then — this link is what lets an aggregator order reach the kitchen, the bill and the ledger."},
+          OrderNo: {"type":"string","readOnly":true},
           ExternalRef: {"type":"string"},
-          Status: {"type":"string"},
+          Status: {"type":"string","enum":["new","accepted","processing","out for delivery","delivered","cancelled"]},
           Payload: {"type":"object"},
+          OrderLines: {"type":"array","items":{ $ref: '#/components/schemas/PosOnlineOrderLine' }},
+          HasUnmappedLines: {"type":"boolean"},
+          CustomerName: {"type":"string"},
+          CustomerPhone: {"type":"string"},
+          ItemsTotal: {"type":"number","format":"float"},
+          GrossAmount: {"type":"number","format":"float"},
+          CommissionAmount: {"type":"number","format":"float"},
+          NetPayout: {"type":"number","format":"float"},
+          IsPrepaid: {"type":"boolean"},
+          PlacedOn: {"type":"string","format":"date-time"},
+          PromisedOn: {"type":"string","format":"date-time"},
+          AcceptedOn: {"type":"string","format":"date-time"},
+          DeliveredOn: {"type":"string","format":"date-time"},
+          RiderName: {"type":"string"},
+          RiderPhone: {"type":"string"},
+          CancelReason: {"type":"string"},
+          BranchName: {"type":"string","readOnly":true},
           BranchDetailId: {"type":"string","format":"uuid"},
           Active: {"type":"boolean"},
+        },
+      },
+      PosOnlineOrderAccept: {
+        type: 'object',
+        properties: {
+          FireKot: {"type":"boolean","default":true,"description":"Send to the kitchen at the same time. Defaults true — an accepted order nobody is cooking is the failure this endpoint exists to remove."},
+        },
+      },
+      PosOnlineOrderReject: {
+        type: 'object', required: ["Reason"],
+        properties: {
+          Reason: {"type":"string","enum":["out_of_stock","kitchen_full","store_closed","item_unavailable","unable_to_deliver","other"],"description":"Coded, because portals require one"},
+          Note: {"type":"string"},
+        },
+      },
+      PosOnlineOrderSetStatus: {
+        type: 'object', required: ["Status"],
+        properties: {
+          Status: {"type":"string","enum":["accepted","processing","out for delivery","delivered","cancelled"]},
+          Reason: {"type":"string","enum":["out_of_stock","kitchen_full","store_closed","item_unavailable","unable_to_deliver","other"]},
+        },
+      },
+      PosOnlineOrderAcceptResult: {
+        type: 'object',
+        properties: {
+          OnlineOrderId: {"type":"string","format":"uuid"},
+          OrderId: {"type":"string","format":"uuid"},
+          OrderNo: {"type":"string"},
+          Status: {"type":"string"},
+          Kot: {"type":"object"},
+          PortalPush: {"type":"object","description":"Whether the portal was told. A failure here never undoes the accept."},
+          Settlement: {"type":"object","description":"Present on delivered. A failure here never undoes the delivery."},
         },
       },
       PosFeedbackCreate: {
@@ -2773,6 +3059,250 @@ const swaggerSpec = {
     ...crudPaths('PosKots', '/api/pos/kots', 'PosKotCreate', 'PosKotUpdate', 'PosKot', false),
     ...crudPaths('PosBills', '/api/pos/bills', 'PosBillCreate', 'PosBillUpdate', 'PosBill', false),
     ...crudPaths('PosOnlineOrders', '/api/pos/online-orders', 'PosOnlineOrderCreate', 'PosOnlineOrderUpdate', 'PosOnlineOrder', false),
+    ...(() => {
+      const generated = crudPaths('PosPortals', '/api/pos/portals', 'PosPortalCreate', 'PosPortalUpdate', 'PosPortal', true);
+      // A portal with orders against it is DEACTIVATED, not deleted: the foreign
+      // key would either take the orders with it or refuse with a raw SQL error
+      // nobody can act on, and neither is acceptable for a record with financial
+      // history behind it. The service answers 409 and says so.
+      generated['/api/pos/portals/{id}'].delete.responses = {
+        ...generated['/api/pos/portals/{id}'].delete.responses,
+        ...responses.conflict,
+      };
+      return generated;
+    })(),
+
+    // ── The expo queue ──────────────────────────────────────────────────────
+    '/api/pos/online-orders/queue': {
+      get: {
+        tags: ['PosOnlineOrders'],
+        summary: 'The live order queue — open work only, oldest first',
+        description:
+          'Its own endpoint rather than a filter over the list, because the screen it feeds '
+          + 'polls every few seconds and wants the orders that need a decision — not page one '
+          + "of a Friday night's history. Sorted by PlacedOn so the order closest to breaching "
+          + 'its accept SLA is first.',
+        security,
+        parameters: [
+          { name: 'branchId', in: 'query', schema: { type: 'string', format: 'uuid' } },
+          { name: 'statuses', in: 'query', schema: { type: 'string' }, description: "Comma-separated. Defaults to the four live stages." },
+        ],
+        responses: { ...listResponse('PosOnlineOrder'), ...responses.unauthorized },
+      },
+    },
+
+    // ── Order lifecycle ─────────────────────────────────────────────────────
+    '/api/pos/online-orders/{id}/accept': {
+      post: {
+        tags: ['PosOnlineOrders'],
+        summary: 'Accept a portal order into the POS',
+        description:
+          'The step this module was missing. In ONE transaction it creates the pos_order, links '
+          + 'it back and fires the kitchen ticket — so an aggregator order finally reaches the '
+          + 'kitchen, the bill and the ledger by the road every other sale already travels. The '
+          + 'round is priced from the costinfo the portal sells under, so the bill is raised at '
+          + 'what the customer actually paid rather than a dine-in price they never saw.',
+        security,
+        parameters: [idParam],
+        requestBody: { required: false, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosOnlineOrderAccept' } } } },
+        responses: { ...singleResponse('PosOnlineOrderAcceptResult'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/online-orders/{id}/reject': {
+      post: {
+        tags: ['PosOnlineOrders'],
+        summary: 'Refuse an order, with a coded reason',
+        security,
+        parameters: [idParam],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosOnlineOrderReject' } } } },
+        responses: { ...singleResponse('PosOnlineOrderAcceptResult'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/online-orders/{id}/status': {
+      put: {
+        tags: ['PosOnlineOrders'],
+        summary: 'Move an order along its lifecycle',
+        description:
+          'The single validated writer for every stage after accept. Illegal moves are refused '
+          + 'with 409 — the queue used to write "processing" on Accept while the tracking board '
+          + 'drew "accepted" as stage one, so the status a manager read never matched the button '
+          + 'a cashier pressed. Moving to `delivered` also settles the bill through the existing '
+          + 'posbill path; a settle failure is reported and does NOT undo the delivery.',
+        security,
+        parameters: [idParam],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosOnlineOrderSetStatus' } } } },
+        responses: { ...singleResponse('PosOnlineOrderAcceptResult'), ...responses.validation, ...responses.notFound, ...responses.conflict, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── Portal configuration ────────────────────────────────────────────────
+    '/api/pos/portals/{id}/credentials': {
+      put: {
+        tags: ['PosPortals'],
+        summary: 'Write a portal\'s secrets',
+        description:
+          'Write-only by design: there is no GET counterpart anywhere and the response is a '
+          + 'receipt rather than the values. A field the caller omits keeps its stored value, so '
+          + 'a form showing "••••" and submitting nothing does not blank a working integration.',
+        security,
+        parameters: [idParam],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosPortalCredential' } } } },
+        responses: { ...singleResponse('PosPortal'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/portals/{id}/branches': {
+      get: {
+        tags: ['PosPortals'],
+        summary: "A portal's branch ↔ store mappings",
+        description: 'The join an inbound order resolves through: portal + ExternalStoreId → our branch.',
+        security,
+        parameters: [idParam],
+        responses: { ...listResponse('PosPortalBranch'), ...responses.notFound, ...responses.unauthorized },
+      },
+    },
+    '/api/pos/portals/branches': {
+      post: {
+        tags: ['PosPortals'], summary: 'Map a branch to a portal store', security,
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosPortalBranchCreate' } } } },
+        responses: { ...singleResponse('PosPortalBranch', 201), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/portals/branches/{id}': {
+      put: {
+        tags: ['PosPortals'], summary: 'Change a store mapping', security,
+        parameters: [idParam],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosPortalBranchUpdate' } } } },
+        responses: { ...singleResponse('PosPortalBranch'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+      delete: {
+        tags: ['PosPortals'], summary: 'Remove a store mapping', security,
+        parameters: [idParam],
+        responses: { ...responses.noContent, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/portals/branches/{id}/online': {
+      put: {
+        tags: ['PosPortals'],
+        summary: 'The kill switch — stop or resume taking orders here',
+        description:
+          'POS_OPS rather than POS_CONFIG: this is what someone reaches for when the kitchen is '
+          + 'underwater, and it must not need a manager. Its own endpoint so a full-row PUT from '
+          + 'a stale form cannot roll back whatever else changed.',
+        security,
+        parameters: [idParam],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosPortalSetOnline' } } } },
+        responses: { ...singleResponse('PosPortalBranch'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── Portal listings ─────────────────────────────────────────────────────
+    '/api/pos/portals/{id}/listings': {
+      get: {
+        tags: ['PosPortals'],
+        summary: "A portal's catalogue, priced",
+        description:
+          'Always priced, because a screen showing a costinfo id instead of a price is not one '
+          + 'anybody can work with — and pricing here means the number shown, the number pushed '
+          + 'to the portal and the number billed all come from one resolution.',
+        security,
+        parameters: [idParam],
+        responses: { ...listResponse('PosPortalListing'), ...responses.notFound, ...responses.unauthorized },
+      },
+    },
+    '/api/pos/portals/listings': {
+      post: {
+        tags: ['PosPortals'],
+        summary: 'List a menu item on a portal',
+        description:
+          'Refused with 409 if the item is not sold on the portal\'s channel. The channel is the '
+          + 'coarse switch and the listing is the fine one; a listing for an item that is not '
+          + 'sold online could never legitimately take an order.',
+        security,
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosPortalListingCreate' } } } },
+        responses: { ...singleResponse('PosPortalListing', 201), ...responses.validation, ...responses.conflict, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/portals/listings/{id}': {
+      put: {
+        tags: ['PosPortals'], summary: 'Change how a portal lists an item', security,
+        parameters: [idParam],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosPortalListingUpdate' } } } },
+        responses: { ...singleResponse('PosPortalListing'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+      delete: {
+        tags: ['PosPortals'], summary: 'Take an item off a portal', security,
+        parameters: [idParam],
+        responses: { ...responses.noContent, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/portals/listings/availability': {
+      post: {
+        tags: ['PosPortals'],
+        summary: 'Bulk stock toggle — the operation the listings screen exists for',
+        description:
+          '200 dishes across 3 portals is 600 decisions; a PUT per row is not a workflow. '
+          + 'POS_OPS, because "we have run out of prawns" is counter work done several times a '
+          + 'day. Every touched listing goes back to SyncStatus `pending`.',
+        security,
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosPortalBulkAvailability' } } } },
+        responses: { ...responses.success, ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/portals/{id}/publish-menu': {
+      post: {
+        tags: ['PosPortals'],
+        summary: 'Publish the catalogue to the portal',
+        description:
+          'Fire-and-RECORD, never fire-and-assume: per-listing SyncStatus is written from what '
+          + 'the portal actually accepted, which is what lets a screen say "3 items out of sync".',
+        security,
+        parameters: [idParam],
+        responses: { ...responses.success, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── The inbound webhook ─────────────────────────────────────────────────
+    '/api/pos/portal-webhooks/{code}': {
+      post: {
+        tags: ['PosPortals'],
+        summary: 'Receive one event from a portal (NO bearer token)',
+        description:
+          'The one route in this API that is not behind a tenant JWT — an aggregator has no user '
+          + 'and no session. The request is authenticated by an HMAC signature over the RAW body, '
+          + "verified against the portal's stored secret, and THE TENANT IS RESOLVED FROM THAT "
+          + 'CREDENTIAL, never from anything in the payload.\n\n'
+          + 'Answers 200 generously: `processed`, `duplicate` (a byte-identical replay, which does '
+          + 'no work) and `needs_mapping` (an unknown store, parked for a human) are all 200, '
+          + 'because aggregators retry hard and de-register endpoints that look flaky — and '
+          + 'retrying will not create a missing store mapping. Only a bad signature is 401.',
+        parameters: [
+          { name: 'code', in: 'path', required: true, schema: { type: 'string' }, description: 'Portal code, e.g. ZOMATO' },
+        ],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' }, } } },
+        responses: {
+          200: {
+            description: 'Event handled — see data.status for what happened',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: {
+                success: { type: 'boolean', example: true },
+                message: { type: 'string' },
+                data: {
+                  type: 'object',
+                  properties: {
+                    status: { type: 'string', enum: ['processed', 'duplicate', 'needs_mapping'] },
+                    orderId: { type: 'string', format: 'uuid', nullable: true },
+                    duplicate: { type: 'boolean' },
+                  },
+                },
+              },
+            } } },
+          },
+          401: { description: 'Invalid signature — deliberately the same answer as an unknown portal code' },
+          429: { description: 'Rate limited (per portal code)' },
+        },
+      },
+    },
     ...crudPaths('PosFeedback', '/api/pos/feedback', 'PosFeedbackCreate', 'PosFeedbackUpdate', 'PosFeedback', false),
     ...crudPaths('PosTokens', '/api/pos/tokens', 'PosTokenCreate', 'PosTokenUpdate', 'PosToken', false),
     ...crudPaths('PosExpenses', '/api/pos/expenses', 'PosExpenseCreate', 'PosExpenseUpdate', 'PosExpense', false),

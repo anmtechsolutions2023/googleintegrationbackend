@@ -12,7 +12,12 @@
 -- These two files are the ONLY source of truth for the database. Schema changes
 -- are made HERE, in place; no ALTER scripts and no migration directory.
 --
--- Verified against an empty database: 149 statements, 66 tables.
+-- Verified against an empty database: 72 tables, MySQL 8.0.32.
+--
+-- NOTE ON COLUMN NAMES: avoid MySQL RESERVED WORDS. `Lines` was one
+-- (LOAD DATA ... LINES TERMINATED BY) and cost a 1064 at deploy time; it is
+-- now pos_online_order.OrderLines. A column that can only be written
+-- backtick-quoted, in every query forever, is not worth the shorter name.
 --
 -- This script:
 --   - Drops and recreates every application table in dependency order
@@ -1073,6 +1078,11 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS pos_portal_event;
+DROP TABLE IF EXISTS pos_portal_credential;
+DROP TABLE IF EXISTS pos_portal_listing;
+DROP TABLE IF EXISTS pos_portal_branch;
+DROP TABLE IF EXISTS pos_portal;
 DROP TABLE IF EXISTS pos_bill_order;
 DROP TABLE IF EXISTS pos_bill;
 DROP TABLE IF EXISTS pos_kot;
@@ -1315,6 +1325,15 @@ CREATE TABLE pos_order (
     TableId         VARCHAR(50)    NULL,
     CustomerId      VARCHAR(50)    NULL,
     OrderType       VARCHAR(20)    NOT NULL DEFAULT 'dinein',
+    -- HOW this was sold, as a reference to the channel master rather than a
+    -- string match. pos_channel existed but nothing read it: item availability
+    -- was written to pos_item_meta_channel and never consulted, and orders
+    -- carried no channel at all. Reports can now slice dine-in / online /
+    -- takeaway without matching on OrderType text.
+    --
+    -- Nullable: a dine-in order punched at the till before a tenant has created
+    -- channels is still a valid order.
+    ChannelId       VARCHAR(50)    NULL,
     Status          VARCHAR(20)    NOT NULL DEFAULT 'open',
     Items           JSON           NULL,
     SubTotal        DECIMAL(12,2)  NOT NULL DEFAULT 0,
@@ -1347,7 +1366,8 @@ CREATE TABLE pos_order (
     PRIMARY KEY (Id),
     UNIQUE (OrderNo, TenantId),
     FOREIGN KEY (TableId)    REFERENCES pos_table(Id),
-    FOREIGN KEY (CustomerId) REFERENCES pos_customer(Id)
+    FOREIGN KEY (CustomerId) REFERENCES pos_customer(Id),
+    FOREIGN KEY (ChannelId)  REFERENCES pos_channel(Id)
 );
 
 -- 4.11 pos_kot — Kitchen Order Ticket fired for an order
@@ -1431,13 +1451,263 @@ CREATE TABLE pos_bill_order (
     FOREIGN KEY (OrderId) REFERENCES pos_order(Id)
 );
 
--- 4.13 pos_online_order — aggregator/online channel order
+-- 4.12c pos_portal — the aggregators that sell on our behalf.
+--
+-- A CHANNEL (pos_channel) answers "how was this sold" — dine-in, takeaway,
+-- online. A PORTAL answers "who sold it for us" — Zomato, Swiggy, District:
+-- a counterparty with its own catalogue, prices, order ids, status vocabulary,
+-- commission and credentials.
+--
+-- These are not the same thing, and conflating them is why pos_online_order
+-- carried a free-text Platform string with nowhere to hang any of the above.
+-- A portal is a SELLER ON A CHANNEL, so it is modelled as a child of the
+-- online channel rather than as a channel itself.
+--
+-- ColorHex/ShortCode make visual identity DATA: the order queue reads them to
+-- draw a portal's colour rail and monogram, so adding a portal is one INSERT
+-- rather than a stylesheet edit and a switch on a platform name.
+CREATE TABLE pos_portal (
+    Id              VARCHAR(50)   NOT NULL,
+    Name            VARCHAR(100)  NOT NULL,
+    Code            VARCHAR(50)   NOT NULL,
+    -- Which sales channel this portal sells on. Normally the ONLINE channel;
+    -- nullable so a tenant that has not created channels yet is not blocked.
+    ChannelId       VARCHAR(50)   NULL,
+    -- The adapter slug that translates this portal's dialect. Resolved through
+    -- a registry, never a switch. 'manual' means orders are keyed in by hand.
+    Adapter         VARCHAR(50)   NOT NULL DEFAULT 'manual',
+    ColorHex        VARCHAR(9)    NULL,
+    ShortCode       VARCHAR(4)    NULL,
+    -- What the portal keeps, as a percentage of the gross order value. Used to
+    -- show net payout on the queue and to post the commission expense.
+    CommissionPct   DECIMAL(6,3)  NOT NULL DEFAULT 0,
+    -- Where commission is booked. An EXPENSE-kind accounttypebase row.
+    CommissionAccountTypeBaseId VARCHAR(50) NULL,
+    -- The tender an accepted order settles against, so aggregator money lands
+    -- in a receivable rather than in the cash drawer.
+    SettlementPaymentModeId     VARCHAR(50) NULL,
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Code, TenantId),
+    FOREIGN KEY (ChannelId) REFERENCES pos_channel(Id),
+    FOREIGN KEY (CommissionAccountTypeBaseId) REFERENCES accounttypebase(Id),
+    FOREIGN KEY (SettlementPaymentModeId) REFERENCES paymentmode(Id)
+);
+
+-- 4.12d pos_portal_branch — which of our branches is which store on a portal.
+--
+-- Two jobs. It is the join an INBOUND order resolves through (portal +
+-- ExternalStoreId → our branch), and it carries the kill switch: IsOnline = 0
+-- stops a branch accepting from one portal without touching the others.
+--
+-- PausedUntil is advisory — it records when someone intended to resume, so the
+-- queue can show "22 min left". IsOnline is the truth.
+CREATE TABLE pos_portal_branch (
+    Id              VARCHAR(50)   NOT NULL,
+    PortalId        VARCHAR(50)   NOT NULL,
+    BranchDetailId  VARCHAR(50)   NOT NULL,
+    -- The portal's own id for this outlet. What arrives on the webhook.
+    ExternalStoreId VARCHAR(100)  NULL,
+    IsOnline        TINYINT(1)    NOT NULL DEFAULT 1,
+    PausedUntil     DATETIME      NULL,
+    PauseReason     VARCHAR(255)  NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (PortalId, BranchDetailId, TenantId),
+    -- An inbound order looks the branch up by (portal, external store).
+    INDEX idx_posportalbranch_ext (TenantId, PortalId, ExternalStoreId),
+    FOREIGN KEY (PortalId)       REFERENCES pos_portal(Id) ON DELETE CASCADE,
+    FOREIGN KEY (BranchDetailId) REFERENCES branchdetail(Id)
+);
+
+-- 4.12e pos_portal_listing — one menu item, as one portal lists it.
+--
+-- Hangs off pos_item_meta (already branch-scoped), so a listing is
+-- automatically branch-specific.
+--
+-- PriceOverrideCostInfoId is a COSTINFO ROW, deliberately not a decimal column.
+-- Every price the tax engine prices correctly arrives as a costinfo row
+-- carrying a tax group and an IsTaxIncluded flag; aggregator prices are usually
+-- marked up AND tax-inclusive where dine-in is exclusive, so they genuinely
+-- need their own. A bare decimal would be a price with no tax identity — the
+-- exact shape that produced zero-tax bills before.
+CREATE TABLE pos_portal_listing (
+    Id              VARCHAR(50)   NOT NULL,
+    PortalId        VARCHAR(50)   NOT NULL,
+    ItemMetaId      VARCHAR(50)   NOT NULL,
+    -- The portal's own id for this dish. What an inbound order line carries.
+    ExternalItemId  VARCHAR(100)  NULL,
+    -- What the portal shows. NULL means "as the item is named with us".
+    ListedName      VARCHAR(255)  NULL,
+    ListedDescription VARCHAR(1000) NULL,
+    -- NULL = inherit the branch price. See the resolution chain in
+    -- posportal.pricing.js.
+    PriceOverrideCostInfoId VARCHAR(50) NULL,
+    -- In stock on THIS portal right now. Flipped many times a day by counter
+    -- staff; distinct from pos_item_meta.Active (do we make this at all) and
+    -- from pos_item_meta_channel (is it sold online at all).
+    Available       TINYINT(1)    NOT NULL DEFAULT 1,
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    -- Push is fire-and-RECORD, never fire-and-assume: these two columns are what
+    -- let a screen say "3 items out of sync with Zomato".
+    LastSyncedOn    DATETIME      NULL,
+    SyncStatus      VARCHAR(20)   NOT NULL DEFAULT 'pending',
+    SyncError       VARCHAR(500)  NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (PortalId, ItemMetaId, TenantId),
+    -- An inbound order line resolves by (portal, external item).
+    INDEX idx_posportallisting_ext (TenantId, PortalId, ExternalItemId),
+    FOREIGN KEY (PortalId)   REFERENCES pos_portal(Id) ON DELETE CASCADE,
+    FOREIGN KEY (ItemMetaId) REFERENCES pos_item_meta(Id) ON DELETE CASCADE,
+    FOREIGN KEY (PriceOverrideCostInfoId) REFERENCES costinfo(Id)
+);
+
+-- 4.12f pos_portal_credential — per-portal secrets.
+--
+-- Its own table rather than pos_setting because these are secrets: the read
+-- path is restricted, and no GET on the portal master ever returns them. The
+-- webhook resolves the TENANT from a verified credential row — never from
+-- anything in the payload, which is attacker-controlled.
+CREATE TABLE pos_portal_credential (
+    Id              VARCHAR(50)   NOT NULL,
+    PortalId        VARCHAR(50)   NOT NULL,
+    -- Shared secret the inbound signature is verified against.
+    WebhookSecret   VARCHAR(255)  NULL,
+    -- Credentials for OUTBOUND calls (status push, menu push).
+    ApiKey          VARCHAR(255)  NULL,
+    ApiSecret       VARCHAR(255)  NULL,
+    ApiBaseUrl      VARCHAR(255)  NULL,
+    TokenExpiresOn  DATETIME      NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (PortalId, TenantId),
+    FOREIGN KEY (PortalId) REFERENCES pos_portal(Id) ON DELETE CASCADE
+);
+
+-- 4.12g pos_portal_event — the raw inbound log, and the idempotency guard.
+--
+-- Every aggregator retries, and some fan out to several endpoints. Without the
+-- unique key below a retry means a duplicate order, a duplicate KOT and a
+-- duplicate ledger posting. The row is written BEFORE any work is done, so a
+-- replay is recognised and answered 200 without doing the work twice.
+--
+-- Deliberately NOT foreign-keyed to pos_online_order: an event that could not
+-- be normalised still has to be recorded, and it has no order to point at.
+CREATE TABLE pos_portal_event (
+    Id              VARCHAR(50)   NOT NULL,
+    PortalId        VARCHAR(50)   NOT NULL,
+    ExternalRef     VARCHAR(100)  NULL,
+    EventType       VARCHAR(50)   NOT NULL DEFAULT 'order.created',
+    -- Hash of the raw body. Part of the idempotency key so a portal legitimately
+    -- re-sending a CHANGED order for the same ref is processed, while a byte-
+    -- identical replay is not.
+    PayloadHash     VARCHAR(64)   NOT NULL,
+    RawPayload      JSON          NULL,
+    ProcessingStatus VARCHAR(20)  NOT NULL DEFAULT 'received',
+    ProcessingError VARCHAR(1000) NULL,
+    OnlineOrderId   VARCHAR(50)   NULL,
+    ReceivedOn      DATETIME      NULL,
+    ProcessedOn     DATETIME      NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (PortalId, ExternalRef, EventType, PayloadHash, TenantId),
+    INDEX idx_posportalevent_status (TenantId, ProcessingStatus),
+    FOREIGN KEY (PortalId) REFERENCES pos_portal(Id) ON DELETE CASCADE
+);
+
+-- 4.13 pos_online_order — one order taken by a portal on our behalf.
+--
+-- Was a stub: Platform + ExternalRef + Status + a JSON blob, linked to nothing.
+-- It now sits between the portal that sent the order and the pos_order it
+-- becomes on accept, which is what lets an aggregator order reach the kitchen,
+-- the bill and the ledger by the road every other sale already travels.
 CREATE TABLE pos_online_order (
     Id              VARCHAR(50)   NOT NULL,
+    -- The portal, by id. Nullable only so a row keyed in before the portal
+    -- master existed still loads; every write path sets it.
+    PortalId        VARCHAR(50)   NULL,
+    -- The portal's name AS IT WAS when the order arrived — a snapshot, not a
+    -- lookup. Same reasoning as pos_order.TableName and
+    -- transactiondetaillog.CustomerName: renaming or retiring a portal must
+    -- never rewrite what last quarter's orders say they came from.
     Platform        VARCHAR(50)   NOT NULL,
+    -- The pos_order this became when it was accepted. NULL until then.
+    -- THIS is the link that was missing: without it an online order fired no
+    -- KOT, raised no bill and never reached the ledger.
+    OrderId         VARCHAR(50)   NULL,
+    -- Which store mapping resolved this order, kept for reconciliation.
+    PortalBranchId  VARCHAR(50)   NULL,
     ExternalRef     VARCHAR(100)  NULL,
     Status          VARCHAR(20)   NOT NULL DEFAULT 'new',
+    -- The raw envelope exactly as the portal sent it. Immutable; the normalized
+    -- view lives in the columns below and in the pos_order created on accept.
     Payload         JSON          NULL,
+    -- Normalized lines, resolved against pos_portal_listing at ingest time.
+    -- A line that matched nothing is KEPT here with its raw name and flagged —
+    -- one unmapped line must never reject a whole order.
+    --
+    -- NOT named `Lines`: LINES is a RESERVED WORD in MySQL (LOAD DATA ... LINES
+    -- TERMINATED BY), so that column could only ever be written backtick-quoted,
+    -- in every query, forever. A name that does not need quoting is worth more
+    -- than the one saved word.
+    OrderLines      JSON          NULL,
+    HasUnmappedLines TINYINT(1)   NOT NULL DEFAULT 0,
+    -- Aggregators mask the customer's real number and rotate it, so this is
+    -- deliberately denormalized rather than resolved to a pos_customer: auto-
+    -- creating one per order would fill the CRM with one-visit ghosts and
+    -- poison the loyalty ledger.
+    CustomerName    VARCHAR(100)  NULL,
+    CustomerPhone   VARCHAR(30)   NULL,
+    ExternalCustomerRef VARCHAR(100) NULL,
+    -- Money, as the portal reports it. NetPayout is what actually arrives.
+    ItemsTotal      DECIMAL(12,2) NOT NULL DEFAULT 0,
+    PortalDiscount  DECIMAL(12,2) NOT NULL DEFAULT 0,
+    PackingCharge   DECIMAL(12,2) NOT NULL DEFAULT 0,
+    DeliveryCharge  DECIMAL(12,2) NOT NULL DEFAULT 0,
+    TaxAmount       DECIMAL(12,2) NOT NULL DEFAULT 0,
+    GrossAmount     DECIMAL(12,2) NOT NULL DEFAULT 0,
+    CommissionAmount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    NetPayout       DECIMAL(12,2) NOT NULL DEFAULT 0,
+    IsPrepaid       TINYINT(1)    NOT NULL DEFAULT 1,
+    -- Lifecycle timestamps. PlacedOn/PromisedOn come from the portal and drive
+    -- the accept-SLA countdown on the queue; the rest are ours.
+    PlacedOn        DATETIME      NULL,
+    PromisedOn      DATETIME      NULL,
+    AcceptedOn      DATETIME      NULL,
+    ReadyOn         DATETIME      NULL,
+    PickedUpOn      DATETIME      NULL,
+    DeliveredOn     DATETIME      NULL,
+    RiderName       VARCHAR(100)  NULL,
+    RiderPhone      VARCHAR(30)   NULL,
+    CancelReason    VARCHAR(255)  NULL,
+    CancelledBy     VARCHAR(50)   NULL,
     BranchDetailId  VARCHAR(50)   NULL,
     TenantId        VARCHAR(50)   NOT NULL,
     Active          TINYINT(1)    NOT NULL,
@@ -1446,7 +1716,14 @@ CREATE TABLE pos_online_order (
     UpdatedOn       DATETIME,
     UpdatedBy       VARCHAR(50),
     PRIMARY KEY (Id),
-    UNIQUE (Platform, ExternalRef, TenantId)
+    -- Keyed on the PORTAL, not on the free-text platform name: 'Zomato',
+    -- 'zomato' and 'ZOMATO' used to be three different portals to this index.
+    UNIQUE (PortalId, ExternalRef, TenantId),
+    -- The queue reads open orders for a branch, newest first.
+    INDEX idx_posonlineorder_queue (TenantId, Status, BranchDetailId),
+    FOREIGN KEY (PortalId)       REFERENCES pos_portal(Id),
+    FOREIGN KEY (PortalBranchId) REFERENCES pos_portal_branch(Id),
+    FOREIGN KEY (OrderId)        REFERENCES pos_order(Id)
 );
 
 -- 4.14 pos_token — counter-service queue number

@@ -92,7 +92,8 @@ const loadTable = async (conn, id, tenantId) => {
 
 const writeOrder = (conn, o, userEmail, tenantId) =>
   conn.execute(QUERIES.POS_ORDER.UPDATE, [
-    o.OrderNo, o.TableId, o.CustomerId ?? null, o.OrderType ?? null, o.Status ?? null,
+    o.OrderNo, o.TableId, o.CustomerId ?? null, o.OrderType ?? null, o.ChannelId ?? null,
+    o.Status ?? null,
     toJson(o.Items), o.SubTotal, o.TaxAmount, o.Total, o.BranchDetailId ?? null,
     o.TableName ?? null, o.FloorId ?? null, o.FloorName ?? null, o.TableCapacity ?? null,
     o.Active != null ? o.Active : 1, userEmail, o.Id, tenantId,
@@ -101,6 +102,8 @@ const writeOrder = (conn, o, userEmail, tenantId) =>
 const insertOrder = (conn, o, userEmail, tenantId) =>
   conn.execute(QUERIES.POS_ORDER.INSERT, [
     o.Id, tenantId, o.OrderNo, o.TableId, o.CustomerId ?? null, o.OrderType ?? 'dinein',
+    // A split round was sold the same way the round it came from was.
+    o.ChannelId ?? null,
     o.Status ?? 'open', toJson(o.Items), o.SubTotal, o.TaxAmount, o.Total,
     o.BranchDetailId ?? null,
     o.TableName ?? null, o.FloorId ?? null, o.FloorName ?? null, o.TableCapacity ?? null,
@@ -245,6 +248,7 @@ const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo },
     TableId: toTableId,
     CustomerId: src.CustomerId ?? null,
     OrderType: src.OrderType || 'dinein',
+    ChannelId: src.ChannelId ?? null,
     Status: srcWasSent ? 'fired' : 'open',
     Items: moved,
     ...sumTotals(moved),

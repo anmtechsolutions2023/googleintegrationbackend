@@ -789,6 +789,45 @@ INSERT IGNORE INTO expense_category (Id, Name, AccountTypeBaseId, Active, Tenant
     ('e0000001-ldgr-0000-0000-000000000006', 'Maintenance',  'b0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
     ('e0000001-ldgr-0000-0000-000000000007', 'Miscellaneous','b0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
 
+-- 11h-2) Sales channels, and the portals that sell on them.
+--
+-- A CHANNEL answers "how was this sold" — dine-in, takeaway, online. A PORTAL
+-- answers "who sold it for us" — Zomato, Swiggy, District. They are not the
+-- same thing: a portal is a SELLER ON a channel, which is why pos_portal hangs
+-- off pos_channel rather than replacing it.
+--
+-- Nothing seeded channels before, so pos_item_meta_channel had nothing to point
+-- at and the availability gate had no data to gate on.
+INSERT IGNORE INTO pos_channel (Id, Name, Code, Description, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('c0000001-chan-0000-0000-000000000001', 'Dine In',  'DINEIN',   'Served at a table',        1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('c0000001-chan-0000-0000-000000000002', 'Takeaway', 'TAKEAWAY', 'Collected at the counter', 2, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('c0000001-chan-0000-0000-000000000003', 'Online',   'ONLINE',   'Sold through a portal',    3, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
+-- Aggregator money is owed to us for weeks, so it must NOT book to Cash — that
+-- would put money in a till that never saw it and break the cash session.
+INSERT IGNORE INTO accounttypebase (Id, Name, Kind, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('b0000001-ldgr-0000-0000-000000000006', 'Aggregator Receivable', 'ASSET',   1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    ('b0000001-ldgr-0000-0000-000000000007', 'Portal Commission',     'EXPENSE', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
+
+-- One settlement tender per portal, not one shared "Aggregator" tender:
+-- reconciling a payout statement means answering what ONE portal owes us.
+INSERT IGNORE INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('m0000001-ldgr-0000-0000-000000000005', 'Zomato Settlement',   'b0000001-ldgr-0000-0000-000000000006', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000006', 'Swiggy Settlement',   'b0000001-ldgr-0000-0000-000000000006', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000007', 'District Settlement', 'b0000001-ldgr-0000-0000-000000000006', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
+-- The portals themselves, on the MANUAL adapter.
+--
+-- Manual is not a placeholder: orders are keyed in by hand and everything
+-- downstream — accept → pos_order → KOT → bill → ledger — behaves identically
+-- to a webhook-delivered order. Connecting a real API later changes only how
+-- orders ARRIVE. ColorHex/ShortCode are data so the order queue can tell
+-- portals apart without a stylesheet edit or a switch on a platform name.
+INSERT IGNORE INTO pos_portal (Id, Name, Code, ChannelId, Adapter, ColorHex, ShortCode, CommissionPct, CommissionAccountTypeBaseId, SettlementPaymentModeId, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('p0000001-prtl-0000-0000-000000000001', 'Zomato',   'ZOMATO',   'c0000001-chan-0000-0000-000000000003', 'manual', '#E23744', 'ZO', 18.000, 'b0000001-ldgr-0000-0000-000000000007', 'm0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('p0000001-prtl-0000-0000-000000000002', 'Swiggy',   'SWIGGY',   'c0000001-chan-0000-0000-000000000003', 'manual', '#F58220', 'SW', 17.000, 'b0000001-ldgr-0000-0000-000000000007', 'm0000001-ldgr-0000-0000-000000000006', 2, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('p0000001-prtl-0000-0000-000000000003', 'District', 'DISTRICT', 'c0000001-chan-0000-0000-000000000003', 'manual', '#5A6472', 'DI', 15.000, 'b0000001-ldgr-0000-0000-000000000007', 'm0000001-ldgr-0000-0000-000000000007', 3, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
 -- 11i) Asset categories — the analysis axis for the equipment register.
 INSERT IGNORE INTO asset_category (Id, Name, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
     ('a0000001-ldgr-0000-0000-000000000001', 'Kitchen Equipment', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),

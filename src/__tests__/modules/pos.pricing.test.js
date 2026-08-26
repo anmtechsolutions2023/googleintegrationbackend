@@ -60,8 +60,16 @@ describe('POS order — server-authoritative totals', () => {
     });
   };
 
+  // Bind positions of POS_ORDER.INSERT, by name. Named rather than indexed
+  // because every column added to pos_order shifts the ones after it, and a
+  // test that asserts on params[7] fails for a reason that has nothing to do
+  // with what it is testing.
+  const ORDER_COL = {
+    Items: 8, SubTotal: 9, TaxAmount: 10, Total: 11,
+  };
   const insertedParams = () =>
     mockConnection.execute.mock.calls.find(([sql]) => /INSERT INTO pos_order/i.test(sql))[1];
+  const inserted = (name) => insertedParams()[ORDER_COL[name]];
 
   it('ignores client totals and recomputes from the tax chain', async () => {
     routeOrder();
@@ -76,12 +84,9 @@ describe('POS order — server-authoritative totals', () => {
       USER,
     );
 
-    const params = insertedParams();
-    // INSERT order: Id, TenantId, OrderNo, TableId, CustomerId, OrderType,
-    //               Status, Items, SubTotal, TaxAmount, Total, ...
-    expect(params[8]).toBe(200);  // SubTotal — net
-    expect(params[9]).toBe(36);   // TaxAmount — 18% of 200
-    expect(params[10]).toBe(236); // Total
+    expect(inserted('SubTotal')).toBe(200);  // net
+    expect(inserted('TaxAmount')).toBe(36);   // 18% of 200
+    expect(inserted('Total')).toBe(236);
   });
 
   it('stamps each line with a priced snapshot', async () => {
@@ -92,7 +97,7 @@ describe('POS order — server-authoritative totals', () => {
       USER,
     );
 
-    const items = JSON.parse(insertedParams()[7]);
+    const items = JSON.parse(inserted('Items'));
     expect(items[0]).toMatchObject({
       costInfoId: CI_A, netAmount: 200, taxAmount: 36, grossAmount: 236, taxPct: 18,
     });
@@ -111,7 +116,7 @@ describe('POS order — server-authoritative totals', () => {
       mockConnection.execute.mock.calls.some(([sql]) =>
         /FROM pos_item_meta WHERE TenantId/i.test(sql)),
     ).toBe(true);
-    expect(insertedParams()[9]).toBe(18);
+    expect(inserted('TaxAmount')).toBe(18);
   });
 
   it('handles tax-inclusive menu prices', async () => {
@@ -121,10 +126,9 @@ describe('POS order — server-authoritative totals', () => {
       TENANT,
       USER,
     );
-    const params = insertedParams();
-    expect(params[8]).toBe(84.75); // net peeled out
-    expect(params[9]).toBe(15.25);
-    expect(params[10]).toBe(100);  // gross is the menu price
+    expect(inserted('SubTotal')).toBe(84.75); // net peeled out
+    expect(inserted('TaxAmount')).toBe(15.25);
+    expect(inserted('Total')).toBe(100);      // gross is the menu price
   });
 
   it('leaves an order with no priceable lines alone', async () => {
@@ -138,7 +142,7 @@ describe('POS order — server-authoritative totals', () => {
       TENANT,
       USER,
     );
-    expect(insertedParams()[8]).toBe(50); // client value preserved
+    expect(inserted('SubTotal')).toBe(50); // client value preserved
   });
 });
 
@@ -161,8 +165,16 @@ describe('POS order — variants surcharge the line', () => {
     });
   };
 
+  // Bind positions of POS_ORDER.INSERT, by name. Named rather than indexed
+  // because every column added to pos_order shifts the ones after it, and a
+  // test that asserts on params[7] fails for a reason that has nothing to do
+  // with what it is testing.
+  const ORDER_COL = {
+    Items: 8, SubTotal: 9, TaxAmount: 10, Total: 11,
+  };
   const insertedParams = () =>
     mockConnection.execute.mock.calls.find(([sql]) => /INSERT INTO pos_order/i.test(sql))[1];
+  const inserted = (name) => insertedParams()[ORDER_COL[name]];
 
   it('taxes base + variant as one price', async () => {
     routeWithVariants();
@@ -170,10 +182,9 @@ describe('POS order — variants surcharge the line', () => {
       { OrderNo: 'ORD-1', Items: [{ id: META_A, qty: 1, variantIds: [VAR_LG] }] },
       TENANT, USER,
     );
-    const params = insertedParams();
-    expect(params[8]).toBe(130);   // net = 100 + 30
-    expect(params[9]).toBe(23.4);  // 18% of 130, not 18 + separate variant tax
-    expect(params[10]).toBe(153.4);
+    expect(inserted('SubTotal')).toBe(130);   // net = 100 + 30
+    expect(inserted('TaxAmount')).toBe(23.4);  // 18% of 130, not 18 + separate variant tax
+    expect(inserted('Total')).toBe(153.4);
   });
 
   it('stores the chosen variants on the line for reprints and repeat orders', async () => {
@@ -182,7 +193,7 @@ describe('POS order — variants surcharge the line', () => {
       { OrderNo: 'ORD-1', Items: [{ id: META_A, qty: 1, variantIds: [VAR_LG] }] },
       TENANT, USER,
     );
-    const line = JSON.parse(insertedParams()[7])[0];
+    const line = JSON.parse(inserted('Items'))[0];
     expect(line.variants).toEqual([{ id: VAR_LG, name: 'Large', code: 'LG', price: 30 }]);
     expect(line.basePrice).toBe(100);
     expect(line.variantAmount).toBe(30);
@@ -199,7 +210,7 @@ describe('POS order — variants surcharge the line', () => {
       },
       TENANT, USER,
     );
-    expect(insertedParams()[8]).toBe(130);
+    expect(inserted('SubTotal')).toBe(130);
   });
 
   it('keeps the same item with different variants as separate lines', async () => {
@@ -214,11 +225,11 @@ describe('POS order — variants surcharge the line', () => {
       },
       TENANT, USER,
     );
-    const items = JSON.parse(insertedParams()[7]);
+    const items = JSON.parse(inserted('Items'));
     expect(items).toHaveLength(2);
     expect(items[0].price).toBe(130);
     expect(items[1].price).toBe(100); // same menu id, no variant, own price
-    expect(insertedParams()[8]).toBe(230);
+    expect(inserted('SubTotal')).toBe(230);
   });
 });
 

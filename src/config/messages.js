@@ -127,7 +127,15 @@ module.exports = {
     FORBIDDEN: 403,
     NOT_FOUND: 404,
     CONFLICT: 409,
+    // Too many requests. The portal webhook is the one route without a tenant
+    // JWT in front of it, so it carries its own rate limit and needs a code to
+    // refuse with.
+    TOO_MANY_REQUESTS: 429,
     INTERNAL_SERVER_ERROR: 500,
+    // A portal adapter that has not implemented a leg of the contract. Distinct
+    // from 500: nothing failed, the capability simply is not built for that
+    // portal yet.
+    NOT_IMPLEMENTED: 501,
   },
   // JWT Configuration
   JWT: {

@@ -204,11 +204,39 @@ class PosOrderService extends BaseCRUDService {
       }
       : { ...data };
 
-    return withTransaction(async (connection) => {
-      order.OrderNo = await issuePosNumber(connection, 'POS_ORDER', 'ORD', tenantId, userEmail);
-      Object.assign(order, await resolveVenueTx(connection, order.TableId, tenantId));
-      return this.createTx(connection, order, tenantId, userEmail);
-    });
+    return withTransaction(async (connection) => this.createRoundTx(
+      connection, order, tenantId, userEmail,
+    ));
+  }
+
+  /**
+   * Place a round on a CALLER-SUPPLIED transaction, already priced.
+   *
+   * The composition seam, mirroring createTx/updateTx on the base class and
+   * existing for the same reason: a round is sometimes one step of a larger
+   * atomic act. Accepting a portal order is exactly that — the order, the link
+   * back to the portal order and the kitchen ticket are one decision, and half
+   * of it committing would leave an aggregator order accepted with no food
+   * being cooked, or food being cooked for an order nothing points at.
+   *
+   * `create` above is unchanged in behaviour and now delegates here, so the
+   * till path and the portal path issue numbers, resolve the venue and insert
+   * through exactly the same code rather than two that can drift.
+   *
+   * Expects `order.Items` to be ALREADY priced (see priceItems) — pricing takes
+   * its own connection and must not be called with a transaction held open.
+   *
+   * @param {Object} connection - Open transaction connection.
+   * @param {Object} order - Priced order data.
+   * @param {string} tenantId
+   * @param {string} userEmail
+   * @returns {Promise<Object>} { id, ...order }
+   */
+  async createRoundTx(connection, order, tenantId, userEmail) {
+    const row = { ...order };
+    row.OrderNo = await issuePosNumber(connection, 'POS_ORDER', 'ORD', tenantId, userEmail);
+    Object.assign(row, await resolveVenueTx(connection, row.TableId, tenantId));
+    return this.createTx(connection, row, tenantId, userEmail);
   }
 
   async update(id, data, tenantId, userEmail) {
@@ -352,6 +380,9 @@ class PosOrderService extends BaseCRUDService {
       // defaulted here — passing NULL is rejected outright. Same 'open' default
       // the transfer path already applies to a newly split round.
       data.OrderType ?? 'dinein',
+      // HOW this was sold, as a reference rather than a string match. Null for
+      // a till order placed by a tenant that has not created channels.
+      data.ChannelId ?? null,
       data.Status ?? 'open',
       toJson(data.Items),
       data.SubTotal !== undefined ? data.SubTotal : 0,
@@ -375,6 +406,7 @@ class PosOrderService extends BaseCRUDService {
       data.TableId !== undefined ? data.TableId : existing.TableId,
       data.CustomerId !== undefined ? data.CustomerId : existing.CustomerId,
       data.OrderType !== undefined ? data.OrderType : existing.OrderType,
+      data.ChannelId !== undefined ? data.ChannelId : existing.ChannelId,
       data.Status !== undefined ? data.Status : existing.Status,
       data.Items !== undefined ? toJson(data.Items) : toJson(existing.Items),
       data.SubTotal !== undefined ? data.SubTotal : existing.SubTotal,
@@ -407,5 +439,9 @@ module.exports = {
   // round can be removed when the customer changes their order.
   remove: (id, tenantId, userEmail) => service.deleteRound(id, tenantId, userEmail),
   fireKot: (id, data, tenantId, userEmail) => service.fireKot(id, data, tenantId, userEmail),
+  // Composition seam for callers that own the transaction — see createRoundTx.
+  priceItems: (items, tenantId) => service.priceItems(items, tenantId),
+  createRoundTx: (conn, order, tenantId, userEmail) =>
+    service.createRoundTx(conn, order, tenantId, userEmail),
   transfer: (payload, tenantId, userEmail) => service.transfer(payload, tenantId, userEmail),
 };

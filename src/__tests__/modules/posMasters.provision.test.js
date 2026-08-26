@@ -29,14 +29,21 @@ describe('provisionPosMasters', () => {
     const conn = makeConn(false);
     await provisionPosMasters(conn, { tenantId: 't1', configId: 'cfg1' }, 'u@x');
 
-    expect(countBy(conn.inserted, 'paymentmode')).toBe(4);          // Cash/Card/UPI/Wallet
+    // Cash/Card/UPI/Wallet, plus one settlement tender per portal — per portal
+    // rather than one shared "Aggregator", because reconciling a payout means
+    // answering what ONE portal owes us.
+    expect(countBy(conn.inserted, 'paymentmode')).toBe(7);
     expect(countBy(conn.inserted, 'paymentreceivedtype')).toBe(5);  // + Payment (money out)
-    expect(countBy(conn.inserted, 'accounttypebase')).toBe(5);      // + Expenses
+    // + Aggregator Receivable and Portal Commission: aggregator money is owed to
+    // us weeks later, so it must not book to Cash.
+    expect(countBy(conn.inserted, 'accounttypebase')).toBe(7);
     expect(countBy(conn.inserted, 'transactiontypestatus')).toBe(5);
     expect(countBy(conn.inserted, 'transactiontype')).toBe(2);      // POS Sale + Expense
     expect(countBy(conn.inserted, 'expense_category')).toBe(7);
     expect(countBy(conn.inserted, 'asset_category')).toBe(5);
     expect(countBy(conn.inserted, 'pos_food_type')).toBe(3);        // Veg/Vegan/Non-Veg
+    expect(countBy(conn.inserted, 'pos_channel')).toBe(3);          // Dine In/Takeaway/Online
+    expect(countBy(conn.inserted, 'pos_portal')).toBe(3);           // Zomato/Swiggy/District
     // One numbering series per document type: sales, expenses, orders, KOTs,
     // bills, counter tokens.
     expect(countBy(conn.inserted, 'transactiontypeconfig')).toBe(6);
@@ -106,12 +113,17 @@ describe('provisionPosMasters', () => {
       .map((p) => ({ type: p[1], account: p[2] }));
 
     // Every mode must carry an account, or its takings are invisible to cash flow.
-    expect(modes).toHaveLength(4);
+    expect(modes).toHaveLength(7);
     modes.forEach((m) => expect(m.account).toBeTruthy());
 
     const byType = Object.fromEntries(modes.map((m) => [m.type, m.account]));
     expect(byType.Card).toBe(byType.UPI);      // both land in Bank
     expect(byType.Cash).not.toBe(byType.Card); // cash does not
+
+    // Aggregator money is owed to us for weeks — booking it as Cash would put
+    // money in a till that never saw it and break the cash session.
+    expect(byType['Zomato Settlement']).not.toBe(byType.Cash);
+    expect(byType['Zomato Settlement']).toBe(byType['Swiggy Settlement']);
   });
 
   it('gives every account a Kind so cash flow can classify it', async () => {
@@ -119,7 +131,46 @@ describe('provisionPosMasters', () => {
     await provisionPosMasters(conn, { tenantId: 't1' }, 'u@x');
 
     const kinds = paramsOf(conn, 'INSERT INTO accounttypebase').map((p) => p[2]);
-    expect(kinds).toEqual(['INCOME', 'ASSET', 'ASSET', 'ASSET', 'EXPENSE']);
+    expect(kinds).toEqual([
+      'INCOME', 'ASSET', 'ASSET', 'ASSET', 'EXPENSE',
+      'ASSET',    // Aggregator Receivable
+      'EXPENSE',  // Portal Commission
+    ]);
+  });
+
+  // A portal is a seller ON a channel, not a channel. If the link were not made
+  // here, every seeded portal would arrive orphaned and its listings could not
+  // be gated on "is this sold online at all".
+  it('parents every seeded portal on the ONLINE channel', async () => {
+    const conn = makeConn(false);
+    await provisionPosMasters(conn, { tenantId: 't1' }, 'u@x');
+
+    const portals = paramsOf(conn, 'INSERT INTO pos_portal')
+      .map((p) => ({ name: p[1], code: p[2], channelId: p[3], color: p[4], short: p[5] }));
+
+    expect(portals.map((p) => p.code)).toEqual(['ZOMATO', 'SWIGGY', 'DISTRICT']);
+    portals.forEach((p) => {
+      expect(p.channelId).toBeTruthy();
+      // Colour and monogram are DATA so the queue can tell portals apart
+      // without a stylesheet edit or a switch on a platform name.
+      expect(p.color).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      expect(p.short).toHaveLength(2);
+    });
+    // All three sell on the same channel.
+    expect(new Set(portals.map((p) => p.channelId)).size).toBe(1);
+  });
+
+  // Everything downstream of accept works identically whether an order arrived
+  // over a webhook or was keyed in, so a portal ships usable before anyone has
+  // credentials for it.
+  it('seeds portals on the manual adapter, so orders can be keyed in from day one', async () => {
+    const conn = makeConn(false);
+    await provisionPosMasters(conn, { tenantId: 't1' }, 'u@x');
+
+    const sql = conn.execute.mock.calls
+      .map(([q]) => q)
+      .find((q) => q.includes('INSERT INTO pos_portal'));
+    expect(sql).toContain("'manual'");
   });
 
   it('is idempotent — inserts nothing when the masters already exist', async () => {

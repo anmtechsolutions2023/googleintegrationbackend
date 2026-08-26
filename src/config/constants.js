@@ -1057,8 +1057,8 @@ module.exports = {
       SELECT_ALL: 'SELECT * FROM pos_order WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM pos_order WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM pos_order WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_order (Id, TenantId, OrderNo, TableId, CustomerId, OrderType, Status, Items, SubTotal, TaxAmount, Total, BranchDetailId, TableName, FloorId, FloorName, TableCapacity, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_order SET OrderNo = ?, TableId = ?, CustomerId = ?, OrderType = ?, Status = ?, Items = ?, SubTotal = ?, TaxAmount = ?, Total = ?, BranchDetailId = ?, TableName = ?, FloorId = ?, FloorName = ?, TableCapacity = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_order (Id, TenantId, OrderNo, TableId, CustomerId, OrderType, ChannelId, Status, Items, SubTotal, TaxAmount, Total, BranchDetailId, TableName, FloorId, FloorName, TableCapacity, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_order SET OrderNo = ?, TableId = ?, CustomerId = ?, OrderType = ?, ChannelId = ?, Status = ?, Items = ?, SubTotal = ?, TaxAmount = ?, Total = ?, BranchDetailId = ?, TableName = ?, FloorId = ?, FloorName = ?, TableCapacity = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_order WHERE Id = ? AND TenantId = ?',
       // Domain action helper: update order status (e.g. after firing a KOT)
       SET_STATUS: 'UPDATE pos_order SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
@@ -1091,12 +1091,221 @@ module.exports = {
         'UPDATE pos_bill SET SubTotal = ?, TaxAmount = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
     },
 
+    // ── Portals: the aggregators that sell on our behalf ──────────────────
+    //
+    // A portal is a SELLER ON A CHANNEL, not a channel. See the table comment
+    // in 01-schema-definition.sql §4.12c for why the two are separate.
+    POS_PORTAL: {
+      SELECT_ALL: 'SELECT * FROM pos_portal WHERE TenantId = ? ORDER BY SortOrder ASC, Name ASC',
+      // The queue needs the channel's name to say what a portal sells on, and
+      // counts of its open orders and live listings — one query, not N.
+      SELECT_ALL_WITH_DETAILS:
+        'SELECT p.*, c.Name AS ChannelName, c.Code AS ChannelCode, ' +
+        '(SELECT COUNT(*) FROM pos_portal_listing l WHERE l.PortalId = p.Id AND l.TenantId = p.TenantId AND l.Active = 1) AS ListingCount, ' +
+        "(SELECT COUNT(*) FROM pos_portal_listing l WHERE l.PortalId = p.Id AND l.TenantId = p.TenantId AND l.Active = 1 AND l.SyncStatus <> 'synced') AS UnsyncedCount, " +
+        "(SELECT COUNT(*) FROM pos_online_order o WHERE o.PortalId = p.Id AND o.TenantId = p.TenantId AND o.Active = 1 AND o.Status IN ('new','accepted','processing','out for delivery')) AS OpenOrderCount " +
+        'FROM pos_portal p LEFT JOIN pos_channel c ON c.Id = p.ChannelId AND c.TenantId = p.TenantId ' +
+        'WHERE p.TenantId = ? ORDER BY p.SortOrder ASC, p.Name ASC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_portal WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_portal WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_CODE: 'SELECT * FROM pos_portal WHERE Code = ? AND TenantId = ? LIMIT 1',
+      // The webhook has no tenant: it resolves one FROM the portal it matched.
+      // Deliberately code-only, and the caller must still verify the signature
+      // before trusting the row.
+      SELECT_ALL_BY_CODE: 'SELECT * FROM pos_portal WHERE Code = ? AND Active = 1',
+      INSERT:
+        'INSERT INTO pos_portal (Id, TenantId, Name, Code, ChannelId, Adapter, ColorHex, ShortCode, ' +
+        'CommissionPct, CommissionAccountTypeBaseId, SettlementPaymentModeId, SortOrder, Active, ' +
+        'CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE:
+        'UPDATE pos_portal SET Name = ?, Code = ?, ChannelId = ?, Adapter = ?, ColorHex = ?, ShortCode = ?, ' +
+        'CommissionPct = ?, CommissionAccountTypeBaseId = ?, SettlementPaymentModeId = ?, SortOrder = ?, ' +
+        'Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_portal WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_PORTAL_BRANCH: {
+      SELECT_ALL:
+        'SELECT pb.*, b.BranchName, p.Name AS PortalName, p.Code AS PortalCode, p.ColorHex, p.ShortCode ' +
+        'FROM pos_portal_branch pb ' +
+        'LEFT JOIN branchdetail b ON b.Id = pb.BranchDetailId AND b.TenantId = pb.TenantId ' +
+        'LEFT JOIN pos_portal p ON p.Id = pb.PortalId AND p.TenantId = pb.TenantId ' +
+        'WHERE pb.TenantId = ? ORDER BY p.SortOrder ASC, b.BranchName ASC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_portal_branch WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_portal_branch WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_PORTAL:
+        'SELECT pb.*, b.BranchName FROM pos_portal_branch pb ' +
+        'LEFT JOIN branchdetail b ON b.Id = pb.BranchDetailId AND b.TenantId = pb.TenantId ' +
+        'WHERE pb.PortalId = ? AND pb.TenantId = ? ORDER BY b.BranchName ASC',
+      // How an inbound order finds its branch.
+      SELECT_BY_EXTERNAL_STORE:
+        'SELECT * FROM pos_portal_branch WHERE PortalId = ? AND ExternalStoreId = ? AND TenantId = ? LIMIT 1',
+      INSERT:
+        'INSERT INTO pos_portal_branch (Id, TenantId, PortalId, BranchDetailId, ExternalStoreId, ' +
+        'IsOnline, PausedUntil, PauseReason, Active, CreatedOn, CreatedBy, UpdatedBy) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE:
+        'UPDATE pos_portal_branch SET PortalId = ?, BranchDetailId = ?, ExternalStoreId = ?, ' +
+        'IsOnline = ?, PausedUntil = ?, PauseReason = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? ' +
+        'WHERE Id = ? AND TenantId = ?',
+      // The kill switch, as its own statement: pausing must not require sending
+      // every other column back and risk overwriting one.
+      SET_ONLINE:
+        'UPDATE pos_portal_branch SET IsOnline = ?, PausedUntil = ?, PauseReason = ?, ' +
+        'UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_portal_branch WHERE Id = ? AND TenantId = ?',
+    },
+
+    POS_PORTAL_LISTING: {
+      // Listings always read with the item they list — a matrix of uuids is
+      // unusable, and the effective price needs the inherited cost anyway.
+      SELECT_ALL:
+        'SELECT l.*, i.Name AS ItemName, i.Code AS ItemCode, im.ItemDetailId, im.BranchDetailId, ' +
+        'im.CostInfoId AS BaseCostInfoId, bc.Amount AS BaseAmount, oc.Amount AS OverrideAmount, ' +
+        'p.Name AS PortalName, p.Code AS PortalCode ' +
+        'FROM pos_portal_listing l ' +
+        'JOIN pos_item_meta im ON im.Id = l.ItemMetaId AND im.TenantId = l.TenantId ' +
+        'LEFT JOIN itemdetail i ON i.Id = im.ItemDetailId AND i.TenantId = im.TenantId ' +
+        'LEFT JOIN costinfo bc ON bc.Id = im.CostInfoId AND bc.TenantId = im.TenantId ' +
+        'LEFT JOIN costinfo oc ON oc.Id = l.PriceOverrideCostInfoId AND oc.TenantId = l.TenantId ' +
+        'LEFT JOIN pos_portal p ON p.Id = l.PortalId AND p.TenantId = l.TenantId ' +
+        'WHERE l.TenantId = ? ORDER BY l.SortOrder ASC, i.Name ASC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_portal_listing WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_portal_listing WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_PORTAL_ITEM:
+        'SELECT * FROM pos_portal_listing WHERE PortalId = ? AND ItemMetaId = ? AND TenantId = ? LIMIT 1',
+      // How an inbound order line finds our menu item.
+      SELECT_BY_EXTERNAL_ITEM:
+        'SELECT l.*, im.ItemDetailId, im.CostInfoId AS BaseCostInfoId ' +
+        'FROM pos_portal_listing l ' +
+        'JOIN pos_item_meta im ON im.Id = l.ItemMetaId AND im.TenantId = l.TenantId ' +
+        'WHERE l.PortalId = ? AND l.ExternalItemId = ? AND l.TenantId = ? LIMIT 1',
+      INSERT:
+        'INSERT INTO pos_portal_listing (Id, TenantId, PortalId, ItemMetaId, ExternalItemId, ListedName, ' +
+        'ListedDescription, PriceOverrideCostInfoId, Available, SortOrder, LastSyncedOn, SyncStatus, ' +
+        'SyncError, Active, CreatedOn, CreatedBy, UpdatedBy) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE:
+        'UPDATE pos_portal_listing SET PortalId = ?, ItemMetaId = ?, ExternalItemId = ?, ListedName = ?, ' +
+        'ListedDescription = ?, PriceOverrideCostInfoId = ?, Available = ?, SortOrder = ?, ' +
+        'LastSyncedOn = ?, SyncStatus = ?, SyncError = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? ' +
+        'WHERE Id = ? AND TenantId = ?',
+      // Bulk availability: what counter staff actually do, several times a day.
+      // Editing 200 rows one PUT at a time is not a workflow.
+      SET_AVAILABILITY:
+        "UPDATE pos_portal_listing SET Available = ?, SyncStatus = 'pending', UpdatedOn = NOW(), " +
+        'UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      MARK_SYNCED:
+        'UPDATE pos_portal_listing SET LastSyncedOn = NOW(), SyncStatus = ?, SyncError = ?, ' +
+        'UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_portal_listing WHERE Id = ? AND TenantId = ?',
+      // The channel gate: a listing may only exist for an item that is sold on
+      // the portal's channel at all. Coarse switch first, fine switch second.
+      COUNT_CHANNEL_LINK:
+        'SELECT COUNT(*) AS total FROM pos_item_meta_channel ' +
+        'WHERE ItemMetaId = ? AND ChannelId = ? AND TenantId = ? AND Active = 1',
+    },
+
+    POS_PORTAL_CREDENTIAL: {
+      SELECT_BY_PORTAL: 'SELECT * FROM pos_portal_credential WHERE PortalId = ? AND TenantId = ? LIMIT 1',
+      // Webhook path: the portal row is already matched by code; this fetches the
+      // secret to verify against. No tenant, because resolving one is the point.
+      SELECT_FOR_VERIFY:
+        'SELECT c.*, p.Id AS PortalId, p.Code AS PortalCode, p.Adapter, p.TenantId ' +
+        'FROM pos_portal_credential c JOIN pos_portal p ON p.Id = c.PortalId AND p.TenantId = c.TenantId ' +
+        'WHERE p.Code = ? AND p.Active = 1 AND c.Active = 1',
+      INSERT:
+        'INSERT INTO pos_portal_credential (Id, TenantId, PortalId, WebhookSecret, ApiKey, ApiSecret, ' +
+        'ApiBaseUrl, TokenExpiresOn, Active, CreatedOn, CreatedBy, UpdatedBy) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE:
+        'UPDATE pos_portal_credential SET WebhookSecret = ?, ApiKey = ?, ApiSecret = ?, ApiBaseUrl = ?, ' +
+        'TokenExpiresOn = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_portal_credential WHERE PortalId = ? AND TenantId = ?',
+    },
+
+    POS_PORTAL_EVENT: {
+      SELECT_ALL:
+        'SELECT e.*, p.Name AS PortalName FROM pos_portal_event e ' +
+        'LEFT JOIN pos_portal p ON p.Id = e.PortalId AND p.TenantId = e.TenantId ' +
+        'WHERE e.TenantId = ? ORDER BY e.ReceivedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_portal_event WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_portal_event WHERE Id = ? AND TenantId = ?',
+      // The idempotency lookup. Runs BEFORE any work: a byte-identical replay
+      // must not create a second order, a second KOT and a second posting.
+      SELECT_DUPLICATE:
+        'SELECT Id, OnlineOrderId, ProcessingStatus FROM pos_portal_event ' +
+        'WHERE PortalId = ? AND ExternalRef <=> ? AND EventType = ? AND PayloadHash = ? AND TenantId = ? LIMIT 1',
+      INSERT:
+        'INSERT INTO pos_portal_event (Id, TenantId, PortalId, ExternalRef, EventType, PayloadHash, ' +
+        'RawPayload, ProcessingStatus, ProcessingError, OnlineOrderId, ReceivedOn, ProcessedOn, Active, ' +
+        'CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, NOW(), ?, ?)',
+      MARK_PROCESSED:
+        'UPDATE pos_portal_event SET ProcessingStatus = ?, ProcessingError = ?, OnlineOrderId = ?, ' +
+        'ProcessedOn = NOW(), UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_portal_event WHERE Id = ? AND TenantId = ?',
+    },
+
     POS_ONLINE_ORDER: {
-      SELECT_ALL: 'SELECT * FROM pos_online_order WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      // Reads carry the portal's identity so the queue can draw the colour rail
+      // and monogram from DATA rather than a switch on a platform string, and
+      // the linked order/KOT so a card can show what the kitchen is doing.
+      SELECT_ALL:
+        'SELECT o.*, p.Name AS PortalName, p.Code AS PortalCode, p.ColorHex, p.ShortCode, ' +
+        'p.CommissionPct, b.BranchName, ord.OrderNo, ord.Status AS OrderStatus ' +
+        'FROM pos_online_order o ' +
+        'LEFT JOIN pos_portal p ON p.Id = o.PortalId AND p.TenantId = o.TenantId ' +
+        'LEFT JOIN branchdetail b ON b.Id = o.BranchDetailId AND b.TenantId = o.TenantId ' +
+        'LEFT JOIN pos_order ord ON ord.Id = o.OrderId AND ord.TenantId = o.TenantId ' +
+        'WHERE o.TenantId = ? ORDER BY o.CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM pos_online_order WHERE TenantId = ?',
-      SELECT_BY_ID: 'SELECT * FROM pos_online_order WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_online_order (Id, TenantId, Platform, ExternalRef, Status, Payload, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_online_order SET Platform = ?, ExternalRef = ?, Status = ?, Payload = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID:
+        'SELECT o.*, p.Name AS PortalName, p.Code AS PortalCode, p.ColorHex, p.ShortCode, ' +
+        'p.CommissionPct, p.SettlementPaymentModeId, p.CommissionAccountTypeBaseId, ' +
+        'b.BranchName, ord.OrderNo, ord.Status AS OrderStatus ' +
+        'FROM pos_online_order o ' +
+        'LEFT JOIN pos_portal p ON p.Id = o.PortalId AND p.TenantId = o.TenantId ' +
+        'LEFT JOIN branchdetail b ON b.Id = o.BranchDetailId AND b.TenantId = o.TenantId ' +
+        'LEFT JOIN pos_order ord ON ord.Id = o.OrderId AND ord.TenantId = o.TenantId ' +
+        'WHERE o.Id = ? AND o.TenantId = ?',
+      // The raw row, without joins — for writes that read-modify-write and must
+      // not have joined columns echoed back into an UPDATE.
+      SELECT_RAW_BY_ID: 'SELECT * FROM pos_online_order WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_EXTERNAL_REF:
+        'SELECT * FROM pos_online_order WHERE PortalId = ? AND ExternalRef = ? AND TenantId = ? LIMIT 1',
+      INSERT:
+        'INSERT INTO pos_online_order (Id, TenantId, PortalId, Platform, OrderId, PortalBranchId, ' +
+        'ExternalRef, Status, Payload, OrderLines, HasUnmappedLines, CustomerName, CustomerPhone, ' +
+        'ExternalCustomerRef, ItemsTotal, PortalDiscount, PackingCharge, DeliveryCharge, TaxAmount, ' +
+        'GrossAmount, CommissionAmount, NetPayout, IsPrepaid, PlacedOn, PromisedOn, AcceptedOn, ReadyOn, ' +
+        'PickedUpOn, DeliveredOn, RiderName, RiderPhone, CancelReason, CancelledBy, BranchDetailId, ' +
+        'Active, CreatedOn, CreatedBy, UpdatedBy) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE:
+        'UPDATE pos_online_order SET PortalId = ?, Platform = ?, OrderId = ?, PortalBranchId = ?, ' +
+        'ExternalRef = ?, Status = ?, Payload = ?, OrderLines = ?, HasUnmappedLines = ?, CustomerName = ?, ' +
+        'CustomerPhone = ?, ExternalCustomerRef = ?, ItemsTotal = ?, PortalDiscount = ?, PackingCharge = ?, ' +
+        'DeliveryCharge = ?, TaxAmount = ?, GrossAmount = ?, CommissionAmount = ?, NetPayout = ?, ' +
+        'IsPrepaid = ?, PlacedOn = ?, PromisedOn = ?, AcceptedOn = ?, ReadyOn = ?, PickedUpOn = ?, ' +
+        'DeliveredOn = ?, RiderName = ?, RiderPhone = ?, CancelReason = ?, CancelledBy = ?, ' +
+        'BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      // Lifecycle moves, as their own statements. A status change must not have
+      // to send 30 other columns back and risk overwriting one of them.
+      SET_ACCEPTED:
+        "UPDATE pos_online_order SET Status = 'accepted', OrderId = ?, AcceptedOn = NOW(), " +
+        'UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      SET_STATUS:
+        'UPDATE pos_online_order SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? ' +
+        'WHERE Id = ? AND TenantId = ?',
+      SET_READY:
+        "UPDATE pos_online_order SET Status = 'processing', ReadyOn = NOW(), UpdatedOn = NOW(), " +
+        'UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      SET_DELIVERED:
+        "UPDATE pos_online_order SET Status = 'delivered', DeliveredOn = NOW(), UpdatedOn = NOW(), " +
+        'UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      SET_CANCELLED:
+        "UPDATE pos_online_order SET Status = 'cancelled', CancelReason = ?, CancelledBy = ?, " +
+        'UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_online_order WHERE Id = ? AND TenantId = ?',
     },
 
@@ -2379,6 +2588,43 @@ module.exports = {
   POS_ONLINE_ORDER_STATUSES: [
     'new', 'accepted', 'processing', 'out for delivery', 'delivered', 'cancelled',
   ],
+
+  // ── Portals ──────────────────────────────────────────────────────────────
+  //
+  // Which move is legal from which state. The queue used to jump 'new' straight
+  // to 'processing' on Accept while the tracking board drew 'accepted' as stage
+  // one, so the status a manager read never matched the button a cashier had
+  // pressed. One table, consulted by both.
+  //
+  // 'cancelled' is an exit from any live state, never a stage.
+  POS_ONLINE_ORDER_TRANSITIONS: {
+    new: ['accepted', 'cancelled'],
+    accepted: ['processing', 'cancelled'],
+    processing: ['out for delivery', 'delivered', 'cancelled'],
+    'out for delivery': ['delivered', 'cancelled'],
+    delivered: [],
+    cancelled: [],
+  },
+  // Portals require a coded reason on a rejection, so it is not free text.
+  POS_ONLINE_ORDER_REJECT_REASONS: [
+    'out_of_stock', 'kitchen_full', 'store_closed', 'item_unavailable',
+    'unable_to_deliver', 'other',
+  ],
+  // Whether a listing matches what the portal currently shows.
+  POS_PORTAL_SYNC_STATUSES: ['pending', 'synced', 'failed'],
+  // Adapter slugs. 'manual' always ships: it is the fallback when an
+  // integration is down, the harness the others are tested against, and what a
+  // tenant with no API access uses forever.
+  POS_PORTAL_ADAPTERS: ['manual', 'zomato.v1', 'swiggy.v1', 'district.v1'],
+  POS_PORTAL_DEFAULT_ADAPTER: 'manual',
+  // What the ingest pipeline records about one inbound event.
+  POS_PORTAL_EVENT_STATUSES: ['received', 'processed', 'duplicate', 'failed', 'needs_mapping'],
+  POS_PORTAL_EVENT_TYPES: [
+    'order.created', 'order.updated', 'order.cancelled', 'rider.assigned',
+  ],
+  // The channel a portal sells on, by code. Portals hang off this channel and
+  // the listing gate is checked against it.
+  POS_ONLINE_CHANNEL_CODE: 'ONLINE',
   AUDIT_CATEGORIES: {
     AUTH:         'AUTH',
     ONBOARDING:   'ONBOARDING',

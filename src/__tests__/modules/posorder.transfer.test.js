@@ -62,19 +62,23 @@ const makeConn = (orders, tables, kots = []) => {
         return [open.map((o) => ({ Id: o.Id }))];
       }
       if (sql.startsWith('UPDATE pos_order SET OrderNo')) {
-        const id = params[16];
+        // ChannelId binds between OrderType and Status, so everything after it
+        // sits one place further along than it used to.
+        const id = params[17];
         oStore.set(id, {
-          ...oStore.get(id), OrderNo: params[0], TableId: params[1], Status: params[4],
-          Items: parseItems(params[5]), SubTotal: params[6], TaxAmount: params[7],
-          Total: params[8], BranchDetailId: params[9], ...venueOf(params, 10),
+          ...oStore.get(id), OrderNo: params[0], TableId: params[1],
+          ChannelId: params[4], Status: params[5],
+          Items: parseItems(params[6]), SubTotal: params[7], TaxAmount: params[8],
+          Total: params[9], BranchDetailId: params[10], ...venueOf(params, 11),
         });
         return [{ affectedRows: 1 }];
       }
       if (sql.startsWith('INSERT INTO pos_order')) {
         oStore.set(params[0], {
-          Id: params[0], OrderNo: params[2], TableId: params[3], Status: params[6],
-          Items: parseItems(params[7]), SubTotal: params[8], TaxAmount: params[9],
-          Total: params[10], BranchDetailId: params[11], ...venueOf(params, 12),
+          Id: params[0], OrderNo: params[2], TableId: params[3],
+          ChannelId: params[6], Status: params[7],
+          Items: parseItems(params[8]), SubTotal: params[9], TaxAmount: params[10],
+          Total: params[11], BranchDetailId: params[12], ...venueOf(params, 13),
         });
         return [{ affectedRows: 1 }];
       }
