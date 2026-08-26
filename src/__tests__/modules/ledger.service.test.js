@@ -53,6 +53,9 @@ const route = (over = {}) => {
       const r = over.handler(q, params);
       if (r !== undefined) return Promise.resolve(r);
     }
+    // Two different reads hit pos_bill: the idempotency probe (by bill id) and
+    // the refund's customer lookup (by log id). They answer different shapes.
+    if (/AS BillId/i.test(q)) return Promise.resolve([over.billCustomer || []]);
     if (/FROM pos_bill/i.test(q)) return Promise.resolve([[{ TransactionDetailLogId: over.alreadyPosted || null }]]);
     if (/FROM transactiontype WHERE Name/i.test(q)) return Promise.resolve([MASTERS[params[0]] || []]);
     if (/FROM transactiontypestatus WHERE Name/i.test(q)) return Promise.resolve([MASTERS[params[0]] || []]);
@@ -569,5 +572,70 @@ describe('expenses — money out, in the same ledger', () => {
     route();
     await ledger.postExpense(mockConn, EXPENSE(), TENANT, USER);
     expect(firstCall(/FROM transactiontypeconfig WHERE Id/i)[1][0]).toBe('cfg-exp');
+  });
+});
+
+
+// ── The claw-back ──────────────────────────────────────────────────────────
+// A refund that returns the money but leaves the visit, the spend and the
+// points standing is the failure this whole path exists to prevent: settle,
+// refund, and the customer ends up a visit richer with points they did not
+// keep. All three must move back inside the SAME transaction as the reversal.
+describe('refund — the customer record must move back too', () => {
+  const SETTLED = { log: [{ Id: 'log-1', TransactionTypeConfigId: 'cfg-1', SettledAt: new Date() }] };
+  const WITH_CUSTOMER = {
+    ...SETTLED,
+    billCustomer: [{ BillId: 'bill-1', Total: 1000, BranchDetailId: 'branch-1', CustomerId: 'cust-1' }],
+  };
+
+  it('reverses the visit and the spend', async () => {
+    route(WITH_CUSTOMER);
+    await ledger.refundSale(mockConn, 'log-1', 'Wrong order', TENANT, USER);
+    const call = firstCall(/UPDATE pos_customer[\s\S]*Visits/i);
+    expect(call).toBeDefined();
+  });
+
+  it('writes a REVERSAL against the original EARN', async () => {
+    route({
+      ...WITH_CUSTOMER,
+      handler: (q) => (/FROM pos_loyalty_ledger/i.test(q)
+        ? [[{ Id: 'earn-1', Points: 10 }]] : undefined),
+    });
+    await ledger.refundSale(mockConn, 'log-1', 'Wrong order', TENANT, USER);
+    const ins = firstCall(/INSERT INTO pos_loyalty_ledger/i);
+    expect(ins).toBeDefined();
+    // Signed, and negative: the ledger stores the movement, not its magnitude.
+    expect(Number(ins[1][4])).toBeLessThan(0);
+  });
+
+  it('reverses the points actually EARNED, not points recomputed from the total', async () => {
+    // The rate could have changed since the sale, or the earn could have been
+    // capped. Recomputing would claw back a number that was never granted.
+    route({
+      ...WITH_CUSTOMER,
+      handler: (q) => (/FROM pos_loyalty_ledger/i.test(q)
+        ? [[{ Id: 'earn-1', Points: 3 }]] : undefined),
+    });
+    await ledger.refundSale(mockConn, 'log-1', null, TENANT, USER);
+    expect(Number(firstCall(/INSERT INTO pos_loyalty_ledger/i)[1][4])).toBe(-3);
+  });
+
+  it('moves no points when the sale never earned any', async () => {
+    route(WITH_CUSTOMER); // no EARN row on file
+    await ledger.refundSale(mockConn, 'log-1', null, TENANT, USER);
+    expect(calls(/INSERT INTO pos_loyalty_ledger/i)).toHaveLength(0);
+  });
+
+  it('touches no customer record for a walk-in sale', async () => {
+    route({ ...SETTLED, billCustomer: [{ BillId: 'bill-1', Total: 1000, CustomerId: null }] });
+    await ledger.refundSale(mockConn, 'log-1', null, TENANT, USER);
+    expect(calls(/UPDATE pos_customer/i)).toHaveLength(0);
+    expect(calls(/INSERT INTO pos_loyalty_ledger/i)).toHaveLength(0);
+  });
+
+  it('still reverses the money when the bill has no customer', async () => {
+    route({ ...SETTLED, billCustomer: [] });
+    const r = await ledger.refundSale(mockConn, 'log-1', null, TENANT, USER);
+    expect(r.status).toBe('REFUNDED');
   });
 });

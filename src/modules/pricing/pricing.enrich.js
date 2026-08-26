@@ -10,8 +10,19 @@
 // their own snapshot taken at write time, and re-pricing them against today's
 // rates would silently rewrite history. See TAX_ENGINE_PLAN.md §3.
 
+const Joi = require('joi');
 const pricingService = require('./pricing.service');
 const { computeTax } = require('../../utils/taxCalculator');
+
+/**
+ * Joi fragment for write schemas on modules that enrich their reads.
+ *
+ * `TaxBreakdown` is computed, never stored. But an edit form is seeded from a
+ * GET response, so it comes straight back on the next PUT — and a write schema
+ * that does not know the field rejects the whole update. Accept it and drop it:
+ * the value is re-derived on the way out regardless of what the client sends.
+ */
+const taxBreakdownEcho = () => Joi.any().optional().strip();
 
 /**
  * Adds `TaxBreakdown` to each row, resolved from the row's costinfo reference.
@@ -99,4 +110,4 @@ const attachBreakdownToOne = async (row, tenantId, options = {}) => {
   return enriched;
 };
 
-module.exports = { attachBreakdown, attachBreakdownToOne };
+module.exports = { attachBreakdown, attachBreakdownToOne, taxBreakdownEcho };

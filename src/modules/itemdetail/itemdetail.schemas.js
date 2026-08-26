@@ -1,5 +1,6 @@
 // src/modules/itemdetail/itemdetail.schemas.js
 const Joi = require('joi');
+const { taxBreakdownEcho } = require('../pricing/pricing.enrich');
 
 const createSchema = Joi.object({
   Name: Joi.string().required().max(255).trim(),
@@ -12,6 +13,7 @@ const createSchema = Joi.object({
   Barcode: Joi.string().optional().max(100).trim().allow(null, ''),
   HSNCode: Joi.string().optional().max(50).trim().allow(null, ''),
   Active: Joi.boolean().optional().default(true),
+  TaxBreakdown: taxBreakdownEcho(),
 });
 
 const updateSchema = Joi.object({
@@ -25,6 +27,7 @@ const updateSchema = Joi.object({
   Barcode: Joi.string().optional().max(100).trim().allow(null, ''),
   HSNCode: Joi.string().optional().max(50).trim().allow(null, ''),
   Active: Joi.boolean().optional(),
+  TaxBreakdown: taxBreakdownEcho(),
 }).min(1);
 
 const paginationSchema = Joi.object({

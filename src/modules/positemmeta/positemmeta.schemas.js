@@ -2,6 +2,7 @@
 // Joi validation schemas for POS Item Meta operations.
 
 const Joi = require('joi');
+const { taxBreakdownEcho } = require('../pricing/pricing.enrich');
 
 // Channels/Variants now come as ChannelIds/VariantIds arrays (synced to the
 // join tables), price via CostInfoId, and food type via FoodTypeId (references
@@ -28,6 +29,8 @@ const createSchema = Joi.object({
   CostInfoAmount: Joi.any().optional().strip(),
   FoodTypeName: Joi.any().optional().strip(),
   FoodTypeIsVeg: Joi.any().optional().strip(),
+  // Computed on every read by pricing.enrich, so it rides back on every edit.
+  TaxBreakdown: taxBreakdownEcho(),
 });
 
 const updateSchema = Joi.object({
@@ -47,6 +50,8 @@ const updateSchema = Joi.object({
   CostInfoAmount: Joi.any().optional().strip(),
   FoodTypeName: Joi.any().optional().strip(),
   FoodTypeIsVeg: Joi.any().optional().strip(),
+  // Computed on every read by pricing.enrich, so it rides back on every edit.
+  TaxBreakdown: taxBreakdownEcho(),
 }).min(1);
 
 const paginationSchema = Joi.object({

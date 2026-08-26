@@ -2067,6 +2067,93 @@ const swaggerSpec = {
           netPosition: { type: 'number', description: 'COLLECTED minus spent — cash in hand, not invoiced.' },
         },
       },
+      LoyaltyStatement: {
+        type: 'object',
+        properties: {
+          balance: { type: 'number', description: 'The authoritative sum of every entry below.' },
+          entries: { type: 'array', items: { $ref: '#/components/schemas/LoyaltyEntry' } },
+        },
+      },
+      LoyaltyEntry: {
+        type: 'object',
+        properties: {
+          Id: { type: 'string' },
+          EntryType: { type: 'string', enum: ['EARN', 'REVERSAL', 'REDEEM', 'ADJUSTMENT', 'EXPIRY'] },
+          Points: { type: 'integer', description: 'Signed — the movement, not its magnitude.' },
+          SourceType: { type: 'string', nullable: true, enum: ['SALE', 'MANUAL', null] },
+          SourceId: { type: 'string', nullable: true, description: 'The bill the entry came from.' },
+          ReversesId: { type: 'string', nullable: true, description: 'The EARN a REVERSAL undoes.' },
+          Reason: { type: 'string', nullable: true },
+          BranchDetailId: { type: 'string', nullable: true },
+          CreatedOn: { type: 'string', format: 'date-time' },
+          CreatedBy: { type: 'string' },
+        },
+      },
+      LoyaltyAdjust: {
+        type: 'object',
+        required: ['Points', 'Reason'],
+        properties: {
+          Points: { type: 'integer', description: 'Signed; zero is refused.', example: 50 },
+          Reason: { type: 'string', maxLength: 255, example: 'Goodwill — delayed order' },
+        },
+      },
+      LoyaltyBalance: {
+        type: 'object',
+        properties: {
+          points: { type: 'integer', description: 'The movement just applied.' },
+          balance: { type: 'integer', description: 'What they hold after it.' },
+        },
+      },
+      ReportCustomers: {
+        type: 'object',
+        properties: {
+          range: reportRange,
+          summary: { type: 'object', properties: {
+            Documents: { type: 'number', description: 'Every settled sale in the window, walk-ins included.' },
+            KnownCustomers: { type: 'number' },
+            RepeatCustomers: { type: 'number', description: 'Of those, how many bought more than once.' },
+            KnownOrders: { type: 'number' },
+            KnownSpend: { type: 'number' },
+            IdentifiedRate: { type: 'number', description: 'Percent of settled sales attached to a named customer.' },
+            RepeatRate: { type: 'number', description: 'Percent of KNOWN customers who came back.' },
+          } },
+          customers: { type: 'array', items: { type: 'object', properties: {
+            Id: { type: 'string' }, Name: { type: 'string' }, Phone: { type: 'string', nullable: true },
+            Orders: { type: 'number' }, Spend: { type: 'number' }, AverageOrder: { type: 'number' },
+            FirstVisit: { type: 'string', format: 'date' }, LastOrder: { type: 'string', format: 'date' },
+            DaysSinceLast: { type: 'number' },
+            AvgDaysBetween: { type: 'number', nullable: true, description: 'Null for a one-time buyer.' },
+            IsRepeat: { type: 'boolean' },
+            LoyaltyPoints: { type: 'number' },
+          } } },
+        },
+      },
+      ReportVisitPattern: {
+        type: 'object',
+        properties: {
+          range: reportRange,
+          cells: { type: 'array', items: { type: 'object', properties: {
+            Dow: { type: 'number', description: 'MySQL DAYOFWEEK — 1 = Sunday.' },
+            Day: { type: 'string' }, Hour: { type: 'number' },
+            Visits: { type: 'number' }, Spend: { type: 'number' },
+          } } },
+          byDay: { type: 'array', items: { type: 'object' } },
+          byHour: { type: 'array', items: { type: 'object' } },
+          Busiest: { type: 'object', nullable: true, description: 'The single sentence a manager wants out of a heatmap.' },
+        },
+      },
+      ReportLapsed: {
+        type: 'object',
+        properties: {
+          thresholdDays: { type: 'number' },
+          customers: { type: 'array', items: { type: 'object', properties: {
+            Id: { type: 'string' }, Name: { type: 'string' }, Phone: { type: 'string', nullable: true },
+            Visits: { type: 'number' }, TotalSpent: { type: 'number' },
+            LoyaltyPoints: { type: 'number' }, LastVisitAt: { type: 'string', format: 'date-time' },
+            DaysSince: { type: 'number' },
+          } } },
+        },
+      },
       ReportVenue: {
         type: 'object',
         description: 'Grouped on the venue snapshot frozen on each round, never on a live join to pos_table — so renaming a table or moving it upstairs leaves last month where it was earned. Rounds with no table are labelled by CHANNEL (Counter / Delivery) rather than pooled under one anonymous row.',
@@ -2368,6 +2455,12 @@ const swaggerSpec = {
             description: 'daily: counter tokens restart at 1 each day, per branch. '
               + 'series: continuous TOK-0001 from the tenant-wide POS_TOKEN series.',
           },
+          'loyalty.rupees_per_point': {
+            type: 'string', default: '100',
+            description: 'Rupees of settled spend that earn one point. Read tenant-wide rather '
+              + 'than per branch — the same spend must not earn differently depending on which '
+              + 'till rang it up. Must be positive: 0 would turn every sale into infinite points.',
+          },
         },
       },
       PosExpenseCreate: {
@@ -2502,6 +2595,30 @@ const swaggerSpec = {
     '/api/ledger/reports/channels': reportPath('LedgerReports', 'Revenue by sales channel', 'ReportChannels',
       'Dine-in, counter and delivery. Counter sales were always in every total — a counter bill posts the same ledger document as any other — but until this report nothing could name them.'),
     '/api/ledger/reports/discounts': reportPath('LedgerReports', 'What was given away, and why', 'ReportDiscounts'),
+    '/api/ledger/reports/customers': reportPath('LedgerReports',
+      'Who buys, how often, and how reliably', 'ReportCustomers',
+      'Ten reports covered WHAT was sold; this one covers WHO bought it. '
+      + 'Reads settled documents rather than pos_order — an order that was placed and never paid '
+      + 'for is not a visit, and counting it would flatter every regular. '
+      + '`AvgDaysBetween` is the column that earns its place: a raw order count cannot separate '
+      + 'somebody who came six times last week from somebody who came six times last year. It is '
+      + 'null for a one-time buyer, because an interval needs two points and 0 would read as '
+      + '"comes every day". '
+      + '`IdentifiedRate` measures settled sales carrying a named customer against ALL settled '
+      + 'sales, walk-ins included — a repeat rate computed only over people we already know always '
+      + 'looks wonderful. A low number is the size of the opportunity, not a failure.'),
+    '/api/ledger/reports/visit-pattern': reportPath('LedgerReports',
+      'When customers actually come in', 'ReportVisitPattern',
+      'Day of week against hour of day. Returns the flat grid AND both axes pre-totalled, so a '
+      + 'heatmap can be drawn without recomputing either. Pass `customerId` to narrow it to one '
+      + 'regular — the same mix-and-match contract the venue bounds use. '
+      + 'Dow follows MySQL DAYOFWEEK (1 = Sunday) and the day NAME is returned beside it, so no '
+      + 'consumer has to remember which convention this is.'),
+    '/api/ledger/reports/lapsed': reportPath('LedgerReports',
+      'Known customers who have stopped coming', 'ReportLapsed',
+      'A targeting list rather than a chart: the rows ARE the campaign. Sorted by lifetime spend, '
+      + 'because the customer worth winning back is not the one who came most recently. '
+      + '`days` sets the threshold (default 30).'),
     '/api/pricing/quote': {
       post: {
         tags: ['Pricing'],
@@ -2995,6 +3112,46 @@ const swaggerSpec = {
         responses: {
           ...singleResponse('PosCustomerProfile'),
           ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/pos/loyalty/{id}/statement': {
+      get: {
+        tags: ['Loyalty'],
+        summary: 'What a customer holds, and every movement that got them there',
+        description: 'The ledger is the authority; `pos_customer.LoyaltyPoints` is a cache of '
+          + 'this sum. Points are EARNED on settlement, REVERSED on refund, REDEEMED against a '
+          + 'bill, or ADJUSTED by hand — each entry naming the sale it came from, so a balance '
+          + 'can always be explained rather than merely asserted. '
+          + 'Readable by whoever may look a customer up, because the till shows a balance beside '
+          + 'the bill.',
+        security,
+        parameters: [idParam],
+        responses: {
+          ...singleResponse('LoyaltyStatement'),
+          ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/pos/loyalty/{id}/adjust': {
+      post: {
+        tags: ['Loyalty'],
+        summary: 'Grant or correct points by hand',
+        description: 'Signed: the same gesture covers a goodwill grant and a correction. Zero is '
+          + 'refused, and a reason is required — an unexplained adjustment is the entry an '
+          + 'auditor asks about six months later. '
+          + 'Restricted to whoever owns the CRM: handing out points has real value, and reading a '
+          + 'balance at the counter is not the same permission as creating one.',
+        security,
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/LoyaltyAdjust' } } },
+        },
+        responses: {
+          ...singleResponse('LoyaltyBalance'),
+          ...responses.validation, ...responses.notFound,
+          ...responses.unauthorized, ...responses.forbidden,
         },
       },
     },

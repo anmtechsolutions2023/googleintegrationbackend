@@ -1,11 +1,13 @@
 // src/modules/costinfo/costinfo.schemas.js
 const Joi = require('joi');
+const { taxBreakdownEcho } = require('../pricing/pricing.enrich');
 
 const createSchema = Joi.object({
   Amount: Joi.number().precision(4).required(),
   TaxGroupId: Joi.string().uuid().optional().allow(null),
   IsTaxIncluded: Joi.boolean().optional().default(false),
   Active: Joi.boolean().optional().default(true),
+  TaxBreakdown: taxBreakdownEcho(),
 });
 
 const updateSchema = Joi.object({
@@ -13,6 +15,7 @@ const updateSchema = Joi.object({
   TaxGroupId: Joi.string().uuid().optional().allow(null),
   IsTaxIncluded: Joi.boolean().optional(),
   Active: Joi.boolean().optional(),
+  TaxBreakdown: taxBreakdownEcho(),
 }).min(1);
 
 const paginationSchema = Joi.object({

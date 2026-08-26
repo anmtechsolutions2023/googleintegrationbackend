@@ -53,19 +53,14 @@ describe('recording a settled sale against a customer', () => {
     expect(call.params[0]).toBe(396);
   });
 
-  it('awards whole loyalty points at the configured rate', async () => {
+  // Points moved OUT of here and into the loyalty ledger, which records why a
+  // balance changed. The rate and the whole-points rule are asserted there —
+  // see loyalty.service.test.js. What matters here is that this path no longer
+  // touches them, so the two cannot both move the same number.
+  it('no longer moves points — the loyalty ledger owns those', async () => {
     await stats.recordSaleTx(mockConn, 'c1', 396, TENANT, USER);
     const call = executed.find((e) => /UPDATE pos_customer/.test(e.sql));
-    // 396 / 100 = 3, floored. Points are whole or they are not points.
-    expect(call.params[1]).toBe(Math.floor(396 / LOYALTY.RUPEES_PER_POINT));
-    expect(call.params[1]).toBe(3);
-  });
-
-  // A refund must not mint loyalty.
-  it('never awards negative points', async () => {
-    await stats.recordSaleTx(mockConn, 'c1', -500, TENANT, USER);
-    const call = executed.find((e) => /UPDATE pos_customer/.test(e.sql));
-    expect(call.params[1]).toBe(0);
+    expect(call.sql).not.toMatch(/LoyaltyPoints/);
   });
 
   // The commonest sale in the building.
@@ -139,5 +134,34 @@ describe('the counter lookup', () => {
   it('caps results — this backs a type-ahead beside a queue', async () => {
     await profile.search('a', TENANT);
     expect(executed[0].sql).toMatch(/LIMIT 10/);
+  });
+});
+
+// The other half, which did not exist: settling credited a visit and the spend,
+// and refunding reversed the money while leaving both standing.
+describe('taking a refunded sale back off the record', () => {
+  it('removes the visit and the spend', async () => {
+    await stats.reverseSaleTx(mockConn, 'c1', 396, TENANT, USER);
+    const call = executed.find((e) => /UPDATE pos_customer/.test(e.sql));
+    expect(call.sql).toMatch(/Visits\s+= GREATEST\(Visits - 1, 0\)/);
+    expect(call.params[0]).toBe(396);
+  });
+
+  // A projection that has drifted must not be driven below zero by a
+  // correction — a customer with -1 visits is a worse answer than one with 0.
+  it('floors at zero rather than going negative', async () => {
+    await stats.reverseSaleTx(mockConn, 'c1', 999999, TENANT, USER);
+    const call = executed.find((e) => /UPDATE pos_customer/.test(e.sql));
+    expect(call.sql).toMatch(/GREATEST\(TotalSpent - \?, 0\)/);
+  });
+
+  it('does nothing for a walk-in', async () => {
+    await expect(stats.reverseSaleTx(mockConn, null, 100, TENANT, USER)).resolves.toBe(false);
+    expect(executed.filter((e) => /UPDATE pos_customer/.test(e.sql))).toHaveLength(0);
+  });
+
+  it('reports a customer who is not in this tenancy rather than failing', async () => {
+    state.customerExists = false;
+    await expect(stats.reverseSaleTx(mockConn, 'ghost', 100, TENANT, USER)).resolves.toBe(false);
   });
 });

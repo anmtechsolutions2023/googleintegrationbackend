@@ -18,12 +18,16 @@ const {
   POS_SETTING_KEYS,
   TOKEN_NUMBERING,
   TOKEN_NUMBERING_DEFAULT,
+  LOYALTY,
 } = require('../../config/constants');
 
 // Every key this module recognises, with the value it falls back to. Unknown
 // keys are rejected at the schema, so this list IS the contract.
 const DEFAULTS = {
   [POS_SETTING_KEYS.TOKEN_NUMBERING]: TOKEN_NUMBERING_DEFAULT,
+  // Rendered as a string like every stored setting; the loyalty service reads
+  // it back through Number() and falls back to this same constant.
+  [POS_SETTING_KEYS.LOYALTY_RATE]: String(LOYALTY.RUPEES_PER_POINT),
 };
 
 /**

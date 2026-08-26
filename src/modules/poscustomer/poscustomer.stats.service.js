@@ -14,7 +14,7 @@
 // to a customer's history is a CRM concern, and the bill service should not
 // grow a second job. settle calls in; nothing here knows how a bill is built.
 
-const { QUERIES, LOYALTY } = require('../../config/constants');
+const { QUERIES } = require('../../config/constants');
 const { logger } = require('../../utils/logger');
 
 /**
@@ -40,11 +40,11 @@ const recordSaleTx = async (conn, customerId, amount, tenantId, userEmail) => {
   if (!customerId) return false;
 
   const spend = Number(amount) || 0;
-  // Whole points only, and never negative: a refund must not mint loyalty.
-  const points = spend > 0 ? Math.floor(spend / LOYALTY.RUPEES_PER_POINT) : 0;
-
+  // Points are no longer moved here. They go through the loyalty ledger, which
+  // records WHY a balance changed — the thing a bare counter could never say,
+  // and the reason a refund used to have nothing to give back.
   const [result] = await conn.execute(QUERIES.POS_CUSTOMER.RECORD_SALE, [
-    spend, points, userEmail, customerId, tenantId,
+    spend, userEmail, customerId, tenantId,
   ]);
 
   if (!result.affectedRows) {
@@ -58,4 +58,40 @@ const recordSaleTx = async (conn, customerId, amount, tenantId, userEmail) => {
   return true;
 };
 
-module.exports = { recordSaleTx };
+/**
+ * Takes a settled sale back off a customer's record when it is refunded.
+ *
+ * The other half of recordSaleTx, and it did not exist: settling credited a
+ * visit, spend and points, and refunding reversed the accounting ledger while
+ * leaving all three standing. A ₹10,000 sale could be settled, refunded, and
+ * still leave the customer a visit richer and 100 points up — points that
+ * nothing spent yet, which is the only reason it had not been noticed.
+ *
+ * Floors at zero rather than going negative: a projection that has drifted must
+ * not be driven below zero by a correction.
+ *
+ * MUST run on the refund transaction's own connection, for the same reason
+ * recordSaleTx runs on the settle one.
+ *
+ * @param {Object} conn - Open TRANSACTION connection.
+ * @param {string|null} customerId
+ * @param {number} amount - What the sale had settled for.
+ * @param {string} tenantId
+ * @param {string} userEmail
+ * @returns {Promise<boolean>} Whether anything was reversed.
+ */
+const reverseSaleTx = async (conn, customerId, amount, tenantId, userEmail) => {
+  if (!customerId) return false;
+
+  const [result] = await conn.execute(QUERIES.POS_CUSTOMER.REVERSE_SALE, [
+    Number(amount) || 0, userEmail, customerId, tenantId,
+  ]);
+
+  if (!result.affectedRows) {
+    logger.warn('Refund against an unknown customer — no CRM reversal', { customerId, tenantId });
+    return false;
+  }
+  return true;
+};
+
+module.exports = { recordSaleTx, reverseSaleTx };

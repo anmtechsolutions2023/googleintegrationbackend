@@ -25,6 +25,9 @@ const { LEDGER, POS_BILL_STATUS } = require('../../config/constants');
 const { toMinor, fromMinor } = require('../../utils/taxCalculator');
 const numberService = require('./transactionNumber.service');
 const contactResolver = require('./contactResolver.service');
+const { logger } = require('../../utils/logger');
+const customerStats = require('../poscustomer/poscustomer.stats.service');
+const loyalty = require('../loyalty/loyalty.service');
 
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
 
@@ -370,6 +373,35 @@ const refundSale = async (conn, logId, reason, tenantId, userEmail) => {
   await conn.execute(QUERIES.LEDGER.UPDATE_BILL_STATUS_BY_LOG, [
     POS_BILL_STATUS.REFUNDED, userEmail, logId, tenantId,
   ]);
+
+  // ── CRM and loyalty ────────────────────────────────────────────────────
+  // Settling credited a visit, the spend and the points. Refunding used to
+  // reverse the money and leave all three standing: a sale could be settled,
+  // refunded, and still leave the customer a visit richer and the points up.
+  // Nothing spent points yet, which is the only reason it had gone unnoticed —
+  // the moment redemption exists, that is a way to withdraw cash.
+  //
+  // On this transaction, so a refund that rolls back keeps the points it was
+  // about to take.
+  const [bills] = await conn.execute(
+    QUERIES.LEDGER.SELECT_BILL_CUSTOMER_BY_LOG, [logId, tenantId],
+  );
+  const bill = bills[0];
+  if (bill?.CustomerId) {
+    await customerStats.reverseSaleTx(
+      conn, bill.CustomerId, bill.Total, tenantId, userEmail,
+    );
+    // By the ORIGINAL entry, not by recomputing: if the earn rate changed
+    // between the sale and the refund, recomputing would take back a different
+    // number than was given.
+    const clawedBack = await loyalty.reverseForSaleTx(conn, {
+      billId: bill.BillId, reason, branchDetailId: bill.BranchDetailId,
+    }, tenantId, userEmail);
+
+    logger.info('Refund reversed the customer record', {
+      customerId: bill.CustomerId, billId: bill.BillId, pointsReversed: clawedBack,
+    });
+  }
 
   return { transactionDetailLogId: logId, status: LEDGER.STATUS_REFUNDED };
 };

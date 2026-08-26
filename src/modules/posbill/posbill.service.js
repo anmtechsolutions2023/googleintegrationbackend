@@ -11,6 +11,7 @@ const pricingService = require('../pricing/pricing.service');
 const ledgerService = require('../ledger/ledger.service');
 const tokenService = require('../postoken/postoken.service');
 const customerStats = require('../poscustomer/poscustomer.stats.service');
+const loyalty = require('../loyalty/loyalty.service');
 const { issuePosNumber } = require('../posorder/posNumbering');
 const repository = require('./posbill.repository');
 const { logger } = require('../../utils/logger');
@@ -244,6 +245,16 @@ class PosBillService extends BaseCRUDService {
       await customerStats.recordSaleTx(
         connection, posCustomerId, posted.payable, tenantId, userEmail,
       );
+
+      // Points, through the loyalty ledger rather than a bare counter — so the
+      // balance carries the reason it moved, and a refund has something to give
+      // back. Same connection, same reasoning as the visit above.
+      await loyalty.earnForSaleTx(connection, {
+        customerId: posCustomerId,
+        billId: id,
+        amount: posted.payable,
+        branchDetailId: existing.BranchDetailId,
+      }, tenantId, userEmail);
 
       await connection.execute(this.queries.SETTLE, [
         toJson(data.Payments ?? data.Tenders),

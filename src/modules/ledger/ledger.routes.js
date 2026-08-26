@@ -32,6 +32,11 @@ router.get('/reports/venue', authenticateToken, checkScope(...READ), ...controll
 // Revenue by sales channel — dine-in / counter / delivery.
 router.get('/reports/channels', authenticateToken, checkScope(...READ), ...controller.channelReport);
 router.get('/reports/discounts', authenticateToken, checkScope(...READ), ...controller.discountReport);
+// Customer reports — same guard as the rest. Reading who bought is reading the
+// books, and a tenancy that may see its revenue may see whose revenue it was.
+router.get('/reports/customers', authenticateToken, checkScope(...READ), ...controller.customerReport);
+router.get('/reports/visit-pattern', authenticateToken, checkScope(...READ), ...controller.visitPatternReport);
+router.get('/reports/lapsed', authenticateToken, checkScope(...READ), ...controller.lapsedReport);
 
 router.get('/documents', authenticateToken, checkScope(...READ), ...controller.list);
 router.get('/documents/:id', authenticateToken, checkScope(...READ), ...controller.getOne);

@@ -1,5 +1,6 @@
 // src/modules/batchdetail/batchdetail.schemas.js
 const Joi = require('joi')
+const { taxBreakdownEcho } = require('../pricing/pricing.enrich');
 
 const createSchema = Joi.object({
   BatchNo: Joi.string().required().max(100).trim(),
@@ -23,6 +24,7 @@ const createSchema = Joi.object({
   MapProviderLocationMapperId: Joi.string().uuid().optional().allow(null),
   BranchDetailId: Joi.string().uuid().optional().allow(null),
   Active: Joi.boolean().optional().default(true),
+  TaxBreakdown: taxBreakdownEcho(),
 })
 
 const updateSchema = Joi.object({
@@ -47,6 +49,7 @@ const updateSchema = Joi.object({
   MapProviderLocationMapperId: Joi.string().uuid().optional().allow(null),
   BranchDetailId: Joi.string().uuid().optional().allow(null),
   Active: Joi.boolean().optional(),
+  TaxBreakdown: taxBreakdownEcho(),
 }).min(1)
 
 const paginationSchema = Joi.object({

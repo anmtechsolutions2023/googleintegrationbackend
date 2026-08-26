@@ -41,6 +41,13 @@ const reportQuerySchema = Joi.object({
   floorId: Joi.string().uuid().optional(),
   tableId: Joi.string().uuid().optional(),
   limit: Joi.number().integer().min(1).max(200).optional(),
+  // Customer bounds. Same reasoning as the venue bounds above: "when does this
+  // regular visit" is the visit-pattern report with one more bound, not a
+  // report of its own.
+  customerId: Joi.string().uuid().optional(),
+  minOrders: Joi.number().integer().min(1).max(1000).optional(),
+  // Lapsed only: how long counts as gone.
+  days: Joi.number().integer().min(1).max(365).optional(),
 })
   // A custom range must actually name its bounds, or it silently collapses to
   // "today" and the caller never learns why their report is empty.

@@ -1004,8 +1004,24 @@ module.exports = {
         UPDATE pos_customer
            SET Visits        = Visits + 1,
                TotalSpent    = TotalSpent + ?,
-               LoyaltyPoints = LoyaltyPoints + ?,
                LastVisitAt   = NOW(),
+               UpdatedOn     = NOW(),
+               UpdatedBy     = ?
+         WHERE Id = ? AND TenantId = ?`,
+      // Refund. Visits and spend are floored at zero: a projection that has
+      // drifted must not be driven negative by a correction, and a customer
+      // with -1 visits is a worse answer than one with 0.
+      REVERSE_SALE: `
+        UPDATE pos_customer
+           SET Visits     = GREATEST(Visits - 1, 0),
+               TotalSpent = GREATEST(TotalSpent - ?, 0),
+               UpdatedOn  = NOW(),
+               UpdatedBy  = ?
+         WHERE Id = ? AND TenantId = ?`,
+      // The points cache, moved by the loyalty ledger and nothing else.
+      ADJUST_POINTS: `
+        UPDATE pos_customer
+           SET LoyaltyPoints = GREATEST(LoyaltyPoints + ?, 0),
                UpdatedOn     = NOW(),
                UpdatedBy     = ?
          WHERE Id = ? AND TenantId = ?`,
@@ -1194,6 +1210,9 @@ module.exports = {
       SELECT_ALL: 'SELECT * FROM pos_setting WHERE TenantId = ? ORDER BY BranchDetailId, SettingKey',
       SELECT_BY_BRANCH: 'SELECT SettingKey, SettingValue FROM pos_setting WHERE TenantId = ? AND BranchDetailId = ?',
       SELECT_VALUE: 'SELECT SettingValue FROM pos_setting WHERE TenantId = ? AND BranchDetailId = ? AND SettingKey = ? LIMIT 1',
+      // Tenant-wide: a loyalty rate that differed per branch would mean the same
+      // spend earned differently depending on which till rang it up.
+      SELECT_VALUE_FOR_TENANT: 'SELECT SettingValue FROM pos_setting WHERE TenantId = ? AND SettingKey = ? LIMIT 1',
       UPSERT: `
         INSERT INTO pos_setting (Id, TenantId, BranchDetailId, SettingKey, SettingValue, Active, CreatedOn, CreatedBy, UpdatedBy)
         VALUES (?, ?, ?, ?, ?, 1, NOW(), ?, ?)
@@ -1455,6 +1474,133 @@ module.exports = {
         'DELETE FROM user_roles WHERE user_email = ? AND tenant_id = ?',
       INSERT:
         'INSERT INTO user_roles (id, user_email, tenant_id, role_id, assigned_by) VALUES (?, ?, ?, ?, ?)',
+    },
+
+    // Customer reports. All read SETTLED DOCUMENTS, not pos_order: an order
+    // that was placed and never paid for is not a visit, and the ledger is what
+    // knows the difference. Ten reports existed and not one was about people.
+    LEDGER_REPORT_CUSTOMER: {
+      // A refunded sale is not a visit. Every other report in this file narrows
+      // to SETTLED/PARTIALLY_PAID, and these must too — otherwise a customer's
+      // "credibility" would count purchases they handed straight back, and the
+      // report would disagree with the CRM projection the refund already
+      // reversed.
+      // Who buys, how often, how much — the credibility view. Repeat customers
+      // sort first because that is what the question is actually about.
+      CUSTOMERS: `
+        SELECT c.Id, c.Name, c.Phone, c.LoyaltyPoints, c.LastVisitAt,
+               COUNT(DISTINCT l.Id)                       AS Orders,
+               COALESCE(SUM(l.GrossAmount), 0)            AS Spend,
+               COALESCE(AVG(l.GrossAmount), 0)            AS AverageOrder,
+               MIN(l.TransactionDate)                     AS FirstVisit,
+               MAX(l.TransactionDate)                     AS LastOrder,
+               DATEDIFF(CURDATE(), MAX(l.TransactionDate)) AS DaysSinceLast,
+               -- Days between first and last purchase, over orders: a rough
+               -- visit interval that says more than a raw count. One-time
+               -- buyers get NULL rather than a misleading zero.
+               CASE WHEN COUNT(DISTINCT l.Id) > 1
+                    THEN ROUND(DATEDIFF(MAX(l.TransactionDate), MIN(l.TransactionDate))
+                               / (COUNT(DISTINCT l.Id) - 1), 1)
+                    ELSE NULL END                          AS AvgDaysBetween
+          FROM pos_customer c
+          JOIN pos_order o        ON o.CustomerId = c.Id AND o.TenantId = c.TenantId
+          JOIN pos_bill_order bo  ON bo.OrderId = o.Id AND bo.TenantId = o.TenantId
+          JOIN pos_bill b         ON b.Id = bo.BillId AND b.TenantId = bo.TenantId
+          JOIN transactiondetaillog l ON l.Id = b.TransactionDetailLogId
+          JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+         WHERE c.TenantId = ? AND l.TransactionDate BETWEEN ? AND ?
+           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+      // No LIMIT here: it is appended by the caller as a clamped integer.
+      // Binding it fails with ER_WRONG_ARGUMENTS, which is why every other
+      // report in this file interpolates its limit too.
+      CUSTOMERS_GROUP_BY: `
+         GROUP BY c.Id, c.Name, c.Phone, c.LoyaltyPoints, c.LastVisitAt
+         ORDER BY Orders DESC, Spend DESC`,
+
+      // When they come. Day-of-week × hour, which is a shape you read rather
+      // than a table you scan.
+      VISIT_PATTERN: `
+        SELECT DAYOFWEEK(l.TransactionDate) AS Dow,
+               HOUR(l.CreatedOn)            AS Hour,
+               COUNT(DISTINCT l.Id)         AS Visits,
+               COALESCE(SUM(l.GrossAmount), 0) AS Spend
+          FROM transactiondetaillog l
+          JOIN pos_bill b        ON b.TransactionDetailLogId = l.Id
+          JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
+          JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+          JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+         WHERE l.TenantId = ? AND l.TransactionDate BETWEEN ? AND ?
+           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+      VISIT_PATTERN_GROUP_BY: ' GROUP BY Dow, Hour ORDER BY Dow, Hour',
+
+      // How much of the trade is repeat trade — the headline number a manager
+      // actually acts on.
+      REPEAT_SUMMARY: `
+        SELECT COUNT(*)                                   AS KnownCustomers,
+               SUM(CASE WHEN Orders > 1 THEN 1 ELSE 0 END) AS RepeatCustomers,
+               SUM(Orders)                                AS KnownOrders,
+               COALESCE(SUM(Spend), 0)                    AS KnownSpend
+          FROM (
+            SELECT o.CustomerId, COUNT(DISTINCT l.Id) AS Orders, SUM(l.GrossAmount) AS Spend
+              FROM pos_order o
+              JOIN pos_bill_order bo ON bo.OrderId = o.Id AND bo.TenantId = o.TenantId
+              JOIN pos_bill b        ON b.Id = bo.BillId AND b.TenantId = bo.TenantId
+              JOIN transactiondetaillog l ON l.Id = b.TransactionDetailLogId
+              JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+             WHERE o.TenantId = ? AND o.CustomerId IS NOT NULL
+               AND l.TransactionDate BETWEEN ? AND ?
+               AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+             GROUP BY o.CustomerId
+          ) per_customer`,
+
+      // Every settled document in the tenancy over the window, so the repeat
+      // rate has a denominator that includes walk-ins.
+      TOTAL_DOCUMENTS: `
+        SELECT COUNT(*) AS Documents, COALESCE(SUM(l.GrossAmount), 0) AS Gross
+          FROM transactiondetaillog l
+          JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+         WHERE l.TenantId = ? AND l.TransactionDate BETWEEN ? AND ?
+           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+
+      // Known customers who have stopped coming — the targeting list.
+      LAPSED: `
+        SELECT Id, Name, Phone, Visits, TotalSpent, LoyaltyPoints, LastVisitAt,
+               DATEDIFF(CURDATE(), LastVisitAt) AS DaysSince
+          FROM pos_customer
+         WHERE TenantId = ? AND LastVisitAt IS NOT NULL
+           AND LastVisitAt < DATE_SUB(CURDATE(), INTERVAL ? DAY)
+         ORDER BY TotalSpent DESC`,
+    },
+
+    // Loyalty ledger — every movement of points, append-only.
+    LOYALTY_LEDGER: {
+      INSERT: `
+        INSERT INTO pos_loyalty_ledger
+          (Id, TenantId, CustomerId, EntryType, Points, SourceType, SourceId,
+           ReversesId, Reason, BranchDetailId, CreatedOn, CreatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+      // The authoritative balance. pos_customer.LoyaltyPoints is a cache of
+      // this, and the two are compared by the reconciliation report.
+      SELECT_BALANCE: `
+        SELECT COALESCE(SUM(Points), 0) AS balance
+          FROM pos_loyalty_ledger WHERE CustomerId = ? AND TenantId = ?`,
+      // FOR UPDATE: two tills settling for one customer at the same moment
+      // would otherwise both read the same balance and both spend it. Same
+      // row-lock discipline the numbering series uses.
+      SELECT_BALANCE_FOR_UPDATE: `
+        SELECT COALESCE(SUM(Points), 0) AS balance
+          FROM pos_loyalty_ledger WHERE CustomerId = ? AND TenantId = ? FOR UPDATE`,
+      SELECT_STATEMENT: `
+        SELECT Id, EntryType, Points, SourceType, SourceId, Reason, CreatedOn, CreatedBy
+          FROM pos_loyalty_ledger
+         WHERE CustomerId = ? AND TenantId = ?
+         ORDER BY CreatedOn DESC, Id DESC
+         LIMIT 100`,
+      // The EARN a refund has to undo, found by the bill that created it.
+      SELECT_ENTRY_BY_SOURCE: `
+        SELECT Id, CustomerId, Points FROM pos_loyalty_ledger
+         WHERE TenantId = ? AND SourceType = ? AND SourceId = ? AND EntryType = ?
+         LIMIT 1`,
     },
 
     // Admin User Management Queries
@@ -1774,6 +1920,20 @@ module.exports = {
       // A refunded document must not leave the POS side claiming 'paid'.
       UPDATE_BILL_STATUS_BY_LOG:
         'UPDATE pos_bill SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE TransactionDetailLogId = ? AND TenantId = ?',
+      // The bill a refund is reversing, and the customer whose record it has to
+      // be taken back off. One query rather than three: the refund path is
+      // already inside a transaction and should not walk the graph.
+      SELECT_BILL_CUSTOMER_BY_LOG: `
+        SELECT b.Id AS BillId, b.Total, b.BranchDetailId,
+               (SELECT o.CustomerId
+                  FROM pos_bill_order bo
+                  JOIN pos_order o ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+                 WHERE bo.BillId = b.Id AND bo.TenantId = b.TenantId
+                   AND o.CustomerId IS NOT NULL
+                 LIMIT 1) AS CustomerId
+          FROM pos_bill b
+         WHERE b.TransactionDetailLogId = ? AND b.TenantId = ?
+         LIMIT 1`,
 
       // Expense link (same posting + idempotency shape as the bill)
       SELECT_EXPENSE_LEDGER_LINK:
@@ -2184,13 +2344,33 @@ module.exports = {
   // does not stay live indefinitely.
   INVITATION: { EXPIRY_DAYS: 14 },
 
-  LOYALTY: { RUPEES_PER_POINT: 100 },
+  LOYALTY: {
+    // Fallback only. A tenant's own rate lives in pos_setting under
+    // 'loyalty.rupees_per_point' — the same per-branch mechanism token
+    // numbering already uses, rather than a second configuration store.
+    RUPEES_PER_POINT: 100,
+    SETTING_KEY: 'loyalty.rupees_per_point',   // = POS_SETTING_KEYS.LOYALTY_RATE
+    ENTRY: {
+      EARN: 'EARN',
+      REVERSAL: 'REVERSAL',
+      REDEEM: 'REDEEM',
+      ADJUSTMENT: 'ADJUSTMENT',
+      EXPIRY: 'EXPIRY',
+    },
+    SOURCE: { BILL: 'BILL', MANUAL: 'MANUAL', RULE: 'RULE' },
+  },
 
   TOKEN_NUMBERING: { DAILY: 'daily', SERIES: 'series' },
   // Absence of a pos_setting row means DAILY — a branch that has never been
   // configured behaves like a token counter, which is the unsurprising default.
   TOKEN_NUMBERING_DEFAULT: 'daily',
-  POS_SETTING_KEYS: { TOKEN_NUMBERING: 'token.numbering' },
+  POS_SETTING_KEYS: {
+    TOKEN_NUMBERING: 'token.numbering',
+    // How spend becomes points. Registered here so the settings endpoint can
+    // actually write it: keys are whitelisted, and a key the reader knows but
+    // the whitelist does not is a setting that silently cannot be changed.
+    LOYALTY_RATE: 'loyalty.rupees_per_point',
+  },
   // Series tag + fallback prefix for 'series' numbering.
   POS_TOKEN_SERIES: { TAG: 'POS_TOKEN', PREFIX: 'TOK' },
   // Ordered: the Tracking board advances an order one stage at a time, so the

@@ -483,7 +483,152 @@ const discountReport = (query, tenantId) =>
     };
   });
 
+/**
+ * Who buys, how often, and how reliably — the customer credibility report.
+ *
+ * Reads SETTLED documents rather than pos_order: an order that was placed and
+ * never paid for is not a visit, and counting it would flatter every regular.
+ *
+ * AvgDaysBetween is the useful column and the least obvious one. A raw order
+ * count cannot separate somebody who came six times last week from somebody who
+ * came six times last year; the interval can.
+ *
+ * @param {Object} query - { preset, fromDate, toDate, branchId, limit, minOrders }
+ * @param {string} tenantId
+ */
+const customerReport = (query, tenantId) =>
+  withConnection(async (conn) => {
+    const range = resolveRange(query);
+    const limit = Math.min(Number(query.limit) || 100, 500);
+
+    let sql = QUERIES.LEDGER_REPORT_CUSTOMER.CUSTOMERS
+      + weekendPredicate(range.weekendOnly, 'l.TransactionDate');
+    const params = [tenantId, range.from, range.to];
+    if (query.branchId) { sql += ' AND l.BranchId = ?'; params.push(query.branchId); }
+    if (query.customerId) { sql += ' AND c.Id = ?'; params.push(query.customerId); }
+    sql += `${QUERIES.LEDGER_REPORT_CUSTOMER.CUSTOMERS_GROUP_BY} LIMIT ${limit}`;
+
+    const [rows] = await conn.execute(sql, params);
+
+    const customers = rows
+      .map((r) => numeric(r, ['Orders', 'Spend', 'AverageOrder', 'LoyaltyPoints', 'DaysSinceLast']))
+      .map((r) => ({
+        ...r,
+        AverageOrder: round2(r.AverageOrder),
+        Spend: round2(r.Spend),
+        // Null for a one-time buyer: an interval needs two points, and 0 would
+        // read as "comes every day".
+        AvgDaysBetween: r.AvgDaysBetween === null ? null : num(r.AvgDaysBetween),
+        IsRepeat: num(r.Orders) > 1,
+      }))
+      .filter((r) => (query.minOrders ? num(r.Orders) >= Number(query.minOrders) : true));
+
+    // The denominator has to include walk-ins, or "repeat rate" measures only
+    // the customers we already know and always looks wonderful.
+    const [[repeat]] = await conn.execute(
+      QUERIES.LEDGER_REPORT_CUSTOMER.REPEAT_SUMMARY, [tenantId, range.from, range.to],
+    );
+    const [[totals]] = await conn.execute(
+      QUERIES.LEDGER_REPORT_CUSTOMER.TOTAL_DOCUMENTS, [tenantId, range.from, range.to],
+    );
+
+    const knownOrders = num(repeat?.KnownOrders);
+    const documents = num(totals?.Documents);
+
+    return {
+      range,
+      summary: {
+        Documents: documents,
+        KnownCustomers: num(repeat?.KnownCustomers),
+        RepeatCustomers: num(repeat?.RepeatCustomers),
+        KnownOrders: knownOrders,
+        KnownSpend: round2(repeat?.KnownSpend),
+        // Share of settled sales attached to somebody we can name. Low is not a
+        // failure — it is the size of the opportunity.
+        IdentifiedRate: documents ? round2((knownOrders / documents) * 100) : 0,
+        // Of the customers we know, how many came back.
+        RepeatRate: num(repeat?.KnownCustomers)
+          ? round2((num(repeat?.RepeatCustomers) / num(repeat?.KnownCustomers)) * 100)
+          : 0,
+      },
+      customers,
+    };
+  });
+
+/**
+ * When people visit: day of week against hour of day.
+ *
+ * Returned as a flat grid AND as totals per day and per hour, so the caller can
+ * draw a heatmap without recomputing either axis.
+ *
+ * @param {Object} query - { preset, fromDate, toDate, branchId, customerId }
+ * @param {string} tenantId
+ */
+const visitPatternReport = (query, tenantId) =>
+  withConnection(async (conn) => {
+    const range = resolveRange(query);
+
+    let sql = QUERIES.LEDGER_REPORT_CUSTOMER.VISIT_PATTERN
+      + weekendPredicate(range.weekendOnly, 'l.TransactionDate');
+    const params = [tenantId, range.from, range.to];
+    if (query.branchId) { sql += ' AND l.BranchId = ?'; params.push(query.branchId); }
+    if (query.customerId) { sql += ' AND o.CustomerId = ?'; params.push(query.customerId); }
+    sql += QUERIES.LEDGER_REPORT_CUSTOMER.VISIT_PATTERN_GROUP_BY;
+
+    const [rows] = await conn.execute(sql, params);
+    const cells = rows.map((r) => numeric(r, ['Dow', 'Hour', 'Visits', 'Spend']));
+
+    // MySQL DAYOFWEEK is 1=Sunday. Named here rather than in the UI so every
+    // consumer agrees on which day column 1 is.
+    const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const byDay = DAYS.map((name, i) => ({
+      Dow: i + 1, Day: name,
+      Visits: cells.filter((c) => c.Dow === i + 1).reduce((s, c) => s + c.Visits, 0),
+      Spend: round2(cells.filter((c) => c.Dow === i + 1).reduce((s, c) => s + c.Spend, 0)),
+    }));
+    const byHour = Array.from({ length: 24 }, (_, h) => ({
+      Hour: h,
+      Visits: cells.filter((c) => c.Hour === h).reduce((s, c) => s + c.Visits, 0),
+    }));
+
+    const busiest = [...cells].sort((a, b) => b.Visits - a.Visits)[0] || null;
+
+    return {
+      range,
+      cells: cells.map((c) => ({ ...c, Day: DAYS[c.Dow - 1], Spend: round2(c.Spend) })),
+      byDay,
+      byHour,
+      // The single sentence a manager wants out of a heatmap.
+      Busiest: busiest ? { Day: DAYS[busiest.Dow - 1], Hour: busiest.Hour, Visits: busiest.Visits } : null,
+    };
+  });
+
+/**
+ * Known customers who have stopped coming — a targeting list, not a chart.
+ *
+ * @param {Object} query - { days, limit }
+ * @param {string} tenantId
+ */
+const lapsedReport = (query, tenantId) =>
+  withConnection(async (conn) => {
+    const days = Math.min(Math.max(Number(query.days) || 30, 1), 365);
+    const limit = Math.min(Number(query.limit) || 100, 500);
+    const [rows] = await conn.execute(
+      `${QUERIES.LEDGER_REPORT_CUSTOMER.LAPSED} LIMIT ${limit}`, [tenantId, days],
+    );
+    return {
+      thresholdDays: days,
+      customers: rows.map((r) => ({
+        ...numeric(r, ['Visits', 'TotalSpent', 'LoyaltyPoints', 'DaysSince']),
+        TotalSpent: round2(r.TotalSpent),
+      })),
+    };
+  });
+
 module.exports = {
+  customerReport,
+  visitPatternReport,
+  lapsedReport,
   salesReport,
   productReport,
   pendingReport,

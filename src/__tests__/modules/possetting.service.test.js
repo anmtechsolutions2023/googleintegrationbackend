@@ -27,6 +27,7 @@ jest.mock('../../utils/dbHelper', () => ({
 }));
 
 const service = require('../../modules/possetting/possetting.service');
+const { POS_SETTING_KEYS } = require('../../config/constants');
 
 const TENANT = 'tn';
 const BRANCH = 'branch-a';
@@ -65,13 +66,22 @@ describe('reading a branch\'s settings', () => {
   it('fills in defaults for keys never set, so the UI renders something', async () => {
     rows.all = [];
     expect(await service.getBranchSettings(BRANCH, TENANT))
-      .toEqual({ 'token.numbering': 'daily' });
+      .toEqual({ 'token.numbering': 'daily', 'loyalty.rupees_per_point': '100' });
   });
 
   it('stored values win over defaults', async () => {
     rows.all = [{ SettingKey: 'token.numbering', SettingValue: 'series' }];
     expect(await service.getBranchSettings(BRANCH, TENANT))
-      .toEqual({ 'token.numbering': 'series' });
+      .toEqual({ 'token.numbering': 'series', 'loyalty.rupees_per_point': '100' });
+  });
+
+  it('returns every key the settings endpoint accepts', async () => {
+    // A key the reader knows but the whitelist rejects is a setting that
+    // silently cannot be changed — which is how the loyalty rate shipped the
+    // first time. Both sides read from POS_SETTING_KEYS so they cannot drift.
+    rows.all = [];
+    const rendered = Object.keys(await service.getBranchSettings(BRANCH, TENANT));
+    Object.values(POS_SETTING_KEYS).forEach((key) => expect(rendered).toContain(key));
   });
 });
 

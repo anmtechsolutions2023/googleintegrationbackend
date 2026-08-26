@@ -17,6 +17,13 @@ const updateSchema = Joi.object({
   [POS_SETTING_KEYS.TOKEN_NUMBERING]: Joi.string()
     .valid(...Object.values(TOKEN_NUMBERING))
     .optional(),
+  // Rupees per point. Stored as text like every other setting, but validated as
+  // a positive number here — a rate of 0 would divide every sale into infinite
+  // points, and a negative one would take points away for buying something.
+  [POS_SETTING_KEYS.LOYALTY_RATE]: Joi.number()
+    .positive()
+    .max(100000)
+    .optional(),
 }).min(1);
 
 module.exports = { branchQuerySchema, updateSchema };

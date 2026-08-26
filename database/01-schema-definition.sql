@@ -1580,6 +1580,48 @@ CREATE TABLE pos_expense (
     FOREIGN KEY (BranchDetailId)         REFERENCES branchdetail(Id)
 );
 
+-- 4.x pos_loyalty_ledger
+-- Every movement of loyalty points, append-only.
+--
+-- pos_customer.LoyaltyPoints was a bare counter: it could say 240 and nothing
+-- could say why, a dispute had no evidence, and a refund could not give points
+-- back because there was no record of what a sale had given. This table is the
+-- record; that column becomes a cache of SUM(Points), exactly as Visits and
+-- TotalSpent are already caches of the accounting ledger.
+--
+-- Nothing here is ever UPDATEd. A correction is a new row, which is what makes
+-- the history answerable months later.
+CREATE TABLE pos_loyalty_ledger (
+    Id              VARCHAR(50)   NOT NULL,
+    CustomerId      VARCHAR(50)   NOT NULL,
+    -- EARN | REVERSAL | REDEEM | ADJUSTMENT | EXPIRY
+    EntryType       VARCHAR(20)   NOT NULL,
+    -- SIGNED. Earning is positive; reversing, redeeming and expiring are
+    -- negative. A balance is therefore one SUM and can never disagree with the
+    -- history that produced it.
+    Points          INT           NOT NULL,
+    -- What caused it. BILL for a sale, MANUAL for a staff adjustment, RULE for
+    -- a milestone or campaign grant.
+    SourceType      VARCHAR(20)   NULL,
+    SourceId        VARCHAR(50)   NULL,
+    -- A REVERSAL names the EARN it undoes, so a refund claws back exactly what
+    -- that sale gave — not what the same sale would earn at today's rate.
+    ReversesId      VARCHAR(50)   NULL,
+    -- Shown to staff and to the customer. A points movement nobody can explain
+    -- is worse than no points at all.
+    Reason          VARCHAR(255)  NULL,
+    BranchDetailId  VARCHAR(50)   NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    -- One entry of a given type per source. Settling twice after a dropped
+    -- response, or refunding twice, cannot mint or claw back twice.
+    UNIQUE KEY uq_loyalty_source (TenantId, SourceType, SourceId, EntryType),
+    INDEX idx_loyalty_customer (TenantId, CustomerId, CreatedOn),
+    FOREIGN KEY (CustomerId) REFERENCES pos_customer(Id)
+);
+
 -- pos_staff — RETIRED.
 --
 -- Staff and users were two objects for the same people: a pos_staff row held a

@@ -23,6 +23,40 @@ const TENANT = 'tenant-1';
 const route = (over = {}) => {
   mockConn.execute.mockImplementation((sql) => {
     const q = String(sql);
+    // ── Customer shapes ────────────────────────────────────────────────────
+    if (/AS AvgDaysBetween/i.test(q)) {
+      return Promise.resolve([over.customers || [
+        { Id: 'c1', Name: 'Priya R', Phone: '9876543210', LoyaltyPoints: '20', LastVisitAt: '2026-08-20',
+          Orders: '4', Spend: '4000.00', AverageOrder: '1000.00', FirstVisit: '2026-08-01',
+          LastOrder: '2026-08-20', DaysSinceLast: '6', AvgDaysBetween: '6.3' },
+        { Id: 'c2', Name: 'Arjun', Phone: null, LoyaltyPoints: '2', LastVisitAt: '2026-08-10',
+          Orders: '1', Spend: '250.00', AverageOrder: '250.00', FirstVisit: '2026-08-10',
+          LastOrder: '2026-08-10', DaysSinceLast: '16', AvgDaysBetween: null },
+      ]]);
+    }
+    if (/AS KnownCustomers/i.test(q)) {
+      return Promise.resolve([[over.repeat || {
+        KnownCustomers: '2', RepeatCustomers: '1', KnownOrders: '5', KnownSpend: '4250.00',
+      }]]);
+    }
+    // `AS Gross` with a word boundary — every other report aliases GrossAmount,
+    // so this matches the walk-in-inclusive denominator and nothing else.
+    if (/AS Gross\b/i.test(q)) {
+      return Promise.resolve([[over.totals || { Documents: '10', Gross: '9000.00' }]]);
+    }
+    if (/AS Dow/i.test(q)) {
+      return Promise.resolve([over.pattern || [
+        { Dow: '4', Hour: '13', Visits: '2', Spend: '400.00' },
+        { Dow: '4', Hour: '20', Visits: '7', Spend: '2100.00' },
+        { Dow: '6', Hour: '20', Visits: '5', Spend: '1500.00' },
+      ]]);
+    }
+    if (/AS DaysSince/i.test(q)) {
+      return Promise.resolve([over.lapsed || [
+        { Id: 'c9', Name: 'Meera', Phone: '90000', Visits: '8', TotalSpent: '9000.00',
+          LoyaltyPoints: '40', LastVisitAt: '2026-05-01', DaysSince: '117' },
+      ]]);
+    }
     if (/SUM\(l\.NetAmount\)/i.test(q)) {
       return Promise.resolve([[over.summary || {
         Documents: 3, NetAmount: '300.00', TaxAmount: '54.00', DiscountAmount: '20.00',
@@ -483,5 +517,130 @@ describe('venue filters on the existing reports', () => {
   it('adds nothing at all when no venue is named', async () => {
     await reports.salesReport({ preset: 'month' }, TENANT);
     expect(allSql()).not.toMatch(/EXISTS/);
+  });
+});
+
+
+// ── Who bought, and can we count on them ───────────────────────────────────
+// Ten reports answer WHAT was sold. These three answer WHO bought it, which is
+// the question a loyalty programme is actually built on.
+describe('customer report — credibility and repeat history', () => {
+  it('reads settled documents, not pos_order', async () => {
+    // An order placed and never paid for is not a visit. Counting it would
+    // flatter every regular in the tenancy.
+    await reports.customerReport({ preset: 'month' }, TENANT);
+    const sql = sqlOf(/AS AvgDaysBetween/)[0];
+    expect(sql).toMatch(/transactiondetaillog/);
+  });
+
+  it('excludes a REFUNDED sale from every part of the report', async () => {
+    // The refund already reversed the visit, the spend and the points. A
+    // report that still counted it would contradict the customer record.
+    await reports.customerReport({ preset: 'month' }, TENANT);
+    ['AS AvgDaysBetween', 'AS KnownCustomers', 'AS Documents'].forEach((shape) => {
+      expect(sqlOf(new RegExp(shape))[0]).toMatch(/'SETTLED', 'PARTIALLY_PAID'/);
+    });
+  });
+
+  it('measures the identified rate against ALL sales, walk-ins included', async () => {
+    // Computed over known customers only, a repeat rate always looks wonderful.
+    const r = await reports.customerReport({ preset: 'month' }, TENANT);
+    expect(r.summary.Documents).toBe(10);
+    expect(r.summary.IdentifiedRate).toBe(50); // 5 known orders of 10 documents
+  });
+
+  it('reports the repeat rate over known customers', async () => {
+    const r = await reports.customerReport({ preset: 'month' }, TENANT);
+    expect(r.summary.RepeatRate).toBe(50); // 1 of 2
+  });
+
+  it('leaves a one-time buyer with no visit interval', async () => {
+    // 0 would read as "comes every day" — the opposite of the truth.
+    const r = await reports.customerReport({ preset: 'month' }, TENANT);
+    expect(r.customers.find((c) => c.Name === 'Arjun').AvgDaysBetween).toBeNull();
+    expect(r.customers.find((c) => c.Name === 'Priya R').AvgDaysBetween).toBe(6.3);
+  });
+
+  it('marks who is a repeat customer', async () => {
+    const r = await reports.customerReport({ preset: 'month' }, TENANT);
+    expect(r.customers.map((c) => c.IsRepeat)).toEqual([true, false]);
+  });
+
+  it('narrows to one customer on request', async () => {
+    await reports.customerReport({ preset: 'month', customerId: 'c1' }, TENANT);
+    expect(sqlOf(/AS AvgDaysBetween/)[0]).toMatch(/c\.Id = \?/);
+    expect(paramsOf(/AS AvgDaysBetween/)).toContain('c1');
+  });
+
+  it('filters out anyone below minOrders', async () => {
+    const r = await reports.customerReport({ preset: 'month', minOrders: 2 }, TENANT);
+    expect(r.customers.map((c) => c.Name)).toEqual(['Priya R']);
+  });
+
+  it('interpolates the row cap instead of binding it', async () => {
+    // LIMIT cannot be bound through mysqld_stmt_execute — binding it fails the
+    // whole report with ER_WRONG_ARGUMENTS.
+    await reports.customerReport({ preset: 'month', limit: 25 }, TENANT);
+    expect(sqlOf(/AS AvgDaysBetween/)[0]).toMatch(/LIMIT 25/);
+    expect(paramsOf(/AS AvgDaysBetween/)).not.toContain(25);
+  });
+
+  it('caps the row count however large a limit is asked for', async () => {
+    await reports.customerReport({ preset: 'month', limit: 99999 }, TENANT);
+    expect(sqlOf(/AS AvgDaysBetween/)[0]).toMatch(/LIMIT 500/);
+  });
+});
+
+describe('visit pattern — when they actually come in', () => {
+  it('returns the grid and both axes already totalled', async () => {
+    const r = await reports.visitPatternReport({ preset: 'month' }, TENANT);
+    expect(r.cells).toHaveLength(3);
+    expect(r.byDay).toHaveLength(7);   // every day, including the quiet ones
+    expect(r.byHour).toHaveLength(24);
+  });
+
+  it('names the day rather than leaving the caller to decode DAYOFWEEK', async () => {
+    const r = await reports.visitPatternReport({ preset: 'month' }, TENANT);
+    expect(r.cells[0].Day).toBe('Wednesday'); // MySQL DAYOFWEEK: 1 = Sunday
+  });
+
+  it('picks out the single busiest slot', async () => {
+    const r = await reports.visitPatternReport({ preset: 'month' }, TENANT);
+    expect(r.Busiest).toEqual({ Day: 'Wednesday', Hour: 20, Visits: 7 });
+  });
+
+  it('has no busiest slot when nothing was sold', async () => {
+    route({ pattern: [] });
+    const r = await reports.visitPatternReport({ preset: 'month' }, TENANT);
+    expect(r.Busiest).toBeNull();
+  });
+
+  it('excludes refunded sales here too', async () => {
+    await reports.visitPatternReport({ preset: 'month' }, TENANT);
+    expect(sqlOf(/AS Dow/)[0]).toMatch(/'SETTLED', 'PARTIALLY_PAID'/);
+  });
+});
+
+describe('lapsed customers — a targeting list, not a chart', () => {
+  it('sorts by lifetime spend, not by recency', async () => {
+    // The customer worth winning back is not the one who came most recently.
+    await reports.lapsedReport({ days: 30 }, TENANT);
+    expect(sqlOf(/AS DaysSince/)[0]).toMatch(/ORDER BY TotalSpent DESC/);
+  });
+
+  it('defaults to a 30-day threshold', async () => {
+    const r = await reports.lapsedReport({}, TENANT);
+    expect(r.thresholdDays).toBe(30);
+  });
+
+  it('clamps an absurd threshold instead of returning nonsense', async () => {
+    expect((await reports.lapsedReport({ days: 99999 }, TENANT)).thresholdDays).toBe(365);
+    expect((await reports.lapsedReport({ days: 0 }, TENANT)).thresholdDays).toBe(30);
+  });
+
+  it('returns money as numbers, not strings', async () => {
+    const r = await reports.lapsedReport({ days: 30 }, TENANT);
+    expect(r.customers[0].TotalSpent).toBe(9000);
+    expect(r.customers[0].DaysSince).toBe(117);
   });
 });
