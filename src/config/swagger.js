@@ -1981,6 +1981,116 @@ const swaggerSpec = {
           duplicate: { type: 'boolean', description: 'True when an idempotency key replayed — no second note was issued.' },
         },
       },
+      // ── Receipt format ──────────────────────────────────────────────────
+      ReceiptFormatResolved: {
+        type: 'object',
+        description:
+          'What prints on paper for this branch, every document type, defaults filled in and legal locks applied. This is what a RENDERER reads — the browser today, an ESC/POS writer later. Both read the same object, which is what stops the printer and the screen disagreeing about what a bill says.',
+        properties: {
+          branchId: { type: 'string', format: 'uuid' },
+          taxMode: {
+            type: 'string', enum: ['gst', 'composition', 'unregistered'],
+            description:
+              'How the branch charges tax. NOT a field — a mode, because it cascades: it decides the document title, whether tax rows exist at all, and whether the composition declaration is mandatory. Derived from the branch\'s own GSTIN unless explicitly set.',
+          },
+          documents: {
+            type: 'object',
+            description: 'One flat { fieldKey: value } map per document type.',
+            properties: {
+              bill: { type: 'object', additionalProperties: { type: 'string' } },
+              creditNote: { type: 'object', additionalProperties: { type: 'string' } },
+              kot: { type: 'object', additionalProperties: { type: 'string' } },
+              tokenSlip: { type: 'object', additionalProperties: { type: 'string' } },
+            },
+          },
+        },
+      },
+      ReceiptFormatField: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', example: 'customer' },
+          label: { type: 'string', example: 'Customer name & mobile' },
+          hint: { type: 'string', nullable: true },
+          type: {
+            type: 'string', enum: ['visibility', 'enum', 'text'],
+            description: '`visibility` fields take one of `states`; `enum` fields one of `options`; `text` is free text bounded by `maxLength`.',
+          },
+          states: {
+            type: 'array', nullable: true,
+            items: { type: 'string', enum: ['always', 'if_present', 'never'] },
+            description:
+              'THREE states, not two, wherever the answer depends on the SALE rather than on a preference. `always` prints "Customer: —" on every walk-in bill; `never` loses the name for the customers who did give one. `if_present` is what anyone actually wants, and no boolean can express it.',
+          },
+          options: {
+            type: 'array', nullable: true,
+            items: { type: 'object', properties: { value: { type: 'string' }, label: { type: 'string' } } },
+          },
+          maxLength: { type: 'integer', nullable: true },
+          default: { type: 'string' },
+          value: { type: 'string', description: 'In force now — the override, or the default, or the lock.' },
+          locked: {
+            type: 'object', nullable: true,
+            description:
+              'Present when the branch may NOT change this field. A settings screen that lets a restaurant print an illegal bill is a bad settings screen. A locked field takes the lock\'s value on every read, so an override written while a branch was GST registered stops applying the moment it is not.',
+            properties: {
+              reason: { type: 'string', example: 'Mandatory on a tax invoice' },
+              changeAt: { type: 'string', nullable: true, example: 'Branch → Tax' },
+            },
+          },
+          overridden: {
+            type: 'boolean',
+            description: 'Whether this branch has actually chosen a value, as opposed to inheriting the default. Drives the reset affordance.',
+          },
+        },
+      },
+      ReceiptFormatSchema: {
+        type: 'object',
+        description:
+          'One document\'s editable shape. The editor reads this and nothing else — it carries no copy of the field list, so a field added to the catalogue appears in the UI with no frontend change.',
+        properties: {
+          doc: { type: 'string', enum: ['bill', 'creditNote', 'kot', 'tokenSlip'] },
+          label: { type: 'string' },
+          description: { type: 'string' },
+          branchId: { type: 'string', format: 'uuid' },
+          taxMode: { type: 'string', enum: ['gst', 'composition', 'unregistered'] },
+          documents: {
+            type: 'array',
+            description: 'Every document type, so the editor renders its own tabs from one call.',
+            items: { type: 'object', properties: { key: { type: 'string' }, label: { type: 'string' } } },
+          },
+          sections: {
+            type: 'array',
+            description: 'In the order they appear on the paper, so the control list and the preview read top to bottom together.',
+            items: {
+              type: 'object',
+              properties: {
+                key: { type: 'string', example: 'header' },
+                label: { type: 'string', example: 'Header' },
+                fields: { type: 'array', items: { $ref: '#/components/schemas/ReceiptFormatField' } },
+              },
+            },
+          },
+        },
+      },
+      ReceiptFormatUpdate: {
+        type: 'object', required: ['values'],
+        properties: {
+          values: {
+            type: 'object',
+            additionalProperties: { type: 'string' },
+            minProperties: 1,
+            example: { customer: 'if_present', fssai: 'never', footerLine1: 'Thank you' },
+            description:
+              'Field key → value, for the document named in `doc`. Setting a field to its DEFAULT deletes the override rather than storing the default: a stored default looks identical until the default changes, at which point every branch that never chose anything is silently pinned to the old one.',
+          },
+        },
+      },
+      ReceiptTaxModeUpdate: {
+        type: 'object', required: ['taxMode'],
+        properties: {
+          taxMode: { type: 'string', enum: ['gst', 'composition', 'unregistered'] },
+        },
+      },
       LedgerCreditNote: {
         type: 'object',
         properties: {
@@ -4117,6 +4227,61 @@ const swaggerSpec = {
         parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosSettings' } } } },
         responses: { ...singleResponse('PosSettings'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── Receipt format ─────────────────────────────────────────────────────
+    // Stored in pos_setting, the table branch preferences already live in — no
+    // new table, and each outlet keeps its own format for free. READS are open
+    // to every scope that can operate a till, because the Print button has to
+    // know the format and a cashier holds neither POS_CONFIG:READ nor
+    // TRANSACTIONS:READ. WRITES are POS_CONFIG:WRITE.
+    '/api/pos/receipt-format': {
+      get: {
+        tags: ['ReceiptFormat'],
+        summary: 'Resolved receipt format for every document type',
+        description:
+          'What a renderer reads. Defaults filled in, branch overrides applied, legal locks enforced.\n\nOnly OVERRIDES are stored, so a branch that accepts every default holds zero rows and picks up an improved default automatically.',
+        security,
+        parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { ...singleResponse('ReceiptFormatResolved'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+      put: {
+        tags: ['ReceiptFormat'],
+        summary: 'Save one document\'s receipt format',
+        description:
+          'Saves the named document\'s fields for this branch, in one transaction.\n\n**A locked field is refused, not ignored** (409). Silently dropping it would mean the editor shows one thing and the printer does another, which is the worst of the three outcomes.\n\nRequires POS_CONFIG:WRITE. Audited.',
+        security,
+        parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }, { name: 'doc', in: 'query', required: true, schema: { type: 'string', enum: ['bill', 'creditNote', 'kot', 'tokenSlip'] } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ReceiptFormatUpdate' } } } },
+        responses: {
+          ...singleResponse('ReceiptFormatSchema'),
+          409: { description: 'A field in the request is locked for this branch — the message names it and why' },
+          ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/pos/receipt-format/schema': {
+      get: {
+        tags: ['ReceiptFormat'],
+        summary: 'One document\'s editable fields, values and locks',
+        description:
+          'Everything the format editor needs, in one call: the field catalogue in paper order, each field\'s current value, which fields this branch may not change and why, and the list of document types for its tabs.\n\nThe editor carries no copy of the field list, so a field added to the catalogue appears in the UI with no frontend change at all.',
+        security,
+        parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }, { name: 'doc', in: 'query', required: true, schema: { type: 'string', enum: ['bill', 'creditNote', 'kot', 'tokenSlip'] } }],
+        responses: { ...singleResponse('ReceiptFormatSchema'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/receipt-format/tax-mode': {
+      put: {
+        tags: ['ReceiptFormat'],
+        summary: 'Set how the branch charges tax',
+        description:
+          'Its OWN route rather than a field on a document, because it changes which fields are locked. Folding it into the document save would let one request flip the mode and a now-locked field together, with the outcome depending on key order.\n\nChanging it cascades: `composition` and `unregistered` retitle the document BILL OF SUPPLY, force the tax rows off, and (for composition) lock the mandatory declaration on.\n\nRequires POS_CONFIG:WRITE. Audited at WARN — it governs what a legal document says.',
+        security,
+        parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ReceiptTaxModeUpdate' } } } },
+        responses: { ...singleResponse('ReceiptFormatResolved'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
       },
     },
 

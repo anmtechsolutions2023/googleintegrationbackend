@@ -76,6 +76,7 @@ const poswebhookRoutes = require('../modules/poswebhook/poswebhook.routes');
 const posfeedbackRoutes = require('../modules/posfeedback/posfeedback.routes');
 const postokenRoutes = require('../modules/postoken/postoken.routes');
 const possettingRoutes = require('../modules/possetting/possetting.routes');
+const receiptFormatRoutes = require('../modules/posreceipt/receipt.format.routes');
 const posbranchRoutes = require('../modules/posbranch/posbranch.routes');
 const posexpenseRoutes = require('../modules/posexpense/posexpense.routes');
 const posreportRoutes = require('../modules/posreport/posreport.routes');
@@ -275,6 +276,10 @@ const registerRoutes = (app) => {
   app.use('/api/pos/feedback', posfeedbackRoutes);
   app.use('/api/pos/tokens', postokenRoutes);
   app.use('/api/pos/settings', possettingRoutes);
+  // What prints on paper, per branch. Beside settings because that is what it
+  // is — but its own module: the catalogue of printable fields, their legal
+  // locks and their defaults is a different concern from token numbering.
+  app.use('/api/pos/receipt-format', receiptFormatRoutes);
   app.use('/api/pos/branches', posbranchRoutes);
   app.use('/api/pos/expenses', posexpenseRoutes);
   app.use('/api/pos/reports', posreportRoutes);

@@ -1477,6 +1477,16 @@ module.exports = {
         INSERT INTO pos_setting (Id, TenantId, BranchDetailId, SettingKey, SettingValue, Active, CreatedOn, CreatedBy, UpdatedBy)
         VALUES (?, ?, ?, ?, ?, 1, NOW(), ?, ?)
         ON DUPLICATE KEY UPDATE SettingValue = VALUES(SettingValue), UpdatedOn = NOW(), UpdatedBy = VALUES(UpdatedBy)`,
+      // Setting a field back to its default DELETES the override rather than
+      // storing the default value. A stored default looks identical until the
+      // default changes, at which point every branch that never chose anything
+      // is silently pinned to the old one.
+      DELETE_KEY:
+        'DELETE FROM pos_setting WHERE TenantId = ? AND BranchDetailId = ? AND SettingKey = ?',
+      // Only the receipt keys, for one branch. LIKE on a prefix rather than
+      // reading every setting the branch holds.
+      SELECT_BY_PREFIX:
+        "SELECT SettingKey, SettingValue FROM pos_setting WHERE TenantId = ? AND BranchDetailId = ? AND SettingKey LIKE CONCAT(?, '%')",
     },
 
     // Everything hanging off ONE round: the token handed for it, its kitchen
