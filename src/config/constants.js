@@ -2917,7 +2917,20 @@ module.exports = {
     // actually write it: keys are whitelisted, and a key the reader knows but
     // the whitelist does not is a setting that silently cannot be changed.
     LOYALTY_RATE: 'loyalty.rupees_per_point',
+    // Whether sending a round to the kitchen also puts it on paper. WHEN it
+    // prints only; HOW MANY copies is already a per-document field in the
+    // receipt format (Receipt Format → Kitchen ticket → Copies), and a second
+    // control for the same thing would let the two disagree.
+    KOT_AUTO_PRINT: 'kot.auto_print',
   },
+
+  // Values for POS_SETTING_KEYS.KOT_AUTO_PRINT.
+  //   ON  — the ticket prints the moment the round is sent. What a kitchen
+  //         printer is for: nobody has to remember a second action.
+  //   OFF — nothing prints automatically; the pass keeps a Print button for
+  //         reprints. For a screen-only kitchen with no printer attached.
+  KOT_AUTO_PRINT: { ON: 'on', OFF: 'off' },
+  KOT_AUTO_PRINT_DEFAULT: 'on',
   // Series tag + fallback prefix for 'series' numbering.
   POS_TOKEN_SERIES: { TAG: 'POS_TOKEN', PREFIX: 'TOK' },
   // Ordered: the Tracking board advances an order one stage at a time, so the

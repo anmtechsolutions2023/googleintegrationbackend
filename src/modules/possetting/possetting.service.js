@@ -19,6 +19,7 @@ const {
   TOKEN_NUMBERING,
   TOKEN_NUMBERING_DEFAULT,
   LOYALTY,
+  KOT_AUTO_PRINT_DEFAULT,
 } = require('../../config/constants');
 
 // Every key this module recognises, with the value it falls back to. Unknown
@@ -28,6 +29,9 @@ const DEFAULTS = {
   // Rendered as a string like every stored setting; the loyalty service reads
   // it back through Number() and falls back to this same constant.
   [POS_SETTING_KEYS.LOYALTY_RATE]: String(LOYALTY.RUPEES_PER_POINT),
+  // On by default: a kitchen that has a printer expects the ticket, and a
+  // branch with no printer sees the browser dialog once and turns it off.
+  [POS_SETTING_KEYS.KOT_AUTO_PRINT]: KOT_AUTO_PRINT_DEFAULT,
 };
 
 /**

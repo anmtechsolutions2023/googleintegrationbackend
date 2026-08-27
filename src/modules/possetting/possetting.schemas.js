@@ -2,7 +2,9 @@
 // Joi validation schemas for per-branch POS settings.
 
 const Joi = require('joi');
-const { TOKEN_NUMBERING, POS_SETTING_KEYS } = require('../../config/constants');
+const {
+  TOKEN_NUMBERING, POS_SETTING_KEYS, KOT_AUTO_PRINT,
+} = require('../../config/constants');
 
 // The branch is the address of every setting, so it is required on both the
 // read and the write — there is no tenant-wide row to fall back to.
@@ -23,6 +25,9 @@ const updateSchema = Joi.object({
   [POS_SETTING_KEYS.LOYALTY_RATE]: Joi.number()
     .positive()
     .max(100000)
+    .optional(),
+  [POS_SETTING_KEYS.KOT_AUTO_PRINT]: Joi.string()
+    .valid(...Object.values(KOT_AUTO_PRINT))
     .optional(),
 }).min(1);
 

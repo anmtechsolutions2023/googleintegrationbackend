@@ -66,13 +66,21 @@ describe('reading a branch\'s settings', () => {
   it('fills in defaults for keys never set, so the UI renders something', async () => {
     rows.all = [];
     expect(await service.getBranchSettings(BRANCH, TENANT))
-      .toEqual({ 'token.numbering': 'daily', 'loyalty.rupees_per_point': '100' });
+      .toEqual({
+        'token.numbering': 'daily',
+        'loyalty.rupees_per_point': '100',
+        'kot.auto_print': 'on',
+      });
   });
 
   it('stored values win over defaults', async () => {
     rows.all = [{ SettingKey: 'token.numbering', SettingValue: 'series' }];
     expect(await service.getBranchSettings(BRANCH, TENANT))
-      .toEqual({ 'token.numbering': 'series', 'loyalty.rupees_per_point': '100' });
+      .toEqual({
+        'token.numbering': 'series',
+        'loyalty.rupees_per_point': '100',
+        'kot.auto_print': 'on',
+      });
   });
 
   it('returns every key the settings endpoint accepts', async () => {
