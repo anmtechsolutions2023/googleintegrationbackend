@@ -11,6 +11,7 @@
 // atomically with the rest of the bootstrap.
 
 const { v4: uuidv4 } = require('uuid');
+const { POS_RETURN_REASONS } = require('../../config/constants');
 
 // Tender → the account the money LANDS IN. Without this mapping every tender
 // books to 'Sales' and no account means anything: cash sales and card sales
@@ -98,10 +99,26 @@ const SERIES = [
   // Counter tokens, for branches set to 'series' numbering. Branches on the
   // default 'daily' setting count in pos_token_counter and never touch this.
   ['POS_TOKEN', 'TOK', 'TOK-{0000}'],
+  // Credit notes. Their own series so an accountant reading CN-0007 knows it is
+  // the seventh return, not the seventh document of mixed kinds — the same
+  // reason sales and expenses do not share a counter.
+  ['POS_RETURN', 'CN', 'CN-{0000}'],
 ];
 
 // Permitted status moves per series. SETTLED → CANCELLED is deliberately absent
 // — a settled document is reversed by REFUNDED, never voided.
+// A credit note's own lifecycle. It is raised and settled in one act at the
+// till, so DRAFT → SETTLED is the whole of it; CANCELLED exists for a note
+// voided before the money moved.
+//
+// Note what is NOT here: any transition on the SALE. The sale is never mutated
+// by a return — how refunded it is, is derived from the notes against it. That
+// is what lets a second partial return happen at all.
+const RETURN_TRANSITIONS = [
+  ['DRAFT', 'SETTLED', 'POS_RETURN_SETTLE'],
+  ['DRAFT', 'CANCELLED', 'POS_RETURN_VOID'],
+];
+
 const TRANSITIONS = [
   ['DRAFT', 'SETTLED', 'POS_SALE_SETTLE'],
   ['DRAFT', 'PARTIALLY_PAID', 'POS_SALE_PART_PAY'],
@@ -295,6 +312,11 @@ const provisionPosMasters = async (conn, { tenantId }, userEmail) => {
     'INSERT INTO transactiontype (Id, Name, TransactionTypeConfigId, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, 1, ?, NOW(), ?, ?)',
     (id) => [id, 'Expense', seriesId.EXPENSE, tenantId, by, by],
   );
+  await ensureByName(
+    conn, 'transactiontype', 'Name', 'POS Return', tenantId,
+    'INSERT INTO transactiontype (Id, Name, TransactionTypeConfigId, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, 1, ?, NOW(), ?, ?)',
+    (id) => [id, 'POS Return', seriesId.POS_RETURN, tenantId, by, by],
+  );
 
   // Permitted status transitions, per series.
   for (const [from, to, tag] of TRANSITIONS) {
@@ -311,6 +333,24 @@ const provisionPosMasters = async (conn, { tenantId }, userEmail) => {
       tenantId, by,
     );
   }
+  for (const [from, to, tag] of RETURN_TRANSITIONS) {
+    await ensureTransition(
+      conn,
+      { configId: seriesId.POS_RETURN, fromId: statusId[from], toId: statusId[to], tag },
+      tenantId, by,
+    );
+  }
+
+  // Why goods came back. Without a taxonomy the reason is free text and
+  // "what are we refunding for?" cannot be grouped, so the question goes
+  // unasked — see the pos_return_reason table comment.
+  for (const [Name, Code, IsFault, SortOrder] of POS_RETURN_REASONS) {
+    await ensureByName(
+      conn, 'pos_return_reason', 'Code', Code, tenantId,
+      'INSERT INTO pos_return_reason (Id, Name, Code, Description, IsFault, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, NULL, ?, ?, ?, 1, NOW(), ?, ?)',
+      (id) => [id, Name, Code, IsFault, SortOrder, tenantId, by, by],
+    );
+  }
 };
 
 module.exports = {
@@ -322,6 +362,7 @@ module.exports = {
   SERIES,
   TRANSITIONS,
   EXPENSE_TRANSITIONS,
+  RETURN_TRANSITIONS,
   EXPENSE_CATEGORIES,
   ASSET_CATEGORIES,
   FOOD_TYPES,

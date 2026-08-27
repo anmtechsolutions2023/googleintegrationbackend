@@ -165,3 +165,35 @@ describe('taking a refunded sale back off the record', () => {
     await expect(stats.reverseSaleTx(mockConn, 'ghost', 100, TENANT, USER)).resolves.toBe(false);
   });
 });
+
+// ── Partial returns must not erase a visit ──────────────────────────────────
+// REVERSE_SALE decremented Visits unconditionally, so a customer who sent back
+// a single naan from a four-item dinner lost a whole visit from their history —
+// and three partial returns could take three visits for one meal.
+describe('reverseSaleTx — visit vs value', () => {
+  const customerWrites = () => executed.filter((e) => /UPDATE pos_customer/.test(e.sql));
+  const visitWrites = () => customerWrites().filter((e) => /Visits/.test(e.sql));
+
+  it('takes the visit off on a FULL return', async () => {
+    await stats.reverseSaleTx(mockConn, 'c1', 1180, TENANT, USER, { removeVisit: true });
+    expect(visitWrites()).toHaveLength(1);
+  });
+
+  it('leaves the visit standing on a PARTIAL return', async () => {
+    await stats.reverseSaleTx(mockConn, 'c1', 236, TENANT, USER, { removeVisit: false });
+    expect(visitWrites()).toHaveLength(0);
+
+    // The spend still comes off — by the value actually returned, not the
+    // whole sale.
+    const write = customerWrites()[0];
+    expect(write.sql).toMatch(/TotalSpent = GREATEST\(TotalSpent - \?, 0\)/);
+    expect(write.params[0]).toBe(236);
+  });
+
+  // The pre-existing full-refund caller passes no options at all, so the
+  // default has to be the behaviour it already relied on.
+  it('defaults to removing the visit, so the old caller is unchanged', async () => {
+    await stats.reverseSaleTx(mockConn, 'c1', 1180, TENANT, USER);
+    expect(visitWrites()).toHaveLength(1);
+  });
+});

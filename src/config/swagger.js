@@ -1615,6 +1615,42 @@ const swaggerSpec = {
           Active: {"type":"boolean"},
         },
       },
+      // Why goods came back. A master rather than free text: twelve cashiers
+      // produce twelve spellings of "wrong item", so returns could not be
+      // grouped and the question went unasked.
+      PosReturnReasonCreate: {
+        type: 'object', required: ["Name", "Code"],
+        properties: {
+          Name: {"type":"string","example":"Wrong item served"},
+          Code: {"type":"string","example":"WRONG_ITEM"},
+          Description: {"type":"string"},
+          IsFault: {"type":"boolean","default":false,"description":"Whether this reason means WE got it wrong, as opposed to the customer changing their mind. That one flag is what turns a refund report into a kitchen-quality signal."},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosReturnReasonUpdate: {
+        type: 'object',
+        properties: {
+          Name: {"type":"string"},
+          Code: {"type":"string"},
+          Description: {"type":"string"},
+          IsFault: {"type":"boolean"},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosReturnReason: {
+        type: 'object',
+        properties: { ...auditFields,
+          Name: {"type":"string"},
+          Code: {"type":"string"},
+          Description: {"type":"string"},
+          IsFault: {"type":"boolean"},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
       PosVariantCreate: {
         type: 'object', required: ["Name", "Code"],
         properties: {
@@ -1876,6 +1912,130 @@ const swaggerSpec = {
       // A CHANNEL answers "how was this sold"; a PORTAL answers "who sold it
       // for us". A portal is a seller ON a channel, which is why it carries a
       // ChannelId rather than being one.
+      // ── Returns ─────────────────────────────────────────────────────────
+      LedgerReturnLine: {
+        type: 'object', required: ['lineId', 'quantity'],
+        properties: {
+          lineId: { type: 'string', format: 'uuid', description: 'A line on the ORIGINAL invoice (Lines[].Id from GET /documents/{id})' },
+          quantity: { type: 'number', description: 'How many units came back. "2 of 3" is the normal case.' },
+          restock: { type: 'boolean', default: false, description: 'INTENT ONLY — there is no stock ledger, so nothing is decremented. Recorded so the data exists when one lands.' },
+        },
+      },
+      LedgerReturnCreate: {
+        type: 'object',
+        properties: {
+          lines: {
+            type: 'array', items: { $ref: '#/components/schemas/LedgerReturnLine' }, maxItems: 200,
+            description: 'Omit or leave empty to return everything still outstanding — which is what makes a full refund a special case of this rather than a second code path.',
+          },
+          reasonId: { type: 'string', format: 'uuid', description: 'A pos_return_reason. Coded, because free text cannot be grouped and "what are we refunding for?" then has no answer.' },
+          note: { type: 'string', maxLength: 500, description: 'Free text ALONGSIDE the coded reason, never instead of it.' },
+          destination: {
+            type: 'string', enum: ['ORIGINAL', 'STORE_CREDIT'], default: 'ORIGINAL',
+            description: 'ORIGINAL mirrors each tender back to the mode it arrived on, cash first. STORE_CREDIT books a LIABILITY instead — nothing leaves the drawer, so booking it as cash would make the till short by an amount that never moved.',
+          },
+          idempotencyKey: { type: 'string', maxLength: 100, description: 'Makes a double-clicked Refund button safe. Replaying returns the note that already exists rather than issuing a second one.' },
+        },
+      },
+      LedgerReturnResult: {
+        type: 'object',
+        properties: {
+          transactionDetailLogId: { type: 'string', format: 'uuid', description: 'The CREDIT NOTE' },
+          transactionNo: { type: 'string', example: 'CN-0007' },
+          grossAmount: { type: 'number' },
+          netAmount: { type: 'number' },
+          taxAmount: { type: 'number' },
+          lines: { type: 'integer' },
+          refundState: {
+            type: 'string', enum: ['NONE', 'PARTIALLY_REFUNDED', 'REFUNDED'],
+            description: 'How refunded the SALE now is. DERIVED from SUM(credit notes) against its gross — never stored, so it cannot disagree with the notes behind it.',
+          },
+          totalReturned: { type: 'number' },
+          saleGross: { type: 'number', description: 'Unchanged. The original total is what the customer\'s printed bill says.' },
+          duplicate: { type: 'boolean', description: 'True when an idempotency key replayed — no second note was issued.' },
+        },
+      },
+      LedgerCreditNote: {
+        type: 'object',
+        properties: {
+          Id: { type: 'string', format: 'uuid' },
+          TransactionNo: { type: 'string', example: 'CN-0007' },
+          TransactionDate: { type: 'string', format: 'date' },
+          GrossAmount: { type: 'number' },
+          NetAmount: { type: 'number' },
+          TaxAmount: { type: 'number' },
+          SettlementStatus: { type: 'string', enum: ['PENDING', 'SETTLED', 'FAILED'] },
+          SettlementRef: { type: 'string', nullable: true },
+          ReasonName: { type: 'string', nullable: true },
+          ReasonCode: { type: 'string', nullable: true },
+          IsFault: { type: 'boolean', description: 'Whether the reason means WE got it wrong, as opposed to the customer changing their mind. That one flag is what turns a refund report into a kitchen-quality signal.' },
+          Remarks: { type: 'string', nullable: true },
+          CreatedOn: { type: 'string', format: 'date-time' },
+          CreatedBy: { type: 'string' },
+        },
+      },
+      LedgerSettlementUpdate: {
+        type: 'object', required: ['SettlementStatus'],
+        properties: {
+          SettlementStatus: { type: 'string', enum: ['PENDING', 'SETTLED', 'FAILED'] },
+          SettlementRef: { type: 'string', maxLength: 100, description: 'The acquirer/PSP reference, once a gateway exists.' },
+        },
+      },
+      ReportReturnReasons: {
+        type: 'object',
+        properties: {
+          range: reportRange,
+          reasons: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                ReasonName: { type: 'string' },
+                ReasonCode: { type: 'string' },
+                IsFault: { type: 'boolean' },
+                ReturnCount: { type: 'integer' },
+                ReturnedAmount: { type: 'number' },
+                Share: { type: 'number', description: '% of returned value' },
+              },
+            },
+          },
+          totals: {
+            type: 'object',
+            properties: {
+              ReturnedAmount: { type: 'number' },
+              FaultAmount: { type: 'number', description: 'The share caused by something WE got wrong.' },
+              ReturnCount: { type: 'integer' },
+            },
+          },
+        },
+      },
+      ReportReturnProducts: {
+        type: 'object',
+        properties: {
+          range: reportRange,
+          products: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                ItemId: { type: 'string', format: 'uuid' },
+                ItemName: { type: 'string' },
+                QuantityReturned: { type: 'number' },
+                QuantitySold: { type: 'number' },
+                ReturnedAmount: { type: 'number' },
+                SoldAmount: { type: 'number' },
+                ReturnCount: { type: 'integer' },
+                QuantityRestockable: { type: 'number', description: 'Where restock was requested. Intent only — there is no stock ledger.' },
+                ReturnRate: {
+                  type: 'number', nullable: true,
+                  description: 'Returned ÷ sold, as a %. The number worth acting on: a dish selling 500 that comes back 5 times is fine, one selling 20 that comes back 5 times is a kitchen problem. Null when it did not sell in the window.',
+                },
+              },
+            },
+          },
+        },
+      },
+
       PosPortalCreate: {
         type: 'object', required: ["Name", "Code"],
         properties: {
@@ -2844,12 +3004,103 @@ const swaggerSpec = {
         responses: { ...singleResponse('LedgerDocument'), ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },
     },
+    '/api/ledger/documents/{id}/returns': {
+      post: {
+        tags: ['Ledger'],
+        summary: 'Return selected lines against a settled sale (partial or full)',
+        description:
+          'Raises a **credit note** — its own numbered document (CN-{0000}) pointing back at the sale. '
+          + 'The sale is NEVER mutated: how refunded it is becomes a derived figure, '
+          + 'SUM(credit notes) against its gross, so partial returns simply accumulate and the invoice '
+          + 'still reads exactly as it did the day it settled.\n\n'
+          + '**Why not a status on the sale.** The old model moved it SETTLED → REFUNDED, which is '
+          + 'terminal: a second, smaller return was rejected at the transition whitelist, the loyalty '
+          + "ledger's unique key rejected the second claw-back, nothing recorded WHICH items came back, "
+          + 'and the sale dropped out of every revenue report — so last Tuesday\'s gross changed when '
+          + 'somebody refunded on Friday.\n\n'
+          + '**Guarantees.** The sale row is locked `FOR UPDATE` before anything is read, so two '
+          + 'cashiers refunding one invoice cannot both be allowed the whole amount. Returns can never '
+          + 'exceed the sale, a line can never return more than was sold, and no payment mode is ever '
+          + 'refunded more than it received. Lines are priced from the ORIGINAL line — an invoice '
+          + 'raised at 18% gives back 18%, whatever the rate is today.\n\n'
+          + 'Requires TRANSACTIONS:WRITE. Audited at WARN — who refunds what and how often is the '
+          + 'standard shrinkage control.',
+        security,
+        parameters: [idParam],
+        requestBody: { required: false, content: { 'application/json': { schema: { $ref: '#/components/schemas/LedgerReturnCreate' } } } },
+        responses: {
+          ...singleResponse('LedgerReturnResult', 201),
+          ...responses.validation, ...responses.conflict, ...responses.notFound,
+          ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+      get: {
+        tags: ['Ledger'],
+        summary: 'Every credit note raised against one sale',
+        description:
+          'The linked documents behind "₹500 of ₹1,240 returned" — each with its reason, amount, '
+          + 'tender and timestamp. The difference between a screen that says a sale was partly '
+          + 'refunded and one that says exactly what happened.',
+        security,
+        parameters: [idParam],
+        responses: {
+          200: {
+            description: 'Success',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: {
+                success: { type: 'boolean' },
+                message: { type: 'string' },
+                data: {
+                  type: 'object',
+                  properties: {
+                    Returns: { type: 'array', items: { $ref: '#/components/schemas/LedgerCreditNote' } },
+                    ReturnedAmount: { type: 'number' },
+                    ReturnCount: { type: 'integer' },
+                  },
+                },
+              },
+            } } },
+          },
+          ...responses.notFound, ...responses.unauthorized,
+        },
+      },
+    },
+    '/api/ledger/returns/settlement-queue': {
+      get: {
+        tags: ['Ledger'],
+        summary: 'Refunds recorded but not yet handed back',
+        description:
+          'The operational worklist. Usually empty today — a till refund is instant — which is '
+          + 'exactly why the shape exists now: the moment a payment gateway makes a refund '
+          + 'asynchronous, this is the queue somebody has to work, and adding it then would mean '
+          + 'reshaping documents already written without it.',
+        security,
+        responses: { ...listResponse('LedgerCreditNote'), ...responses.unauthorized },
+      },
+    },
+    '/api/ledger/returns/{id}/settlement': {
+      put: {
+        tags: ['Ledger'],
+        summary: 'Mark a refund as paid out, failed, or back to pending',
+        description:
+          'A human at the till today; a payment gateway later. The vocabulary exists from day one so '
+          + 'that later change needs no reshaping of documents already written. Requires TRANSACTIONS:WRITE.',
+        security,
+        parameters: [idParam],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/LedgerSettlementUpdate' } } } },
+        responses: {
+          ...responses.success, ...responses.validation, ...responses.notFound,
+          ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
     '/api/ledger/documents/{id}/refund': {
       post: {
         tags: ['Ledger'],
         summary: 'Reverse a settled document (whole document)',
         description:
-          'Moves SETTLED → REFUNDED and writes a negative tender back to the mode each payment came in on.\n\n**Nothing is deleted or overwritten** — the original document stands and the reversal sits beside it. Only a SETTLED document can be refunded; the transition whitelist has no SETTLED → CANCELLED. Requires TRANSACTIONS:WRITE.',
+          'Reverses a whole document. Now a thin wrapper over `POST /documents/{id}/returns` with no line selection — "return everything still outstanding" — so there is one implementation of returning goods rather than two that drift.\n\n**The signature is unchanged and existing callers keep working.** What changes underneath: a CREDIT NOTE is raised instead of the sale being mutated, so the sale stays SETTLED, no longer vanishes from revenue reports, and can still be partially returned against afterwards if any of it was left.\n\n**Nothing is deleted or overwritten** — the original stands and the reversal sits beside it. Requires TRANSACTIONS:WRITE.',
         security,
         parameters: [idParam],
         requestBody: {
@@ -2881,6 +3132,20 @@ const swaggerSpec = {
     '/api/ledger/reports/channels': reportPath('LedgerReports', 'Revenue by sales channel', 'ReportChannels',
       'Dine-in, counter and delivery. Counter sales were always in every total — a counter bill posts the same ledger document as any other — but until this report nothing could name them.'),
     '/api/ledger/reports/discounts': reportPath('LedgerReports', 'What was given away, and why', 'ReportDiscounts'),
+    '/api/ledger/reports/return-reasons': reportPath('LedgerReports',
+      'Why goods came back', 'ReportReturnReasons',
+      'Whether returns are a kitchen problem, a menu problem or a till problem. '
+      + 'Unanswerable before returns became documents: the reason was free text, and twelve cashiers '
+      + 'produce twelve spellings of "wrong item", so it could not be grouped.\n\n'
+      + '`IsFault` splits what WE got wrong from what the customer simply changed their mind about — '
+      + 'merged, the total says nothing anyone can act on.'),
+    '/api/ledger/reports/return-products': reportPath('LedgerReports',
+      'Which dishes come back, and how often', 'ReportReturnProducts',
+      'Only answerable because a credit note carries its own priced lines, each naming the sale line '
+      + 'it reverses. Before that the data did not exist at any granularity.\n\n'
+      + '`ReturnRate` is the figure to act on rather than the raw count: a dish that sells 500 and '
+      + 'comes back 5 times is fine; one that sells 20 and comes back 5 times is a kitchen problem. '
+      + 'Ranking by count alone would put the popular dish at the top.'),
     '/api/ledger/reports/customers': reportPath('LedgerReports',
       'Who buys, how often, and how reliably', 'ReportCustomers',
       'Ten reports covered WHAT was sold; this one covers WHO bought it. '
@@ -3053,6 +3318,7 @@ const swaggerSpec = {
     ...crudPaths('PosTables', '/api/pos/tables', 'PosTableCreate', 'PosTableUpdate', 'PosTable', false),
     ...crudPaths('PosItemMeta', '/api/pos/item-meta', 'PosItemMetaCreate', 'PosItemMetaUpdate', 'PosItemMeta', false),
     ...crudPaths('PosChannels', '/api/pos/channels', 'PosChannelCreate', 'PosChannelUpdate', 'PosChannel', false),
+    ...crudPaths('PosReturnReasons', '/api/pos/return-reasons', 'PosReturnReasonCreate', 'PosReturnReasonUpdate', 'PosReturnReason', false),
     ...crudPaths('PosVariants', '/api/pos/variants', 'PosVariantCreate', 'PosVariantUpdate', 'PosVariant', false),
     ...crudPaths('PosCustomers', '/api/pos/customers', 'PosCustomerCreate', 'PosCustomerUpdate', 'PosCustomer', false),
     ...crudPaths('PosOrders', '/api/pos/orders', 'PosOrderCreate', 'PosOrderUpdate', 'PosOrder', false),

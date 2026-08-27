@@ -60,6 +60,7 @@ const posfloorRoutes = require('../modules/posfloor/posfloor.routes');
 const postableRoutes = require('../modules/postable/postable.routes');
 const positemmetaRoutes = require('../modules/positemmeta/positemmeta.routes');
 const poschannelRoutes = require('../modules/poschannel/poschannel.routes');
+const posreturnreasonRoutes = require('../modules/posreturnreason/posreturnreason.routes');
 const posvariantRoutes = require('../modules/posvariant/posvariant.routes');
 const posfoodtypeRoutes = require('../modules/posfoodtype/posfoodtype.routes');
 const poscustomerRoutes = require('../modules/poscustomer/poscustomer.routes');
@@ -257,6 +258,7 @@ const registerRoutes = (app) => {
   app.use('/api/pos/tables', postableRoutes);
   app.use('/api/pos/item-meta', positemmetaRoutes);
   app.use('/api/pos/channels', poschannelRoutes);
+  app.use('/api/pos/return-reasons', posreturnreasonRoutes);
   app.use('/api/pos/variants', posvariantRoutes);
   app.use('/api/pos/food-types', posfoodtypeRoutes);
   app.use('/api/pos/customers', poscustomerRoutes);
@@ -349,6 +351,7 @@ const registerRoutes = (app) => {
         { name: 'pos-tables', path: '/api/pos/tables' },
         { name: 'pos-item-meta', path: '/api/pos/item-meta' },
         { name: 'pos-channels', path: '/api/pos/channels' },
+        { name: 'pos-return-reasons', path: '/api/pos/return-reasons' },
         { name: 'pos-portals', path: '/api/pos/portals' },
         { name: 'pos-variants', path: '/api/pos/variants' },
         { name: 'pos-food-types', path: '/api/pos/food-types' },

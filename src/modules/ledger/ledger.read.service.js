@@ -8,6 +8,9 @@ const { withConnection } = require('../../utils/dbHelper');
 const { QUERIES, LEDGER } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
+// One implementation of "how refunded is this sale" — a second would eventually
+// disagree with the first.
+const { refundState } = require('./ledger.returns.service');
 const {
   calculatePagination,
   getPaginationMetadata,
@@ -84,10 +87,40 @@ const listDocuments = (filters, page, limit, tenantId) =>
       params,
     );
 
+    // How much has come back against each sale on this page.
+    //
+    // ONE grouped read for the whole page rather than a query per row: a ledger
+    // list is fifty documents and an N+1 here would be fifty round trips to
+    // render a column. The result is a map, so a document with no returns costs
+    // nothing.
+    const [returnedRows] = await conn.execute(
+      QUERIES.LEDGER.SELECT_RETURNED_TOTALS_BULK, [tenantId],
+    );
+    const returnedBySale = new Map(
+      (returnedRows || []).map((r) => [r.saleId, {
+        returned: Number(r.returned || 0),
+        noteCount: Number(r.noteCount || 0),
+      }]),
+    );
+
     return {
       // Same identification rule as the detail read, so a document cannot be
       // labelled one way in the list and another way when opened.
-      data: rows.map((r) => ({ ...r, Source: describeSourceRow(r) })),
+      data: rows.map((r) => {
+        const back = returnedBySale.get(r.Id) || { returned: 0, noteCount: 0 };
+        return {
+          ...r,
+          Source: describeSourceRow(r),
+          // Staff see "₹500 of ₹1,240 returned" without opening anything.
+          // GrossAmount is untouched: the original total is what the customer's
+          // printed bill says, and a list that overwrote it with the net would
+          // stop matching the paper.
+          ReturnedAmount: back.returned,
+          ReturnCount: back.noteCount,
+          NetOfReturns: Number((Number(r.GrossAmount || 0) - back.returned).toFixed(2)),
+          RefundState: refundState(r.GrossAmount, back.returned),
+        };
+      }),
       pagination: getPaginationMetadata(total, pageNum, limitNum),
     };
   });
@@ -112,6 +145,30 @@ const getDocument = (id, tenantId) =>
     // than an error.
     const [orders] = await conn.execute(QUERIES.LEDGER.SELECT_DOC_ORDERS, [id, tenantId]);
 
+    // ── Returns ─────────────────────────────────────────────────────────────
+    // Every credit note raised against this invoice, and how much of it has
+    // come back. This is the difference between a screen that says "partly
+    // refunded" and one that says exactly what happened, when, why and to
+    // which tender.
+    const [returnNotes] = await conn.execute(
+      QUERIES.LEDGER.SELECT_RETURNS_BY_SALE, [id, tenantId],
+    );
+    const [[returnedRow]] = await conn.execute(
+      QUERIES.LEDGER.SELECT_RETURNED_TOTAL, [id, tenantId],
+    );
+    const returnedAmount = Number(returnedRow?.returned || 0);
+
+    // Per line, how much has already gone back — so the UI can render
+    // "2 of 3 returned" against the line rather than mutating the quantity it
+    // was sold at. Mutating it would make the document stop matching the
+    // printed bill the customer is holding.
+    const [returnedLines] = await conn.execute(
+      QUERIES.LEDGER.SELECT_RETURNED_BY_LINE, [id, tenantId],
+    );
+    const returnedByLine = new Map(
+      (returnedLines || []).map((r) => [r.SourceLineId, Number(r.returnedQty || 0)]),
+    );
+
     return {
       ...log,
       TaxByComponent: parseJson(log.TaxByComponent) || [],
@@ -119,9 +176,22 @@ const getDocument = (id, tenantId) =>
         ...l,
         TaxComponents: parseJson(l.TaxComponents) || [],
         Variants: parseJson(l.Variants) || [],
+        // How many of this line have already come back.
+        ReturnedQty: returnedByLine.get(l.Id) || 0,
       })),
       Tenders: tenders,
       History: history,
+
+      // ── The returns picture ──────────────────────────────────────────────
+      // GrossAmount is deliberately NOT reduced. The original total is what the
+      // customer's printed bill says, and overwriting it with the net would make
+      // the document stop matching the piece of paper in their hand. Returns and
+      // Net ride alongside instead.
+      ReturnedAmount: returnedAmount,
+      NetOfReturns: Number((Number(log.GrossAmount || 0) - returnedAmount).toFixed(2)),
+      RefundState: refundState(log.GrossAmount, returnedAmount),
+      // Each note with its reason, amount and timestamp.
+      Returns: returnNotes || [],
       // Each round with its token (if any) and the venue it was served at, so
       // the document can be traced back to the floor it came from.
       Orders: orders,
@@ -134,4 +204,55 @@ const getDocument = (id, tenantId) =>
     };
   });
 
-module.exports = { listDocuments, getDocument };
+/**
+ * Every credit note against one sale.
+ *
+ * Its own endpoint as well as part of getDocument, because the returns worklist
+ * needs it without paying for a full document read.
+ */
+const listReturnsForSale = (saleId, tenantId) =>
+  withConnection(async (conn) => {
+    const [notes] = await conn.execute(QUERIES.LEDGER.SELECT_RETURNS_BY_SALE, [saleId, tenantId]);
+    const [[totals]] = await conn.execute(QUERIES.LEDGER.SELECT_RETURNED_TOTAL, [saleId, tenantId]);
+    return {
+      Returns: notes || [],
+      ReturnedAmount: Number(totals?.returned || 0),
+      ReturnCount: Number(totals?.noteCount || 0),
+    };
+  });
+
+/**
+ * Refunds recorded but not yet handed over.
+ *
+ * Empty in normal operation today — a till refund is instant — which is exactly
+ * why the shape exists now: the moment a payment gateway makes a refund
+ * asynchronous, this is the queue somebody has to work, and adding it then
+ * would mean reshaping documents already written without it.
+ */
+const pendingSettlements = (tenantId) =>
+  withConnection(async (conn) => {
+    const [rows] = await conn.execute(
+      QUERIES.LEDGER.SELECT_PENDING_SETTLEMENTS, [tenantId, LEDGER.TYPE_POS_RETURN],
+    );
+    return rows || [];
+  });
+
+/** Mark a refund as actually paid out, failed, or back to pending. */
+const setSettlementStatus = (noteId, body, tenantId, userEmail) =>
+  withConnection(async (conn) => {
+    const [result] = await conn.execute(QUERIES.LEDGER.SET_SETTLEMENT_STATUS, [
+      body.SettlementStatus, body.SettlementRef || null, userEmail, noteId, tenantId,
+    ]);
+    if (!result.affectedRows) {
+      throw new HttpError('Credit note not found.', MESSAGES.HTTP_STATUS.NOT_FOUND);
+    }
+    return { Id: noteId, SettlementStatus: body.SettlementStatus };
+  });
+
+module.exports = {
+  listDocuments,
+  getDocument,
+  listReturnsForSale,
+  pendingSettlements,
+  setSettlementStatus,
+};

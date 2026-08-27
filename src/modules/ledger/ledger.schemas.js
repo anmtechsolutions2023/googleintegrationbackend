@@ -1,6 +1,7 @@
 // src/modules/ledger/ledger.schemas.js
 const Joi = require('joi');
 const { VALID_PRESETS, VALID_BUCKETS } = require('../../utils/dateRange');
+const { LEDGER } = require('../../config/constants');
 
 const listQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).optional().default(1),
@@ -14,7 +15,49 @@ const listQuerySchema = Joi.object({
 
 const refundSchema = Joi.object({
   // Recorded on the reversing tender so a refund is never unexplained.
+  //
+  // Kept as free text and kept working: this is the WHOLE-document refund, and
+  // every existing caller sends exactly this. A partial return goes through
+  // returnSchema below, which takes a coded reason instead.
   Reason: Joi.string().max(100).optional().allow(null, ''),
+});
+
+// One line coming back. Quantity rather than a flag, because "2 of 3" is the
+// normal case — a customer sends back some of what they ordered, not a whole
+// line, and certainly not a whole bill.
+const returnLineSchema = Joi.object({
+  lineId: Joi.string().uuid().required(),
+  quantity: Joi.number().positive().precision(4).required(),
+  // Intent only — there is no stock ledger to restock into. See the
+  // RestockRequested column comment in the schema.
+  restock: Joi.boolean().optional().default(false),
+});
+
+const returnSchema = Joi.object({
+  // Empty or omitted means "everything still outstanding", which is what makes
+  // a full refund a special case of this rather than a second code path.
+  lines: Joi.array().items(returnLineSchema).max(200).optional().default([]),
+  // The CODED reason. Free text cannot be grouped, so "what are we refunding
+  // for?" was unanswerable — see pos_return_reason.
+  reasonId: Joi.string().uuid().optional().allow(null),
+  // Alongside the code, never instead of it: the code is what reports group by,
+  // the note is what a human needs to read.
+  note: Joi.string().max(500).optional().allow(null, ''),
+  destination: Joi.string()
+    .valid(...Object.values(LEDGER.REFUND_DESTINATION))
+    .optional()
+    .default(LEDGER.REFUND_DESTINATION.ORIGINAL),
+  // Makes a double-clicked Refund button safe. The old model's accidental guard
+  // was the status transition failing the second time; removing that terminal
+  // state removes the guard, so this replaces it explicitly.
+  idempotencyKey: Joi.string().max(100).optional().allow(null, ''),
+});
+
+// Marking a refund as actually paid out. Today that is a human at the till;
+// the vocabulary exists so a payment gateway can drive it later.
+const settlementSchema = Joi.object({
+  SettlementStatus: Joi.string().valid(...LEDGER.SETTLEMENT_STATUSES).required(),
+  SettlementRef: Joi.string().max(100).optional().allow(null, ''),
 });
 
 /**
@@ -71,4 +114,7 @@ const reportQuerySchema = Joi.object({
 
 const uuidParamSchema = Joi.object({ id: Joi.string().uuid().required() });
 
-module.exports = { listQuerySchema, refundSchema, reportQuerySchema, uuidParamSchema };
+module.exports = {
+  listQuerySchema, refundSchema, returnSchema, settlementSchema,
+  reportQuerySchema, uuidParamSchema,
+};

@@ -28,36 +28,12 @@ const contactResolver = require('./contactResolver.service');
 const { logger } = require('../../utils/logger');
 const customerStats = require('../poscustomer/poscustomer.stats.service');
 const loyalty = require('../loyalty/loyalty.service');
+// Shared with the returns service. Lifted out so a credit note does not have to
+// import the sale posting it reverses — see ledger.primitives.js.
+const { requireMaster, applyRoundOff, transitionStatus } = require('./ledger.primitives');
+const returnsService = require('./ledger.returns.service');
 
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
-
-/** Looks a master up by name, failing loudly — a missing master is a seed bug. */
-const requireMaster = async (conn, query, name, tenantId, label) => {
-  const [rows] = await conn.execute(query, [name, tenantId]);
-  if (!rows || rows.length === 0) {
-    throw new HttpError(
-      `${MESSAGES.ERROR.LEDGER_MASTER_MISSING}${label} '${name}'.`,
-      MESSAGES.HTTP_STATUS.BAD_REQUEST,
-    );
-  }
-  return rows[0];
-};
-
-/**
- * Rounds a payable to the nearest rupee and reports the adjustment.
- * Cash tills cannot hand over paise, so the ledger records the rounding rather
- * than letting it vanish into a mismatched total.
- * @param {number} gross
- * @returns {{roundedGross:number, roundOff:number}}
- */
-const applyRoundOff = (gross) => {
-  const grossMinor = toMinor(gross);
-  const roundedMinor = Math.round(grossMinor / 100) * 100;
-  return {
-    roundedGross: fromMinor(roundedMinor),
-    roundOff: fromMinor(roundedMinor - grossMinor),
-  };
-};
 
 /**
  * Resolves the tender's payment mode and the account the money lands in.
@@ -95,34 +71,6 @@ const resolveTenderMode = async (conn, tender, tenantId) => {
     );
   }
   return mode;
-};
-
-/**
- * Moves a document to a new status, but only if the whitelist permits it, and
- * records the move.
- *
- * This is the state machine doing its job: `transactiontypebaseconversion` is
- * the rule, `transactiontypeconversionmapper` is the event.
- */
-const transitionStatus = async (
-  conn, { logId, configId, fromStatusId, toStatusId, settledAt }, tenantId, userEmail,
-) => {
-  const [permitted] = await conn.execute(QUERIES.LEDGER.SELECT_TRANSITION, [
-    configId, fromStatusId, toStatusId, tenantId,
-  ]);
-  if (!permitted || permitted.length === 0) {
-    throw new HttpError(
-      MESSAGES.ERROR.LEDGER_TRANSITION_NOT_ALLOWED,
-      MESSAGES.HTTP_STATUS.CONFLICT,
-    );
-  }
-
-  await conn.execute(QUERIES.LEDGER.INSERT_CONVERSION_MAPPER, [
-    uuidv4(), tenantId, permitted[0].Id, logId, toStatusId, userEmail, userEmail,
-  ]);
-  await conn.execute(QUERIES.LEDGER.UPDATE_LOG_STATUS, [
-    toStatusId, settledAt ?? null, userEmail, logId, tenantId,
-  ]);
 };
 
 /**
@@ -301,109 +249,46 @@ const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
 };
 
 /**
- * Reverses a settled document.
+ * Reverses a settled document, in full.
  *
- * Nothing is deleted or overwritten: the original stands, the status moves
- * SETTLED → REFUNDED (recorded), and a negative tender is written so the money
- * out is as traceable as the money in.
+ * ── Now a thin wrapper, deliberately ────────────────────────────────────────
+ * This used to BE the refund: it moved the sale's own status SETTLED →
+ * REFUNDED and mirrored every tender back. That worked for exactly one refund
+ * of exactly the whole amount, and failed at the state machine on the second.
+ *
+ * The work now lives in ledger.returns.service.createReturnTx, which raises a
+ * credit note against the sale instead of mutating it. A FULL refund is simply
+ * that call with no line selection — "return everything still outstanding" —
+ * so there is one implementation of returning goods rather than two that drift.
+ *
+ * The signature is unchanged and every existing caller keeps working. What
+ * changes underneath: the sale is no longer mutated, so a document refunded
+ * through this path can still be partially returned against afterwards if some
+ * of it was left, and it no longer vanishes from revenue reports.
+ *
+ * @param {Object} conn - Open transaction connection.
+ * @param {string} logId - The sale to reverse.
+ * @param {string} reason - Free text, kept as the note on the credit note.
+ * @returns {Promise<Object>} { transactionDetailLogId, status, creditNoteNo }
  */
 const refundSale = async (conn, logId, reason, tenantId, userEmail) => {
-  const [logs] = await conn.execute(QUERIES.LEDGER.SELECT_LOG_FULL, [logId, tenantId]);
-  if (!logs || logs.length === 0) {
-    throw new HttpError('Ledger document not found.', MESSAGES.HTTP_STATUS.NOT_FOUND);
-  }
-  const log = logs[0];
-
-  const settled = await requireMaster(
-    conn, QUERIES.LEDGER.SELECT_STATUS_BY_NAME, LEDGER.STATUS_SETTLED, tenantId, 'status',
-  );
-  const refunded = await requireMaster(
-    conn, QUERIES.LEDGER.SELECT_STATUS_BY_NAME, LEDGER.STATUS_REFUNDED, tenantId, 'status',
-  );
-  const refundType = await requireMaster(
-    conn, QUERIES.LEDGER.SELECT_RECEIVED_TYPE_BY_NAME, LEDGER.RECEIVED_REFUND, tenantId, 'received type',
-  );
-  const salesAccount = await requireMaster(
-    conn, QUERIES.LEDGER.SELECT_ACCOUNT_BY_NAME, LEDGER.ACCOUNT_SALES, tenantId, 'account',
-  );
-
-  // Only a settled sale can be refunded. The whitelist has no
-  // SETTLED → CANCELLED, so this is the only way back out.
-  await transitionStatus(
+  const result = await returnsService.createReturnTx(
     conn,
-    {
-      logId, configId: log.TransactionTypeConfigId,
-      fromStatusId: settled.Id, toStatusId: refunded.Id, settledAt: log.SettledAt,
-    },
+    { saleLogId: logId, lines: [], note: reason },
     tenantId, userEmail,
   );
+  await returnsService.applyDownstreamTx(conn, result, tenantId, userEmail);
 
-  // Mirror each original tender as a negative one, back to the mode it came in
-  // on. `paymentmodetransactiondetail.PaymentModeId` is NOT NULL, and refunding
-  // cash to a card would be wrong anyway — the money goes back the way it came.
-  const [payments] = await conn.execute(QUERIES.LEDGER.SELECT_PAYMENT_DETAIL_BY_LOG, [logId, tenantId]);
-  if (payments && payments.length > 0) {
-    const [originals] = await conn.execute(
-      `SELECT b.Amount, b.AccountTypeBaseId, pmtd.PaymentModeId
-         FROM paymentbreakup b
-         JOIN paymentmodetransactiondetail pmtd ON pmtd.Id = b.PaymentModeTransactionDetailId
-        WHERE b.PaymentDetailId = ? AND b.TenantId = ? AND b.Amount > 0`,
-      [payments[0].Id, tenantId],
-    );
-
-    for (const original of originals || []) {
-      const pmtdId = uuidv4();
-      await conn.execute(QUERIES.LEDGER.INSERT_PMTD, [
-        pmtdId, tenantId, original.PaymentModeId, null,
-        reason ? String(reason).slice(0, 100) : 'Refund',
-        userEmail, userEmail,
-      ]);
-      // Reversed out of the SAME account the money went into, so the asset
-      // account nets to zero rather than leaving cash that was never there.
-      await conn.execute(QUERIES.LEDGER.INSERT_BREAKUP, [
-        uuidv4(), tenantId, original.AccountTypeBaseId || salesAccount.Id,
-        payments[0].Id, pmtdId,
-        refundType.Id, -Number(original.Amount || 0), null, userEmail, userEmail,
-      ]);
-    }
-  }
-
-  // The POS side must not go on claiming 'paid' for a document the ledger has
-  // reversed. Same transaction, so the two can never disagree.
-  await conn.execute(QUERIES.LEDGER.UPDATE_BILL_STATUS_BY_LOG, [
-    POS_BILL_STATUS.REFUNDED, userEmail, logId, tenantId,
-  ]);
-
-  // ── CRM and loyalty ────────────────────────────────────────────────────
-  // Settling credited a visit, the spend and the points. Refunding used to
-  // reverse the money and leave all three standing: a sale could be settled,
-  // refunded, and still leave the customer a visit richer and the points up.
-  // Nothing spent points yet, which is the only reason it had gone unnoticed —
-  // the moment redemption exists, that is a way to withdraw cash.
-  //
-  // On this transaction, so a refund that rolls back keeps the points it was
-  // about to take.
-  const [bills] = await conn.execute(
-    QUERIES.LEDGER.SELECT_BILL_CUSTOMER_BY_LOG, [logId, tenantId],
-  );
-  const bill = bills[0];
-  if (bill?.CustomerId) {
-    await customerStats.reverseSaleTx(
-      conn, bill.CustomerId, bill.Total, tenantId, userEmail,
-    );
-    // By the ORIGINAL entry, not by recomputing: if the earn rate changed
-    // between the sale and the refund, recomputing would take back a different
-    // number than was given.
-    const clawedBack = await loyalty.reverseForSaleTx(conn, {
-      billId: bill.BillId, reason, branchDetailId: bill.BranchDetailId,
-    }, tenantId, userEmail);
-
-    logger.info('Refund reversed the customer record', {
-      customerId: bill.CustomerId, billId: bill.BillId, pointsReversed: clawedBack,
-    });
-  }
-
-  return { transactionDetailLogId: logId, status: LEDGER.STATUS_REFUNDED };
+  return {
+    // The SALE's id, as before — callers use this to identify what was refunded.
+    transactionDetailLogId: logId,
+    status: LEDGER.STATUS_REFUNDED,
+    // The credit note that actually carries the reversal.
+    creditNoteId: result.transactionDetailLogId,
+    creditNoteNo: result.transactionNo,
+    refundedAmount: result.grossAmount,
+    refundState: result.refundState,
+  };
 };
 
 /**

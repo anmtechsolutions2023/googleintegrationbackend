@@ -38,17 +38,21 @@ describe('provisionPosMasters', () => {
     // us weeks later, so it must not book to Cash.
     expect(countBy(conn.inserted, 'accounttypebase')).toBe(7);
     expect(countBy(conn.inserted, 'transactiontypestatus')).toBe(5);
-    expect(countBy(conn.inserted, 'transactiontype')).toBe(2);      // POS Sale + Expense
+    // POS Sale + Expense + POS Return (the credit note).
+    expect(countBy(conn.inserted, 'transactiontype')).toBe(3);
     expect(countBy(conn.inserted, 'expense_category')).toBe(7);
     expect(countBy(conn.inserted, 'asset_category')).toBe(5);
     expect(countBy(conn.inserted, 'pos_food_type')).toBe(3);        // Veg/Vegan/Non-Veg
     expect(countBy(conn.inserted, 'pos_channel')).toBe(3);          // Dine In/Takeaway/Online
     expect(countBy(conn.inserted, 'pos_portal')).toBe(3);           // Zomato/Swiggy/District
     // One numbering series per document type: sales, expenses, orders, KOTs,
-    // bills, counter tokens.
-    expect(countBy(conn.inserted, 'transactiontypeconfig')).toBe(6);
-    // 5 sale transitions + 3 expense transitions.
-    expect(countBy(conn.inserted, 'transactiontypebaseconversion')).toBe(8);
+    // bills, counter tokens, credit notes.
+    expect(countBy(conn.inserted, 'transactiontypeconfig')).toBe(7);
+    // 5 sale + 3 expense + 2 return transitions.
+    expect(countBy(conn.inserted, 'transactiontypebaseconversion')).toBe(10);
+    // Why goods came back — without the taxonomy the reason is free text and
+    // cannot be grouped.
+    expect(countBy(conn.inserted, 'pos_return_reason')).toBe(7);
   });
 
   it('gives every document type its OWN numbering series', async () => {
@@ -57,10 +61,11 @@ describe('provisionPosMasters', () => {
 
     const configs = paramsOf(conn, 'INSERT INTO transactiontypeconfig');
     expect(configs.map((p) => p[4])).toEqual([
-      'POS_SALE', 'EXPENSE', 'POS_ORDER', 'POS_KOT', 'POS_BILL', 'POS_TOKEN',
+      'POS_SALE', 'EXPENSE', 'POS_ORDER', 'POS_KOT', 'POS_BILL', 'POS_TOKEN', 'POS_RETURN',
     ]);
     expect(configs.map((p) => p[3])).toEqual([
       'INV-{0000}', 'EXP-{0000}', 'ORD-{0000}', 'KOT-{0000}', 'BILL-{0000}', 'TOK-{0000}',
+      'CN-{0000}',
     ]);
   });
 
@@ -171,6 +176,28 @@ describe('provisionPosMasters', () => {
       .map(([q]) => q)
       .find((q) => q.includes('INSERT INTO pos_portal'));
     expect(sql).toContain("'manual'");
+  });
+
+  // A return is a DOCUMENT, not a status the sale moves into — so it needs its
+  // own type, its own counter and its own lifecycle. If it shared the sale's
+  // series, CN-0007 and INV-0007 would be the same number.
+  it('gives credit notes their own type, series and transitions', async () => {
+    const conn = makeConn(false);
+    await provisionPosMasters(conn, { tenantId: 't1' }, 'u@x');
+
+    const types = paramsOf(conn, 'INSERT INTO transactiontype (Id, Name').map((p) => p[1]);
+    expect(types).toContain('POS Return');
+
+    const series = paramsOf(conn, 'INSERT INTO transactiontypeconfig');
+    const sale = series.find((p) => p[4] === 'POS_SALE');
+    const ret = series.find((p) => p[4] === 'POS_RETURN');
+    expect(ret).toBeTruthy();
+    expect(ret[0]).not.toBe(sale[0]);
+
+    // And the sale gains NO new transition: it is never mutated by a return.
+    const tags = paramsOf(conn, 'INSERT INTO transactiontypebaseconversion').map((p) => p[5]);
+    expect(tags).toContain('POS_RETURN_SETTLE');
+    expect(tags).not.toContain('POS_SALE_PARTIALLY_REFUNDED');
   });
 
   it('is idempotent — inserts nothing when the masters already exist', async () => {

@@ -33,6 +33,9 @@ const BANK_ACCOUNT = 'acct-bank';
 const MASTERS = {
   'POS Sale':       [{ Id: 'type-sale', TransactionTypeConfigId: 'cfg-1' }],
   Expense:          [{ Id: 'type-exp', TransactionTypeConfigId: 'cfg-exp' }],
+  // A return is its own document type with its own series — see
+  // ledger.returns.service.js for why it is not a status on the sale.
+  'POS Return':     [{ Id: 'type-return', TransactionTypeConfigId: 'cfg-return' }],
   DRAFT:            [{ Id: 'st-draft', Name: 'DRAFT' }],
   SETTLED:          [{ Id: 'st-settled', Name: 'SETTLED' }],
   PARTIALLY_PAID:   [{ Id: 'st-part', Name: 'PARTIALLY_PAID' }],
@@ -43,7 +46,36 @@ const MASTERS = {
   Partial:          [{ Id: 'rt-part' }],
   Refund:           [{ Id: 'rt-refund' }],
   Payment:          [{ Id: 'rt-payment' }],
+  CANCELLED:        [{ Id: 'st-cancel', Name: 'CANCELLED' }],
+  'Store Credit':   [{ Id: 'acct-credit', Kind: 'LIABILITY' }],
 };
+
+// A settled sale, as the returns path reads it back under its row lock. Richer
+// than the old fixture because a credit note has to be priced FROM the sale:
+// it needs the status, the gross and the lines, not just an id.
+const SETTLED_SALE = (over = {}) => [{
+  Id: 'log-1',
+  TransactionTypeConfigId: 'cfg-1',
+  TransactionNo: 'INV-0001',
+  StatusName: 'SETTLED',
+  GrossAmount: 118,
+  NetAmount: 100,
+  TaxAmount: 18,
+  DiscountAmount: 0,
+  BranchId: 'branch-1',
+  SettledAt: new Date(),
+  ...over,
+}];
+
+// The sale's lines are what a return sends back — so a return of "everything"
+// is priced from these rather than from the header.
+const SALE_LINES = (over = []) => (over.length ? over : [{
+  Id: 'line-1', ItemId: 'item-1', Quantity: 1, CostInfoId: 'ci-1',
+  UnitPrice: 100, BasePrice: 100, VariantAmount: 0,
+  NetAmount: 100, DiscountAmount: 0, ItemDiscountAmount: 0,
+  TaxAmount: 18, GrossAmount: 118,
+  TaxComponents: [], Variants: [], ItemName: 'Dosa',
+}]);
 
 /** Routes every query the ledger issues; overrides let a test bend one answer. */
 const route = (over = {}) => {
@@ -88,7 +120,28 @@ const route = (over = {}) => {
     if (/FROM pos_customer/i.test(q)) return Promise.resolve([over.posCustomer || []]);
     if (/FROM contactdetail/i.test(q)) return Promise.resolve([over.contact || []]);
     if (/FROM transactiondetaillog l/i.test(q)) return Promise.resolve([over.log || []]);
-    if (/FROM paymentdetail/i.test(q)) return Promise.resolve([over.paymentDetail || []]);
+    // How much has already come back, in total and per original line. Empty on
+    // a first return; a test bends these to exercise a SECOND one.
+    if (/ReversesLogId = \? AND TenantId/i.test(q) && /SUM\(GrossAmount\)/i.test(q)) {
+      return Promise.resolve([[over.returnedTotal || { returned: 0, noteCount: 0 }]]);
+    }
+    if (/n\.ReversesLogId = \?/i.test(q)) return Promise.resolve([over.returnedByLine || []]);
+    // The idempotency probe.
+    if (/ReversesLogId = \? AND Remarks = \?/i.test(q)) {
+      return Promise.resolve([over.duplicateNote || []]);
+    }
+    if (/FROM transactionitemdetail t/i.test(q)) return Promise.resolve([SALE_LINES(over.saleLines || [])]);
+    if (/FROM paymentdetail/i.test(q)) return Promise.resolve([over.paymentDetail || [{ Id: 'pd-1' }]]);
+    // tenderCapacity: what each mode still has left to give back.
+    if (/FROM paymentbreakup b/i.test(q) && /GROUP BY/i.test(q)) {
+      return Promise.resolve([(over.breakups || [{ Amount: 118, AccountTypeBaseId: CASH_ACCOUNT, PaymentModeId: CASH_MODE }])
+        .map((b) => ({
+          PaymentModeId: b.PaymentModeId,
+          AccountTypeBaseId: b.AccountTypeBaseId ?? (b.PaymentModeId === CARD_MODE ? BANK_ACCOUNT : CASH_ACCOUNT),
+          ModeType: b.PaymentModeId === CARD_MODE ? 'Card' : 'Cash',
+          NetAmount: b.Amount,
+        }))]);
+    }
     if (/FROM paymentbreakup/i.test(q)) return Promise.resolve([over.breakups || []]);
     if (/^\s*SELECT/i.test(q)) return Promise.resolve([[]]);
     return Promise.resolve([{ affectedRows: 1 }]);
@@ -380,14 +433,40 @@ describe('customer merge', () => {
   });
 });
 
+// A full refund is now the credit-note path with no line selection — see
+// ledger.returns.service.js. These assert the guarantees that did NOT change:
+// money goes back the way it came, nothing is deleted, and the reversal is
+// recorded as a status move rather than a silent edit.
 describe('refund — reversal, never deletion', () => {
-  const settledLog = [{ Id: 'log-1', TransactionTypeConfigId: 'cfg-1', SettledAt: new Date() }];
+  const settledLog = SETTLED_SALE();
 
-  it('transitions to REFUNDED and records it', async () => {
+  it('records the reversal as a status move, not a silent edit', async () => {
     route({ log: settledLog, paymentDetail: [{ Id: 'pd-1', TotalAmount: 118 }], breakups: [{ Amount: 118, PaymentModeId: CASH_MODE }] });
     const r = await ledger.refundSale(mockConn, 'log-1', 'Wrong order', TENANT, USER);
     expect(r.status).toBe('REFUNDED');
+    // The move recorded is the CREDIT NOTE's DRAFT → SETTLED. The sale itself
+    // is never mutated — that is what lets a second, smaller return happen.
     expect(calls(/INSERT INTO transactiontypeconversionmapper/i)).toHaveLength(1);
+  });
+
+  it('leaves the sale document untouched', async () => {
+    route({ log: settledLog, paymentDetail: [{ Id: 'pd-1' }], breakups: [{ Amount: 118, PaymentModeId: CASH_MODE }] });
+    await ledger.refundSale(mockConn, 'log-1', 'Wrong order', TENANT, USER);
+
+    // The only UPDATE_LOG_STATUS is the credit note's own, addressed by the
+    // note's id — never the sale's.
+    const statusWrites = calls(/UPDATE transactiondetaillog SET TransactionTypeStatusId/i);
+    statusWrites.forEach(([, params]) => expect(params[3]).not.toBe('log-1'));
+  });
+
+  it('raises a numbered credit note that points back at the sale', async () => {
+    route({ log: settledLog, paymentDetail: [{ Id: 'pd-1' }], breakups: [{ Amount: 118, PaymentModeId: CASH_MODE }] });
+    const r = await ledger.refundSale(mockConn, 'log-1', 'Wrong order', TENANT, USER);
+
+    expect(r.creditNoteId).toBeTruthy();
+    const note = firstCall(/INSERT INTO transactiondetaillog[\s\S]*ReversesLogId/i)[1];
+    expect(note[17]).toBe('log-1');   // ReversesLogId
+    expect(Number(note[12])).toBe(118); // GrossAmount, positive on the note
   });
 
   it('writes a negative tender back to the original mode', async () => {
@@ -496,7 +575,7 @@ describe('account attribution — where the money actually landed', () => {
 });
 
 describe('refund — the POS side must not disagree', () => {
-  const SETTLED_LOG = { log: [{ Id: 'log-1', TransactionTypeConfigId: 'cfg-1', SettledAt: new Date() }] };
+  const SETTLED_LOG = { log: SETTLED_SALE() };
 
   it('marks the linked bill refunded in the same transaction', async () => {
     route(SETTLED_LOG);
@@ -582,7 +661,7 @@ describe('expenses — money out, in the same ledger', () => {
 // refund, and the customer ends up a visit richer with points they did not
 // keep. All three must move back inside the SAME transaction as the reversal.
 describe('refund — the customer record must move back too', () => {
-  const SETTLED = { log: [{ Id: 'log-1', TransactionTypeConfigId: 'cfg-1', SettledAt: new Date() }] };
+  const SETTLED = { log: SETTLED_SALE() };
   const WITH_CUSTOMER = {
     ...SETTLED,
     billCustomer: [{ BillId: 'bill-1', Total: 1000, BranchDetailId: 'branch-1', CustomerId: 'cust-1' }],

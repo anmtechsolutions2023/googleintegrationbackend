@@ -227,3 +227,83 @@ describe('a manual adjustment', () => {
     expect(wrote().points).toBe(-25);
   });
 });
+
+// ── Partial returns ─────────────────────────────────────────────────────────
+// The old claw-back reversed the ENTIRE original EARN whatever came back, and
+// was keyed on the BILL — so the second partial return against one bill
+// violated UNIQUE (TenantId, SourceType, SourceId, EntryType) and rolled the
+// whole refund transaction back.
+describe('reverseForReturnTx — proportional, and repeatable', () => {
+  const EARN = { Id: 'earn-1', CustomerId: 'cust-1', Points: 100 };
+
+  const routeReturn = ({ earn = EARN, alreadyReversed = 0 } = {}) => {
+    mockConn.execute.mockImplementation((sql) => {
+      const q = String(sql);
+      if (/SELECT Id, CustomerId, Points FROM pos_loyalty_ledger/i.test(q)) {
+        return Promise.resolve([earn ? [earn] : []]);
+      }
+      if (/SUM\(-Points\)/i.test(q)) {
+        return Promise.resolve([[{ reversed: alreadyReversed }]]);
+      }
+      if (/^\s*SELECT/i.test(q)) return Promise.resolve([[]]);
+      return Promise.resolve([{ affectedRows: 1 }]);
+    });
+  };
+
+  const inserted = () => mockConn.execute.mock.calls
+    .filter(([sql]) => /INSERT INTO pos_loyalty_ledger/i.test(String(sql)))
+    .map(([, p]) => p);
+
+  it('claws back only the share that actually came back', async () => {
+    routeReturn();
+    // A quarter of a ₹1,000 sale returned, against 100 points earned.
+    const points = await returnLoyalty(250, 1000, false);
+    expect(points).toBe(25);
+    expect(Number(inserted()[0][4])).toBe(-25);
+  });
+
+  // Keyed on the CREDIT NOTE, which is what makes the second return legal —
+  // the unique key still stops a replayed request double-clawing.
+  it('keys the reversal on the credit note, not the bill', async () => {
+    routeReturn();
+    await returnLoyalty(250, 1000, false);
+    expect(inserted()[0][5]).toBe('RETURN');
+    expect(inserted()[0][6]).toBe('note-1');
+    // And still names the EARN it undoes, so a claw-back is traceable.
+    expect(inserted()[0][7]).toBe('earn-1');
+  });
+
+  // Three returns of a third each at 100 points give 33+33+33 = 99, leaving a
+  // point that was granted and never taken back.
+  it('trues up the remainder on the final return', async () => {
+    routeReturn({ alreadyReversed: 66 });
+    const points = await returnLoyalty(334, 1000, true);
+    expect(points).toBe(34);
+  });
+
+  it('never reverses more than was earned, however many returns', async () => {
+    routeReturn({ alreadyReversed: 100 });
+    const points = await returnLoyalty(500, 1000, false);
+    expect(points).toBe(0);
+    expect(inserted()).toHaveLength(0);
+  });
+
+  it('moves nothing when the sale never earned any', async () => {
+    routeReturn({ earn: null });
+    expect(await returnLoyalty(500, 1000, false)).toBe(0);
+    expect(inserted()).toHaveLength(0);
+  });
+
+  // Helper: the call under test, with the noise factored out.
+  async function returnLoyalty(returnedAmount, originalAmount, isFinal) {
+    return loyalty.reverseForReturnTx(mockConn, {
+      billId: 'bill-1',
+      returnLogId: 'note-1',
+      returnedAmount,
+      originalAmount,
+      isFinal,
+      reason: 'Return CN-0001',
+      branchDetailId: 'branch-1',
+    }, TENANT, USER);
+  }
+});

@@ -164,6 +164,87 @@ const reverseForSaleTx = async (conn, refund, tenantId, userEmail) => {
 };
 
 /**
+ * Claw back the points a PARTIAL return should take — and no more.
+ *
+ * ── Why this is not reverseForSaleTx with a number ──────────────────────────
+ * That one reverses the entire original EARN whatever came back, which is right
+ * for a full refund and wrong for every partial one. It is also keyed on the
+ * BILL, and the ledger's UNIQUE (TenantId, SourceType, SourceId, EntryType)
+ * then rejects the SECOND partial return against the same bill outright — the
+ * constraint is well-motivated (it is what stops a dropped response clawing
+ * back twice), so the fix is to give each return its own source rather than to
+ * weaken the key.
+ *
+ * So: keyed on the CREDIT NOTE. Each return is legitimately its own source, the
+ * key still stops a replayed request double-clawing, and partial returns can
+ * accumulate.
+ *
+ * ── The true-up ────────────────────────────────────────────────────────────
+ * Proportional shares round. Three returns of a third each at 100 points give
+ * 33 + 33 + 33 = 99, leaving a point that was granted and never taken back. On
+ * the FINAL return — the one that completes the sale — the remainder is taken
+ * instead of the proportion, so a sequence of partial returns reverses exactly
+ * what was granted and never one point more.
+ *
+ * @param {Object} conn - The refund transaction's connection.
+ * @param {Object} ret
+ * @param {string} ret.billId          - The bill whose EARN is being reversed.
+ * @param {string} ret.returnLogId     - The credit note. Becomes SourceId.
+ * @param {number} ret.returnedAmount  - Value coming back on THIS return.
+ * @param {number} ret.originalAmount  - The sale's gross.
+ * @param {boolean} ret.isFinal        - Does this return complete the sale?
+ * @returns {Promise<number>} Points actually reversed (a positive number).
+ */
+const reverseForReturnTx = async (conn, ret, tenantId, userEmail) => {
+  const [rows] = await conn.execute(QUERIES.LOYALTY_LEDGER.SELECT_ENTRY_BY_SOURCE, [
+    tenantId, SOURCE.BILL, ret.billId, ENTRY.EARN,
+  ]);
+  const original = rows[0];
+  // No earn to reverse: a walk-in sale, or one settled before loyalty existed.
+  if (!original || Number(original.Points) <= 0) return 0;
+
+  const earned = Number(original.Points);
+
+  // Everything already clawed back against this bill, however many returns ago.
+  const [[prior]] = await conn.execute(
+    `SELECT COALESCE(SUM(-Points), 0) AS reversed
+       FROM pos_loyalty_ledger
+      WHERE TenantId = ? AND CustomerId = ? AND EntryType = ? AND ReversesId = ?`,
+    [tenantId, original.CustomerId, ENTRY.REVERSAL, original.Id],
+  );
+  const alreadyReversed = Number(prior?.reversed || 0);
+  const outstanding = Math.max(0, earned - alreadyReversed);
+  if (outstanding === 0) return 0;
+
+  const originalAmount = Number(ret.originalAmount) || 0;
+  const returnedAmount = Number(ret.returnedAmount) || 0;
+
+  // The final return takes whatever is left, so rounding never strands a point.
+  const wanted = ret.isFinal || originalAmount <= 0
+    ? outstanding
+    : Math.round((earned * returnedAmount) / originalAmount);
+
+  const points = Math.min(wanted, outstanding);
+  if (points <= 0) return 0;
+
+  const entry = await appendTx(conn, {
+    customerId: original.CustomerId,
+    entryType: ENTRY.REVERSAL,
+    points: -points,
+    // The CREDIT NOTE, not the bill — see the note above.
+    sourceType: SOURCE.RETURN,
+    sourceId: ret.returnLogId,
+    reversesId: original.Id,
+    reason: ret.reason
+      ? `Returned — ${String(ret.reason).slice(0, 200)}`
+      : 'Returned',
+    branchDetailId: ret.branchDetailId,
+  }, tenantId, userEmail);
+
+  return entry ? points : 0;
+};
+
+/**
  * Spend points against a sale.
  *
  * Not yet reachable from the till — the redemption control is the next slice —
@@ -252,6 +333,7 @@ const getStatement = (customerId, tenantId) =>
 module.exports = {
   earnForSaleTx,
   reverseForSaleTx,
+  reverseForReturnTx,
   redeemForSaleTx,
   adjust,
   getStatement,

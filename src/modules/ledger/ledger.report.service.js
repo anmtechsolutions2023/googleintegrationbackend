@@ -108,13 +108,158 @@ const salesReport = (query, tenantId) =>
         ...branchParam, ...venue.params],
     );
 
+    // ── Returns, ALONGSIDE gross — never netted into it ──────────────────
+    //
+    // Gross for a closed period must never change. A refund processed in March
+    // cannot be allowed to alter February's reported sales, or the number stops
+    // being trustworthy — and that is precisely what the old model did, because
+    // it moved the sale's own status to REFUNDED and dropped it out of this
+    // query entirely.
+    //
+    // Now the sale is never mutated, so gross is stable by construction, and
+    // returns are a second measure read from the credit notes.
+    const [[returns]] = await conn.execute(
+      `${QUERIES.LEDGER_REPORT.RETURNS_SUMMARY}${weekend}${branchClause}`,
+      [tenantId, LEDGER.TYPE_POS_RETURN, range.from, range.to, ...branchParam],
+    );
+
+    const returnsTrendSql = QUERIES.LEDGER_REPORT.RETURNS_TREND
+      .replace('{{BUCKET}}', bucketExpression(range.bucket, 'l.TransactionDate'))
+      .replace('GROUP BY Bucket', `${weekend}${branchClause} GROUP BY Bucket`);
+    const [returnsTrend] = await conn.execute(
+      returnsTrendSql,
+      [tenantId, LEDGER.TYPE_POS_RETURN, range.from, range.to, ...branchParam],
+    );
+
+    const summaryOut = numeric(summary || {}, [
+      'Documents', 'NetAmount', 'TaxAmount', 'DiscountAmount',
+      'RoundOff', 'GrossAmount', 'Collected', 'Outstanding',
+    ]);
+    // Picked explicitly, NOT spread. `numeric` returns the whole row with the
+    // named fields coerced, so spreading it here would let any column the
+    // returns query happens to select overwrite the same-named column on the
+    // sales summary — GrossAmount above all.
+    const returnsOut = {
+      ReturnCount: num(returns?.ReturnCount),
+      ReturnedAmount: num(returns?.ReturnedAmount),
+      ReturnedNet: num(returns?.ReturnedNet),
+      ReturnedTax: num(returns?.ReturnedTax),
+    };
+    const returnedByBucket = new Map(
+      (returnsTrend || []).map((r) => [String(r.Bucket), Number(r.ReturnedAmount) || 0]),
+    );
+
     return {
       range,
-      summary: numeric(summary || {}, [
-        'Documents', 'NetAmount', 'TaxAmount', 'DiscountAmount',
-        'RoundOff', 'GrossAmount', 'Collected', 'Outstanding',
-      ]),
-      trend: trend.map((r) => numeric(r, ['Documents', 'GrossAmount', 'DiscountAmount', 'TaxAmount'])),
+      summary: {
+        ...summaryOut,
+        ...returnsOut,
+        // The third column. Derived for display only — nothing stores it, so
+        // it can never disagree with the two figures it comes from.
+        NetOfReturns: round2(summaryOut.GrossAmount - returnsOut.ReturnedAmount),
+        ReturnRate: summaryOut.GrossAmount > 0
+          ? round2((returnsOut.ReturnedAmount / summaryOut.GrossAmount) * 100)
+          : 0,
+      },
+      trend: trend.map((r) => {
+        const row = numeric(r, ['Documents', 'GrossAmount', 'DiscountAmount', 'TaxAmount']);
+        const returned = returnedByBucket.get(String(row.Bucket)) || 0;
+        return {
+          ...row,
+          ReturnedAmount: returned,
+          NetOfReturns: round2(row.GrossAmount - returned),
+        };
+      }),
+    };
+  });
+
+/**
+ * Why goods came back, and which dishes.
+ *
+ * Both were unanswerable before returns became documents: the reason was free
+ * text nobody could group, and nothing recorded WHICH items were refunded at
+ * any granularity.
+ */
+const returnReasonsReport = (query, tenantId) =>
+  withConnection(async (conn) => {
+    const range = resolveRange(query);
+    const branchClause = query.branchId ? ' AND l.BranchId = ?' : '';
+    const branchParam = query.branchId ? [query.branchId] : [];
+
+    const [rows] = await conn.execute(
+      QUERIES.LEDGER_REPORT.RETURN_REASONS
+        .replace('GROUP BY', `${branchClause} GROUP BY`),
+      [tenantId, LEDGER.TYPE_POS_RETURN, range.from, range.to, ...branchParam],
+    );
+
+    const reasons = rows.map((r) => numeric(r, ['ReturnCount', 'ReturnedAmount', 'IsFault']));
+    const total = reasons.reduce((sum, r) => sum + r.ReturnedAmount, 0);
+
+    return {
+      range,
+      reasons: reasons.map((r) => ({
+        ...r,
+        IsFault: !!r.IsFault,
+        Share: total > 0 ? round2((r.ReturnedAmount / total) * 100) : 0,
+      })),
+      // The split that turns a refund report into a kitchen-quality signal:
+      // what we got wrong, versus what the customer simply changed their mind
+      // about. Merged, the number says nothing actionable.
+      totals: {
+        ReturnedAmount: round2(total),
+        FaultAmount: round2(reasons.filter((r) => r.IsFault)
+          .reduce((sum, r) => sum + r.ReturnedAmount, 0)),
+        ReturnCount: reasons.reduce((sum, r) => sum + r.ReturnCount, 0),
+      },
+    };
+  });
+
+/**
+ * Which dishes come back, and how often relative to how often they sell.
+ *
+ * The return RATE is the number worth acting on: a dish that sells 500 and
+ * comes back 5 times is fine; one that sells 20 and comes back 5 times is a
+ * kitchen problem. Reporting the count alone would rank the popular dish worst.
+ */
+const returnProductReport = (query, tenantId) =>
+  withConnection(async (conn) => {
+    const range = resolveRange(query);
+    const branchClause = query.branchId ? ' AND l.BranchId = ?' : '';
+    const branchParam = query.branchId ? [query.branchId] : [];
+
+    const [returned] = await conn.execute(
+      QUERIES.LEDGER_REPORT.RETURN_BY_PRODUCT
+        .replace('GROUP BY', `${branchClause} GROUP BY`),
+      [tenantId, LEDGER.TYPE_POS_RETURN, range.from, range.to, ...branchParam],
+    );
+
+    // What each of those dishes sold in the same window, so the rate is real
+    // rather than an unanchored count.
+    const [sold] = await conn.execute(
+      `${QUERIES.LEDGER_REPORT.PRODUCT_SALES}${branchClause} GROUP BY ti.ItemId, i.Name, c.Name`,
+      [tenantId, LEDGER.TYPE_POS_SALE, range.from, range.to, ...branchParam],
+    );
+    const soldByItem = new Map(
+      (sold || []).map((r) => [r.ItemId, {
+        qty: Number(r.QuantitySold) || 0,
+        amount: Number(r.GrossAmount) || 0,
+      }]),
+    );
+
+    return {
+      range,
+      products: returned.map((r) => {
+        const row = numeric(r, [
+          'QuantityReturned', 'ReturnedAmount', 'ReturnCount', 'QuantityRestockable',
+        ]);
+        const s = soldByItem.get(row.ItemId) || { qty: 0, amount: 0 };
+        return {
+          ...row,
+          QuantitySold: s.qty,
+          SoldAmount: round2(s.amount),
+          ReturnRate: s.qty > 0 ? round2((row.QuantityReturned / s.qty) * 100) : null,
+        };
+      }),
     };
   });
 
@@ -639,4 +784,6 @@ module.exports = {
   venueReport,
   channelReport,
   discountReport,
+  returnReasonsReport,
+  returnProductReport,
 };

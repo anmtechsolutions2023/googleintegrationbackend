@@ -32,6 +32,13 @@ router.get('/reports/venue', authenticateToken, checkScope(...READ), ...controll
 // Revenue by sales channel — dine-in / counter / delivery.
 router.get('/reports/channels', authenticateToken, checkScope(...READ), ...controller.channelReport);
 router.get('/reports/discounts', authenticateToken, checkScope(...READ), ...controller.discountReport);
+// ── Returns ────────────────────────────────────────────────────────────────
+// "Which dishes come back, and why" — unanswerable before returns were their
+// own documents, because nothing recorded WHICH items were refunded.
+router.get('/reports/return-reasons', authenticateToken, checkScope(...READ), ...controller.returnReasonsReport);
+router.get('/reports/return-products', authenticateToken, checkScope(...READ), ...controller.returnProductReport);
+// Money owed but not yet handed back — the operational worklist.
+router.get('/returns/settlement-queue', authenticateToken, checkScope(...READ), ...controller.settlementQueue);
 // Customer reports — same guard as the rest. Reading who bought is reading the
 // books, and a tenancy that may see its revenue may see whose revenue it was.
 router.get('/reports/customers', authenticateToken, checkScope(...READ), ...controller.customerReport);
@@ -46,6 +53,34 @@ router.post(
   checkScope(...WRITE),
   auditLog(AUDIT_CATEGORIES.PAYMENTS, 'WARN', 'Ledger document refunded'),
   ...controller.refund,
+);
+
+/**
+ * POST /documents/:id/returns — a PARTIAL return.
+ *
+ * Reuses TRANSACTIONS:WRITE rather than inventing a scope: a return IS a ledger
+ * write, and that scope already means exactly that. Audited at WARN like the
+ * full refund, because who refunds what and how often is the standard
+ * shrinkage control and the audit rows are what answer it.
+ */
+router.post(
+  '/documents/:id/returns',
+  authenticateToken,
+  checkScope(...WRITE),
+  auditLog(AUDIT_CATEGORIES.PAYMENTS, 'WARN', 'Partial return recorded'),
+  ...controller.createReturn,
+);
+
+/** Every credit note against one sale — the detail drawer's linked documents. */
+router.get('/documents/:id/returns', authenticateToken, checkScope(...READ), ...controller.listReturns);
+
+/** Mark a refund as actually paid out. A human today, a gateway later. */
+router.put(
+  '/returns/:id/settlement',
+  authenticateToken,
+  checkScope(...WRITE),
+  auditLog(AUDIT_CATEGORIES.PAYMENTS, 'WARN', 'Refund settlement updated'),
+  ...controller.setSettlement,
 );
 
 module.exports = router;

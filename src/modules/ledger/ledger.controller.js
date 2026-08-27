@@ -2,13 +2,15 @@
 const readService = require('./ledger.read.service');
 const ledgerService = require('./ledger.service');
 const { asyncHandler } = require('../../utils/controllerHelper');
-const { successResponse, paginatedResponse } = require('../../utils/responseHelper');
+const { successResponse, paginatedResponse, createdResponse } = require('../../utils/responseHelper');
 const { validateQuery, validateBody, validateParams } = require('../../middleware/validation');
 const {
-  listQuerySchema, refundSchema, reportQuerySchema, uuidParamSchema,
+  listQuerySchema, refundSchema, returnSchema, settlementSchema,
+  reportQuerySchema, uuidParamSchema,
 } = require('./ledger.schemas');
 const { withTransaction } = require('../../utils/dbHelper');
 const reportService = require('./ledger.report.service');
+const returnsService = require('./ledger.returns.service');
 
 const list = asyncHandler(async (req, res) => {
   const { page, limit, ...filters } = req.validatedQuery;
@@ -31,6 +33,56 @@ const refund = asyncHandler(async (req, res) => {
   successResponse(res, 'Document refunded', result);
 });
 
+/**
+ * A PARTIAL return: selected lines, in the quantities that actually came back.
+ *
+ * A full refund is this with no line selection, which is why POST /refund above
+ * now delegates to the same machinery rather than owning a second one.
+ */
+const createReturn = asyncHandler(async (req, res) => {
+  const result = await withTransaction(async (conn) => {
+    const note = await returnsService.createReturnTx(
+      conn,
+      { saleLogId: req.params.id, ...req.validatedBody },
+      req.user.tid, req.user.email,
+    );
+    // A replay returns the note that already exists and must NOT re-run the
+    // downstream work — that would claw points back a second time.
+    if (!note.duplicate) {
+      await returnsService.applyDownstreamTx(conn, note, req.user.tid, req.user.email);
+    }
+    const { _context, ...clean } = note;
+    return clean;
+  });
+  createdResponse(res, 'Return recorded', result);
+});
+
+/** Every credit note raised against one sale. */
+const listReturns = asyncHandler(async (req, res) => {
+  const data = await readService.listReturnsForSale(req.params.id, req.user.tid);
+  successResponse(res, 'Returns retrieved', data);
+});
+
+/**
+ * Money owed but not yet handed back.
+ *
+ * The operational worklist. Today every refund is executed at the till so this
+ * is usually empty; it is the report that matters most the moment a payment
+ * gateway makes a refund something that can be pending or fail.
+ */
+const settlementQueue = asyncHandler(async (req, res) => {
+  const data = await readService.pendingSettlements(req.user.tid);
+  successResponse(res, 'Pending refund settlements retrieved', data);
+});
+
+/** Mark a refund as actually paid out — a human today, a gateway later. */
+const setSettlement = asyncHandler(async (req, res) => {
+  const data = await readService.setSettlementStatus(
+    req.params.id, req.validatedBody, req.user.tid, req.user.email,
+  );
+  successResponse(res, 'Refund settlement updated', data);
+});
+
 // ── Reports ──────────────────────────────────────────────────────────────────
 // Every one takes the same query contract, so the timeframe handling is written
 // once. `report` builds the handler; the exported arrays only differ in which
@@ -45,6 +97,12 @@ module.exports = {
   list: [validateQuery(listQuerySchema), list],
   getOne: [validateParams(uuidParamSchema), getOne],
   refund: [validateParams(uuidParamSchema), validateBody(refundSchema), refund],
+  createReturn: [validateParams(uuidParamSchema), validateBody(returnSchema), createReturn],
+  listReturns: [validateParams(uuidParamSchema), listReturns],
+  settlementQueue: [settlementQueue],
+  setSettlement: [validateParams(uuidParamSchema), validateBody(settlementSchema), setSettlement],
+  returnReasonsReport: [validateQuery(reportQuerySchema), report(reportService.returnReasonsReport, 'Return reasons report retrieved')],
+  returnProductReport: [validateQuery(reportQuerySchema), report(reportService.returnProductReport, 'Product return report retrieved')],
 
   salesReport: [validateQuery(reportQuerySchema), report(reportService.salesReport, 'Sales report retrieved')],
   productReport: [validateQuery(reportQuerySchema), report(reportService.productReport, 'Product report retrieved')],

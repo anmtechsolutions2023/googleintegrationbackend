@@ -80,15 +80,27 @@ const recordSaleTx = async (conn, customerId, amount, tenantId, userEmail) => {
  * @param {string} userEmail
  * @returns {Promise<boolean>} Whether anything was reversed.
  */
-const reverseSaleTx = async (conn, customerId, amount, tenantId, userEmail) => {
+const reverseSaleTx = async (conn, customerId, amount, tenantId, userEmail, options = {}) => {
   if (!customerId) return false;
 
-  const [result] = await conn.execute(QUERIES.POS_CUSTOMER.REVERSE_SALE, [
+  // ── Visit vs value ───────────────────────────────────────────────────────
+  // Returning one item from a four-item dinner did not un-happen the visit, so
+  // only a FULL return takes it off; the spend comes off either way, by the
+  // value actually returned.
+  //
+  // Defaults to removing the visit so the existing full-refund caller behaves
+  // exactly as it did — a partial return is the new case and opts in.
+  const removeVisit = options.removeVisit !== false;
+  const query = removeVisit
+    ? QUERIES.POS_CUSTOMER.REVERSE_SALE
+    : QUERIES.POS_CUSTOMER.REVERSE_SALE_VALUE_ONLY;
+
+  const [result] = await conn.execute(query, [
     Number(amount) || 0, userEmail, customerId, tenantId,
   ]);
 
   if (!result.affectedRows) {
-    logger.warn('Refund against an unknown customer — no CRM reversal', { customerId, tenantId });
+    logger.warn('Return against an unknown customer — no CRM reversal', { customerId, tenantId });
     return false;
   }
   return true;

@@ -1011,10 +1011,24 @@ module.exports = {
       // Refund. Visits and spend are floored at zero: a projection that has
       // drifted must not be driven negative by a correction, and a customer
       // with -1 visits is a worse answer than one with 0.
+      // A FULL return: the sale is entirely undone, so the visit comes off
+      // with the spend.
       REVERSE_SALE: `
         UPDATE pos_customer
            SET Visits     = GREATEST(Visits - 1, 0),
                TotalSpent = GREATEST(TotalSpent - ?, 0),
+               UpdatedOn  = NOW(),
+               UpdatedBy  = ?
+         WHERE Id = ? AND TenantId = ?`,
+      // A PARTIAL return: value only.
+      //
+      // Returning one item from a four-item dinner did not un-happen the visit.
+      // The old statement decremented Visits unconditionally, so a customer who
+      // sent back a single naan lost a whole visit from their history — and
+      // three partial returns could take three visits for one meal.
+      REVERSE_SALE_VALUE_ONLY: `
+        UPDATE pos_customer
+           SET TotalSpent = GREATEST(TotalSpent - ?, 0),
                UpdatedOn  = NOW(),
                UpdatedBy  = ?
          WHERE Id = ? AND TenantId = ?`,
@@ -1095,6 +1109,38 @@ module.exports = {
     //
     // A portal is a SELLER ON A CHANNEL, not a channel. See the table comment
     // in 01-schema-definition.sql §4.12c for why the two are separate.
+    // Why goods came back. A CRUD master, mirroring expense_category.
+    POS_RETURN_REASON: {
+      SELECT_ALL: 'SELECT * FROM pos_return_reason WHERE TenantId = ? ORDER BY SortOrder ASC, Name ASC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_return_reason WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_return_reason WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_CODE: 'SELECT * FROM pos_return_reason WHERE Code = ? AND TenantId = ? LIMIT 1',
+      INSERT:
+        'INSERT INTO pos_return_reason (Id, TenantId, Name, Code, Description, IsFault, SortOrder, '
+        + 'Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE:
+        'UPDATE pos_return_reason SET Name = ?, Code = ?, Description = ?, IsFault = ?, '
+        + 'SortOrder = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_return_reason WHERE Id = ? AND TenantId = ?',
+    },
+
+    // An intent to notify, made durable inside the transaction that caused it.
+    // There is no worker yet — see the table comment for why the rows are
+    // written anyway.
+    NOTIFICATION_OUTBOX: {
+      INSERT:
+        'INSERT INTO notification_outbox (Id, TenantId, EventType, Audience, SourceType, SourceId, '
+        + 'Payload, Status, Attempts, AvailableOn, Active, CreatedOn, CreatedBy, UpdatedBy) '
+        + "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, NOW(), 1, NOW(), ?, ?)",
+      SELECT_ALL:
+        'SELECT * FROM notification_outbox WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM notification_outbox WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM notification_outbox WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_SOURCE:
+        'SELECT * FROM notification_outbox WHERE TenantId = ? AND SourceType = ? AND SourceId = ? '
+        + 'ORDER BY CreatedOn ASC',
+    },
+
     POS_PORTAL: {
       SELECT_ALL: 'SELECT * FROM pos_portal WHERE TenantId = ? ORDER BY SortOrder ASC, Name ASC',
       // The queue needs the channel's name to say what a portal sells on, and
@@ -1718,7 +1764,8 @@ module.exports = {
           JOIN transactiondetaillog l ON l.Id = b.TransactionDetailLogId
           JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
          WHERE c.TenantId = ? AND l.TransactionDate BETWEEN ? AND ?
-           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+          AND l.ReversesLogId IS NULL`,
       // No LIMIT here: it is appended by the caller as a clamped integer.
       // Binding it fails with ER_WRONG_ARGUMENTS, which is why every other
       // report in this file interpolates its limit too.
@@ -1739,7 +1786,8 @@ module.exports = {
           JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
           JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
          WHERE l.TenantId = ? AND l.TransactionDate BETWEEN ? AND ?
-           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+          AND l.ReversesLogId IS NULL`,
       VISIT_PATTERN_GROUP_BY: ' GROUP BY Dow, Hour ORDER BY Dow, Hour',
 
       // How much of the trade is repeat trade — the headline number a manager
@@ -1759,6 +1807,7 @@ module.exports = {
              WHERE o.TenantId = ? AND o.CustomerId IS NOT NULL
                AND l.TransactionDate BETWEEN ? AND ?
                AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+          AND l.ReversesLogId IS NULL
              GROUP BY o.CustomerId
           ) per_customer`,
 
@@ -1769,7 +1818,8 @@ module.exports = {
           FROM transactiondetaillog l
           JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
          WHERE l.TenantId = ? AND l.TransactionDate BETWEEN ? AND ?
-           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+          AND l.ReversesLogId IS NULL`,
 
       // Known customers who have stopped coming — the targeting list.
       LAPSED: `
@@ -2081,6 +2131,104 @@ module.exports = {
            TaxAmount, GrossAmount,
            TaxComponents, Variants, Comment, Active, CreatedOn, CreatedBy, UpdatedBy)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+      // ── Returns / credit notes ──────────────────────────────────────────
+      //
+      // A credit note is a transactiondetaillog row like any other, plus the
+      // link back to what it reverses. Its own INSERT rather than extending
+      // INSERT_LOG deliberately: the sale and expense paths are the money path
+      // with a large test suite behind them, and a return has genuinely
+      // different required columns. Neither statement is derived from the
+      // other, so both name their columns explicitly.
+      INSERT_RETURN_LOG: `
+        INSERT INTO transactiondetaillog
+          (Id, TenantId, TransactionNo, TransactionTypeConfigId, TransactionTypeId,
+           TransactionTypeStatusId, BranchId, TransactionDate,
+           NetAmount, TaxAmount, DiscountAmount, RoundOff, GrossAmount, TaxByComponent,
+           ContactDetailId, CustomerName, CustomerMobile,
+           ReversesLogId, SettlementStatus, SettlementRef, ReturnReasonId,
+           Remarks, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+      INSERT_RETURN_LINE: `
+        INSERT INTO transactionitemdetail
+          (Id, TenantId, TransactionDetailLogId, LineNo, ItemId, Quantity, CostInfoId,
+           UnitPrice, BasePrice, VariantAmount, NetAmount, DiscountAmount, ItemDiscountAmount,
+           TaxAmount, GrossAmount, TaxComponents, Variants, Comment,
+           SourceLineId, RestockRequested,
+           Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+
+      // THE CONCURRENCY GUARD. Two cashiers refunding one invoice at the same
+      // moment would both read "nothing returned yet" and both be allowed to
+      // refund the whole thing. Locking the sale row serialises them, the same
+      // discipline the numbering counter already uses to stop two tills taking
+      // one invoice number.
+      SELECT_SALE_FOR_RETURN: `
+        SELECT l.Id, l.TenantId, l.TransactionNo, l.GrossAmount, l.NetAmount, l.TaxAmount,
+               l.DiscountAmount, l.BranchId, l.ContactDetailId, l.CustomerName,
+               l.CustomerMobile, l.TransactionTypeConfigId, l.TransactionTypeStatusId,
+               l.SettledAt, s.Name AS StatusName
+          FROM transactiondetaillog l
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+         WHERE l.Id = ? AND l.TenantId = ?
+         FOR UPDATE`,
+
+      // How much of this sale has already come back. Read INSIDE the lock above.
+      SELECT_RETURNED_TOTAL: `
+        SELECT COALESCE(SUM(GrossAmount), 0) AS returned,
+               COUNT(*) AS noteCount
+          FROM transactiondetaillog
+         WHERE ReversesLogId = ? AND TenantId = ? AND Active = 1`,
+
+      // Per ORIGINAL LINE: how many units have already been sent back. This is
+      // what stops a second return taking a quantity that was never sold.
+      SELECT_RETURNED_BY_LINE: `
+        SELECT r.SourceLineId, COALESCE(SUM(r.Quantity), 0) AS returnedQty
+          FROM transactionitemdetail r
+          JOIN transactiondetaillog n ON n.Id = r.TransactionDetailLogId AND n.TenantId = r.TenantId
+         WHERE n.ReversesLogId = ? AND r.TenantId = ? AND n.Active = 1
+         GROUP BY r.SourceLineId`,
+
+      // The credit notes raised against one sale, for the detail drawer.
+      SELECT_RETURNS_BY_SALE: `
+        SELECT l.Id, l.TransactionNo, l.TransactionDate, l.GrossAmount, l.NetAmount,
+               l.TaxAmount, l.SettlementStatus, l.SettlementRef, l.Remarks,
+               l.CreatedOn, l.CreatedBy, s.Name AS StatusName,
+               rr.Name AS ReasonName, rr.Code AS ReasonCode, rr.IsFault
+          FROM transactiondetaillog l
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+          LEFT JOIN pos_return_reason rr ON rr.Id = l.ReturnReasonId AND rr.TenantId = l.TenantId
+         WHERE l.ReversesLogId = ? AND l.TenantId = ?
+         ORDER BY l.CreatedOn ASC`,
+
+      // Every sale's returned-to-date, for the ledger list's extra column.
+      // One grouped read rather than N per-row queries.
+      SELECT_RETURNED_TOTALS_BULK: `
+        SELECT ReversesLogId AS saleId, COALESCE(SUM(GrossAmount), 0) AS returned,
+               COUNT(*) AS noteCount
+          FROM transactiondetaillog
+         WHERE TenantId = ? AND ReversesLogId IS NOT NULL AND Active = 1
+         GROUP BY ReversesLogId`,
+
+      // Money owed but not yet handed back — the operational worklist.
+      SELECT_PENDING_SETTLEMENTS: `
+        SELECT l.Id, l.TransactionNo, l.TransactionDate, l.GrossAmount,
+               l.SettlementStatus, l.CreatedOn, l.CreatedBy,
+               orig.TransactionNo AS SaleNo, l.ReversesLogId,
+               l.CustomerName, l.CustomerMobile, b.BranchName
+          FROM transactiondetaillog l
+          JOIN transactiontype t ON t.Id = l.TransactionTypeId
+          LEFT JOIN transactiondetaillog orig ON orig.Id = l.ReversesLogId
+          LEFT JOIN branchdetail b ON b.Id = l.BranchId
+         WHERE l.TenantId = ? AND t.Name = ? AND l.Active = 1
+           AND COALESCE(l.SettlementStatus, 'PENDING') = 'PENDING'
+         ORDER BY l.CreatedOn ASC`,
+
+      SET_SETTLEMENT_STATUS: `
+        UPDATE transactiondetaillog
+           SET SettlementStatus = ?, SettlementRef = COALESCE(?, SettlementRef),
+               UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE Id = ? AND TenantId = ?`,
+
       SELECT_LINES_BY_LOG: `
         SELECT t.*, i.Name AS ItemName
           FROM transactionitemdetail t
@@ -2161,6 +2309,18 @@ module.exports = {
     // weekend filter are interpolated, and both come from a fixed whitelist in
     // utils/dateRange.js, never from request text.
     LEDGER_REPORT: {
+      // ── Why every revenue query excludes reversals ─────────────────────────
+      //
+      // A credit note is a SETTLED document with lines and a customer, so a
+      // query that filters on status alone counts it as a SALE: returned dishes
+      // would inflate QuantitySold, and a refunded customer would look like a
+      // repeat buyer. `l.ReversesLogId IS NULL` is the precise exclusion — a
+      // credit note is exactly "a document that reverses another one".
+      //
+      // Returns are reported ALONGSIDE these as their own measure (see
+      // RETURNS_SUMMARY below), never netted into them. That is what stops a
+      // refund on Friday changing last Tuesday's gross: gross never moves, and
+      // Net = Gross − Returns is computed for display.
       // Invoiced vs collected. GrossAmount is what the document says; the
       // paymentdetail subquery is what was actually taken, and the difference
       // is the outstanding balance that makes partial payment visible.
@@ -2184,6 +2344,79 @@ module.exports = {
         WHERE l.TenantId = ? AND t.Name = ?
           AND l.TransactionDate BETWEEN ? AND ?
           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+
+      // ── Returns, as their own measure ─────────────────────────────────────
+      //
+      // Deliberately a SEPARATE aggregate rather than a negative folded into
+      // SALES_SUMMARY. Gross for a closed period must never change: a refund
+      // processed in March cannot be allowed to alter February's reported
+      // sales, or the number stops being trustworthy. Reports show
+      // Gross · Returns · Net, where only the last two move.
+      RETURNS_SUMMARY: `
+        SELECT
+          COUNT(*)                            AS ReturnCount,
+          COALESCE(SUM(l.GrossAmount), 0)     AS ReturnedAmount,
+          COALESCE(SUM(l.NetAmount), 0)       AS ReturnedNet,
+          COALESCE(SUM(l.TaxAmount), 0)       AS ReturnedTax
+        FROM transactiondetaillog l
+        JOIN transactiontype t ON t.Id = l.TransactionTypeId
+        WHERE l.TenantId = ? AND t.Name = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND l.Active = 1`,
+
+      RETURNS_TREND: `
+        SELECT
+          {{BUCKET}}                          AS Bucket,
+          COUNT(*)                            AS ReturnCount,
+          COALESCE(SUM(l.GrossAmount), 0)     AS ReturnedAmount
+        FROM transactiondetaillog l
+        JOIN transactiontype t ON t.Id = l.TransactionTypeId
+        WHERE l.TenantId = ? AND t.Name = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND l.Active = 1
+        GROUP BY Bucket ORDER BY Bucket ASC`,
+
+      // Whether returns are a kitchen problem, a menu problem or a till
+      // problem. Unanswerable while the reason was free text typed by twelve
+      // cashiers — see pos_return_reason.
+      RETURN_REASONS: `
+        SELECT
+          COALESCE(rr.Name, 'Unspecified')    AS ReasonName,
+          COALESCE(rr.Code, 'NONE')           AS ReasonCode,
+          COALESCE(rr.IsFault, 0)             AS IsFault,
+          COUNT(*)                            AS ReturnCount,
+          COALESCE(SUM(l.GrossAmount), 0)     AS ReturnedAmount
+        FROM transactiondetaillog l
+        JOIN transactiontype t ON t.Id = l.TransactionTypeId
+        LEFT JOIN pos_return_reason rr ON rr.Id = l.ReturnReasonId AND rr.TenantId = l.TenantId
+        WHERE l.TenantId = ? AND t.Name = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND l.Active = 1
+        GROUP BY rr.Id, rr.Name, rr.Code, rr.IsFault
+        ORDER BY ReturnedAmount DESC`,
+
+      // WHICH DISHES COME BACK, and at what rate.
+      //
+      // Only answerable because a credit note carries its own priced lines and
+      // each names the sale line it reverses. Before that the data did not
+      // exist at any granularity — refundSale() took only (logId, reason).
+      RETURN_BY_PRODUCT: `
+        SELECT
+          ti.ItemId,
+          i.Name                              AS ItemName,
+          COALESCE(SUM(ti.Quantity), 0)       AS QuantityReturned,
+          COALESCE(SUM(ti.GrossAmount), 0)    AS ReturnedAmount,
+          COUNT(DISTINCT ti.TransactionDetailLogId) AS ReturnCount,
+          SUM(CASE WHEN ti.RestockRequested = 1 THEN ti.Quantity ELSE 0 END) AS QuantityRestockable
+        FROM transactionitemdetail ti
+        JOIN transactiondetaillog l ON l.Id = ti.TransactionDetailLogId AND l.TenantId = ti.TenantId
+        JOIN transactiontype t ON t.Id = l.TransactionTypeId
+        LEFT JOIN itemdetail i ON i.Id = ti.ItemId AND i.TenantId = ti.TenantId
+        WHERE l.TenantId = ? AND t.Name = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND l.Active = 1
+        GROUP BY ti.ItemId, i.Name
+        ORDER BY ReturnedAmount DESC`,
 
       SALES_TREND: `
         SELECT
@@ -2220,7 +2453,8 @@ module.exports = {
         LEFT JOIN categorydetail c   ON c.Id = i.CategoryId
         WHERE ti.TenantId = ?
           AND l.TransactionDate BETWEEN ? AND ?
-          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+          AND l.ReversesLogId IS NULL`,
 
       // Revenue by floor and table.
       //
@@ -2292,7 +2526,8 @@ module.exports = {
         JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
         WHERE ti.TenantId = ?
           AND l.TransactionDate BETWEEN ? AND ?
-          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+          AND l.ReversesLogId IS NULL`,
 
       DISCOUNT_BY_PRODUCT: `
         SELECT
@@ -2311,6 +2546,7 @@ module.exports = {
         WHERE ti.TenantId = ?
           AND l.TransactionDate BETWEEN ? AND ?
           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+          AND l.ReversesLogId IS NULL
           AND ti.DiscountAmount > 0`,
 
       DISCOUNT_BY_BILL: `
@@ -2566,7 +2802,12 @@ module.exports = {
       ADJUSTMENT: 'ADJUSTMENT',
       EXPIRY: 'EXPIRY',
     },
-    SOURCE: { BILL: 'BILL', MANUAL: 'MANUAL', RULE: 'RULE' },
+    // RETURN is what makes a SECOND partial refund legal. The ledger's
+    // UNIQUE (TenantId, SourceType, SourceId, EntryType) rejects a second
+    // REVERSAL against the same BILL — correct, it is what stops a dropped
+    // response clawing back twice — so each credit note is its own source
+    // instead of weakening the key.
+    SOURCE: { BILL: 'BILL', RETURN: 'RETURN', MANUAL: 'MANUAL', RULE: 'RULE' },
   },
 
   TOKEN_NUMBERING: { DAILY: 'daily', SERIES: 'series' },
@@ -2715,6 +2956,10 @@ module.exports = {
   LEDGER: {
     TYPE_POS_SALE:        'POS Sale',
     TYPE_EXPENSE:         'Expense',
+    // A credit note. Its own document type with its own number series, because
+    // a return IS a document — not a status the sale moves into. See
+    // ledger.returns.service.js for why that distinction carries the feature.
+    TYPE_POS_RETURN:      'POS Return',
     STATUS_DRAFT:         'DRAFT',
     STATUS_PARTIALLY_PAID:'PARTIALLY_PAID',
     STATUS_SETTLED:       'SETTLED',
@@ -2723,6 +2968,9 @@ module.exports = {
     ACCOUNT_SALES:        'Sales',
     ACCOUNT_CASH:         'Cash',
     ACCOUNT_EXPENSES:     'Expenses',
+    // Store credit is a LIABILITY, not money leaving the drawer. Issuing it as
+    // a cash refund would make the till short by an amount that never left it.
+    ACCOUNT_STORE_CREDIT: 'Store Credit',
     RECEIVED_FULL:        'Full',
     RECEIVED_PARTIAL:     'Partial',
     RECEIVED_REFUND:      'Refund',
@@ -2731,7 +2979,53 @@ module.exports = {
     IMMUTABLE_STATUSES:   ['SETTLED', 'PARTIALLY_PAID', 'REFUNDED', 'CANCELLED'],
     // Modes that must carry a reference number for reconciliation.
     REF_REQUIRED_MODES:   ['Card', 'UPI', 'Wallet'],
+
+    // ── Returns ────────────────────────────────────────────────────────────
+    //
+    // How refunded a SALE is. Deliberately NOT a stored status: it is derived
+    // from SUM(credit notes) against GrossAmount, so a second partial return
+    // needs no state transition and the sale itself is never mutated.
+    REFUND_STATE: {
+      NONE:      'NONE',
+      PARTIAL:   'PARTIALLY_REFUNDED',
+      FULL:      'REFUNDED',
+    },
+    // Has the money actually gone back? Every refund today is executed at the
+    // till, so PENDING → SETTLED is a human marking it done. The vocabulary
+    // exists now so a gateway can be wired in later without reshaping
+    // documents already written.
+    SETTLEMENT_STATUS: {
+      PENDING: 'PENDING',
+      SETTLED: 'SETTLED',
+      FAILED:  'FAILED',
+    },
+    SETTLEMENT_STATUSES: ['PENDING', 'SETTLED', 'FAILED'],
+    // Where the refund goes. ORIGINAL mirrors each tender back to the mode it
+    // arrived on; STORE_CREDIT books a liability instead of moving money.
+    REFUND_DESTINATION: { ORIGINAL: 'ORIGINAL', STORE_CREDIT: 'STORE_CREDIT' },
+    // How a partial refund is split across the tenders the sale was paid with.
+    //
+    // CASH_FIRST is what a till actually does and is what keeps a drawer count
+    // honest. The invariant that matters more than the choice: NO MODE IS EVER
+    // REFUNDED MORE THAN IT RECEIVED — otherwise a sequence of partial returns
+    // can hand back cash the customer never paid in cash.
+    TENDER_APPORTIONMENT: 'CASH_FIRST',
   },
+
+  // Why goods came back. Seeded as a master (pos_return_reason) so returns can
+  // be GROUPED; the free-text note rides alongside rather than instead of it.
+  // IsFault separates "we got it wrong" from "they changed their mind", which
+  // is what turns a refund report into a kitchen-quality signal.
+  // [Name, Code, IsFault, SortOrder]
+  POS_RETURN_REASONS: [
+    ['Wrong item served',    'WRONG_ITEM',   1, 1],
+    ['Quality complaint',    'QUALITY',      1, 2],
+    ['Item arrived late',    'LATE',         1, 3],
+    ['Item unavailable',     'UNAVAILABLE',  1, 4],
+    ['Billed in error',      'BILLING_ERROR', 1, 5],
+    ['Customer changed mind', 'CHANGED_MIND', 0, 6],
+    ['Other',                'OTHER',        0, 7],
+  ],
 
   // POS bill lifecycle. These strings are written by settle and read by every
   // report; they were previously inline literals, and a report filtering on
@@ -2740,6 +3034,10 @@ module.exports = {
     UNPAID:         'unpaid',
     PARTIALLY_PAID: 'partially_paid',
     PAID:           'paid',
+    // Some of it came back, the rest stands. Without this a partly-returned
+    // bill had to claim either 'paid' (a lie by omission) or 'refunded' (a lie
+    // outright), and every report reading this column inherited the lie.
+    PARTIALLY_REFUNDED: 'partially_refunded',
     REFUNDED:       'refunded',
     VOID:           'void',
   },

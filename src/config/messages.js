@@ -48,6 +48,26 @@ module.exports = {
       'No transaction numbering config found for this document type.',
     LEDGER_TRANSITION_NOT_ALLOWED:
       'That status change is not permitted for this document type.',
+    // ── Returns ────────────────────────────────────────────────────────
+    LEDGER_RETURN_NOT_SETTLED:
+      'Only a settled sale can be returned against.',
+    LEDGER_RETURN_NO_LINES:
+      'This document has no lines, so there is nothing to return.',
+    LEDGER_RETURN_LINE_UNKNOWN:
+      'That line is not on this invoice: ',
+    LEDGER_RETURN_QTY_INVALID:
+      'A returned quantity must be greater than zero.',
+    LEDGER_RETURN_QTY_EXCEEDS:
+      'Cannot return more than was sold of ',
+    LEDGER_RETURN_EXCEEDS_SALE:
+      'Returns against this sale would exceed what it was settled for.',
+    LEDGER_ALREADY_FULLY_RETURNED:
+      'Every line on this sale has already been returned in full.',
+    LEDGER_RETURN_NO_PAYMENT:
+      'This sale has no recorded payment, so there is nothing to refund against.',
+    LEDGER_REFUND_EXCEEDS_TENDERS:
+      'The refund is larger than what remains on the tenders this sale was paid with. '
+      + 'No payment mode may be refunded more than it received.',
     LEDGER_ALREADY_POSTED:
       'This bill has already been posted to the ledger.',
     LEDGER_PAYMENT_MODE_UNKNOWN:

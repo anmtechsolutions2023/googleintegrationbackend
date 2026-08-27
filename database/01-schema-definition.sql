@@ -318,6 +318,8 @@ CREATE TABLE user_roles (
 -- =============================================================================
 
 -- Drop in reverse dependency order before recreating
+DROP TABLE IF EXISTS notification_outbox;
+DROP TABLE IF EXISTS pos_return_reason;
 DROP TABLE IF EXISTS paymentbreakup;
 DROP TABLE IF EXISTS paymentdetail;
 DROP TABLE IF EXISTS paymentmodetransactiondetail;
@@ -508,6 +510,36 @@ CREATE TABLE asset_category (
     UpdatedBy  VARCHAR(50),
     PRIMARY KEY (Id),
     UNIQUE (Name, TenantId)
+);
+
+-- 3.7c pos_return_reason — why goods came back.
+--
+-- The refund reason was free text (Joi.string().max(100)) stashed on the
+-- reversing tender's comment. Twelve cashiers produce twelve spellings of
+-- "wrong item", so "what are we actually refunding for?" could not be grouped
+-- and the question went unasked.
+--
+-- A taxonomy, with a free-text note kept ALONGSIDE rather than instead of it:
+-- the code is what reports group by, the note is what a human needs to read.
+--
+-- IsFault marks the reasons that indicate WE got it wrong (wrong item, quality,
+-- late) as opposed to the customer simply changing their mind. That single flag
+-- is the difference between a return report and a kitchen-quality signal.
+CREATE TABLE pos_return_reason (
+    Id          VARCHAR(50)   NOT NULL,
+    Name        VARCHAR(100)  NOT NULL,
+    Code        VARCHAR(50)   NOT NULL,
+    Description VARCHAR(255)  NULL,
+    IsFault     TINYINT(1)    NOT NULL DEFAULT 0,
+    SortOrder   INT           NOT NULL DEFAULT 0,
+    TenantId    VARCHAR(50)   NOT NULL,
+    Active      TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn   DATETIME,
+    CreatedBy   VARCHAR(50),
+    UpdatedOn   DATETIME,
+    UpdatedBy   VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Code, TenantId)
 );
 
 -- 3.8 transactiontypestatus
@@ -864,6 +896,36 @@ CREATE TABLE transactiondetaillog (
     CustomerName             VARCHAR(150)  NULL,
     CustomerMobile           VARCHAR(50)   NULL,
     SettledAt                DATETIME      NULL,
+    -- WHICH DOCUMENT THIS ONE REVERSES. Set on a credit note (POS Return),
+    -- NULL on everything else.
+    --
+    -- This is what makes a partial refund expressible at all. The old model
+    -- moved the sale's own status SETTLED → REFUNDED, which is terminal and
+    -- all-or-nothing: the transition whitelist has no self-transition, so a
+    -- SECOND partial return against the same invoice was rejected outright, and
+    -- there was nowhere to record how much came back or which items.
+    --
+    -- Now the sale is never mutated. Each return is its own numbered document
+    -- pointing back here, so returns simply accumulate and the invoice still
+    -- reads exactly as it did the day it was settled. How refunded a sale is
+    -- becomes DERIVED — SUM(returns) against GrossAmount — rather than stored.
+    ReversesLogId            VARCHAR(50)   NULL,
+    -- Has the money actually gone back to the customer?
+    --
+    -- Today every refund is executed at the till, so this is set by a human
+    -- marking it done. It exists from day one anyway: the moment a payment
+    -- gateway is wired in, a refund becomes an async request that can be
+    -- PENDING or FAIL, and adding the column later would mean reshaping
+    -- documents that had already been written without it.
+    SettlementStatus         VARCHAR(20)   NULL,
+    -- The acquirer/PSP reference, when one exists. Unused until a gateway does.
+    -- Deliberately NOT reused to carry the return reason: two meanings in one
+    -- column is how a field ends up holding whichever the last writer meant.
+    SettlementRef            VARCHAR(100)  NULL,
+    -- WHY the goods came back, on a credit note. A coded reason from
+    -- pos_return_reason, so returns can be grouped; the free-text note lives in
+    -- Remarks alongside it rather than instead of it.
+    ReturnReasonId           VARCHAR(50)   NULL,
     Remarks                  VARCHAR(500)  NULL,
     Active                   TINYINT(1)    NOT NULL,
     CreatedOn                DATETIME,
@@ -873,6 +935,14 @@ CREATE TABLE transactiondetaillog (
     PRIMARY KEY (Id),
     -- A ledger must not be able to issue the same document number twice.
     UNIQUE KEY uk_tdl_txnno_tenant (TransactionNo, TenantId),
+    -- Every credit note against a sale, in one index — the read that derives
+    -- "how much of this invoice came back".
+    INDEX idx_tdl_reverses (TenantId, ReversesLogId),
+    -- The refund worklist: money owed but not yet returned.
+    INDEX idx_tdl_settlement (TenantId, SettlementStatus),
+    -- Self-referential: a credit note points at the sale it reverses.
+    FOREIGN KEY (ReversesLogId)           REFERENCES transactiondetaillog(Id),
+    FOREIGN KEY (ReturnReasonId)          REFERENCES pos_return_reason(Id),
     FOREIGN KEY (TransactionTypeConfigId) REFERENCES transactiontypeconfig(Id),
     FOREIGN KEY (TransactionTypeId)       REFERENCES transactiontype(Id),
     FOREIGN KEY (TransactionTypeStatusId) REFERENCES transactiontypestatus(Id),
@@ -925,6 +995,21 @@ CREATE TABLE transactionitemdetail (
     -- variant later cannot rewrite an invoice already issued.
     Variants               JSON           NULL,
     Comment                VARCHAR(100),
+    -- On a CREDIT NOTE line: the sale line this one sends back.
+    --
+    -- Without it "2 of 3 returned" is underivable and a second return could
+    -- take back a quantity that was never sold. It is also what makes
+    -- return-rate-by-product answerable — the returned line and the sold line
+    -- are joinable rather than merely both existing.
+    SourceLineId           VARCHAR(50)    NULL,
+    -- Did this come back into sellable stock?
+    --
+    -- INTENT ONLY. There is no stock ledger in this system — batchdetail.Quantity
+    -- is a hand-edited VARCHAR that no sale ever decrements — so nothing can be
+    -- restocked yet. Recording the intent now means the data exists on the day a
+    -- stock ledger lands; inventing a decrement against a quantity nothing
+    -- maintains would be worse than admitting there is none.
+    RestockRequested       TINYINT(1)     NOT NULL DEFAULT 0,
     TenantId               VARCHAR(50)    NOT NULL,
     Active                 TINYINT(1)     NOT NULL,
     CreatedOn              DATETIME,
@@ -936,6 +1021,9 @@ CREATE TABLE transactionitemdetail (
     -- UNIQUE(LogId, ItemId, TenantId), which allowed an item only once per
     -- document and so could not represent the same dish with different options.
     UNIQUE KEY uk_tid_log_line (TransactionDetailLogId, LineNo, TenantId),
+    -- "How much of this sale line has already come back", in one index.
+    INDEX idx_tid_source_line (TenantId, SourceLineId),
+    FOREIGN KEY (SourceLineId)           REFERENCES transactionitemdetail(Id),
     FOREIGN KEY (TransactionDetailLogId) REFERENCES transactiondetaillog(Id),
     FOREIGN KEY (ItemId)                 REFERENCES itemdetail(Id),
     FOREIGN KEY (CostInfoId)             REFERENCES costinfo(Id)
@@ -1064,6 +1152,49 @@ CREATE TABLE paymentbreakup (
     FOREIGN KEY (PaymentDetailId)                REFERENCES paymentdetail(Id),
     FOREIGN KEY (PaymentModeTransactionDetailId) REFERENCES paymentmodetransactiondetail(Id),
     FOREIGN KEY (PaymentReceivedTypeId)          REFERENCES paymentreceivedtype(Id)
+);
+
+-- 3.33 notification_outbox — an intent to tell somebody, made durable.
+--
+-- THE TRANSACTIONAL OUTBOX PATTERN, and the reason it is here rather than a
+-- mail call in the refund path: a provider timeout must never roll back a
+-- completed refund. A late email is a nuisance; a refund that silently
+-- un-happened because SMTP hung is a financial defect.
+--
+-- So the refund transaction writes a ROW — as durable as the refund itself —
+-- and delivery happens elsewhere, later, with retries. There is deliberately no
+-- consumer yet: no mail transport, no SMS provider and no job runner exist in
+-- this system. Writing the rows from day one means nothing is lost in the
+-- meantime and the worker, when it is built, has a backlog to drain rather than
+-- a cold start with no history.
+CREATE TABLE notification_outbox (
+    Id           VARCHAR(50)   NOT NULL,
+    -- RETURN_RECORDED | REFUND_SETTLED | REFUND_FAILED | HIGH_VALUE_RETURN | ...
+    EventType    VARCHAR(50)   NOT NULL,
+    -- Who it is about: 'customer' | 'manager' | 'frontdesk'.
+    Audience     VARCHAR(20)   NOT NULL,
+    -- The document that caused it, so a delivered message can be traced back.
+    SourceType   VARCHAR(30)   NULL,
+    SourceId     VARCHAR(50)   NULL,
+    -- Everything the template will need, captured AT WRITE TIME. A worker that
+    -- re-read the document later could render a message describing a state the
+    -- event never had.
+    Payload      JSON          NULL,
+    Status       VARCHAR(20)   NOT NULL DEFAULT 'pending',
+    Attempts     INT           NOT NULL DEFAULT 0,
+    LastError    VARCHAR(500)  NULL,
+    AvailableOn  DATETIME      NULL,
+    DeliveredOn  DATETIME      NULL,
+    TenantId     VARCHAR(50)   NOT NULL,
+    Active       TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn    DATETIME,
+    CreatedBy    VARCHAR(50),
+    UpdatedOn    DATETIME,
+    UpdatedBy    VARCHAR(50),
+    PRIMARY KEY (Id),
+    -- The worker's claim query: oldest pending first, per tenant.
+    INDEX idx_outbox_pending (TenantId, Status, AvailableOn),
+    INDEX idx_outbox_source (TenantId, SourceType, SourceId)
 );
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -715,12 +715,18 @@ INSERT IGNORE INTO transactiontypeconfig (Id, TenantId, StartCounterNo, Prefix, 
     -- Counter tokens, for branches configured with 'series' numbering (see
     -- pos_setting.token.numbering). Branches on the default 'daily' setting
     -- never touch this row — they count in pos_token_counter instead.
-    ('t0000001-ttc0-0000-0000-000000000007', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'TOK',  'TOK-{0000}',  'POS_TOKEN', 1, NOW(), 'system-seed', 'system-seed');
+    ('t0000001-ttc0-0000-0000-000000000007', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'TOK',  'TOK-{0000}',  'POS_TOKEN', 1, NOW(), 'system-seed', 'system-seed'),
+    -- Credit notes. Their own counter so CN-0007 means "the seventh return",
+    -- not the seventh document of mixed kinds.
+    ('t0000001-ttc0-0000-0000-000000000008', 'e3845e08-dcc2-11f0-8e78-0242ac110002', '1', 'CN',   'CN-{0000}',   'POS_RETURN', 1, NOW(), 'system-seed', 'system-seed');
 
 -- 11c) Document types, each bound to its own series.
 INSERT IGNORE INTO transactiontype (Id, Name, TransactionTypeConfigId, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
     ('y0000001-ldgr-0000-0000-000000000001', 'POS Sale', 't0000001-ttc0-0000-0000-000000000002', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
-    ('y0000001-ldgr-0000-0000-000000000002', 'Expense',  't0000001-ttc0-0000-0000-000000000003', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
+    ('y0000001-ldgr-0000-0000-000000000002', 'Expense',  't0000001-ttc0-0000-0000-000000000003', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    -- A return is a DOCUMENT, not a status the sale moves into. Giving it its
+    -- own type is what lets partial returns accumulate against one invoice.
+    ('y0000001-ldgr-0000-0000-000000000003', 'POS Return', 't0000001-ttc0-0000-0000-000000000008', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
 
 -- 11d) Permitted status transitions, PER SERIES.
 -- NOTE: SETTLED → CANCELLED is deliberately ABSENT. A settled document is
@@ -747,7 +753,14 @@ INSERT IGNORE INTO transactiontypebaseconversion
     ('v0000001-ldgr-0000-0000-000000000007', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000003',
      's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000004', 'EXPENSE_VOID', 1, NOW(), 'system-seed', 'system-seed'),
     ('v0000001-ldgr-0000-0000-000000000008', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000003',
-     's0000001-ldgr-0000-0000-000000000003', 's0000001-ldgr-0000-0000-000000000005', 'EXPENSE_REVERSE', 1, NOW(), 'system-seed', 'system-seed');
+     's0000001-ldgr-0000-0000-000000000003', 's0000001-ldgr-0000-0000-000000000005', 'EXPENSE_REVERSE', 1, NOW(), 'system-seed', 'system-seed'),
+    -- Credit note: raised and settled in one act at the till, or voided before
+    -- the money moved. Note what is ABSENT — no new transition on the SALE.
+    -- The sale is never mutated by a return; how refunded it is, is derived.
+    ('v0000001-ldgr-0000-0000-000000000009', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000008',
+     's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000003', 'POS_RETURN_SETTLE', 1, NOW(), 'system-seed', 'system-seed'),
+    ('v0000001-ldgr-0000-0000-000000000010', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 't0000001-ttc0-0000-0000-000000000008',
+     's0000001-ldgr-0000-0000-000000000001', 's0000001-ldgr-0000-0000-000000000004', 'POS_RETURN_VOID', 1, NOW(), 'system-seed', 'system-seed');
 
 -- 11e) Ledger accounts, each with its KIND.
 -- Kind is what lets cash flow classify a movement without matching on a name a
@@ -807,7 +820,11 @@ INSERT IGNORE INTO pos_channel (Id, Name, Code, Description, SortOrder, TenantId
 -- would put money in a till that never saw it and break the cash session.
 INSERT IGNORE INTO accounttypebase (Id, Name, Kind, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
     ('b0000001-ldgr-0000-0000-000000000006', 'Aggregator Receivable', 'ASSET',   1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
-    ('b0000001-ldgr-0000-0000-000000000007', 'Portal Commission',     'EXPENSE', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
+    ('b0000001-ldgr-0000-0000-000000000007', 'Portal Commission',     'EXPENSE', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),
+    -- Store credit issued instead of a cash refund. A LIABILITY: nothing left
+    -- the drawer, so booking it as a cash refund would make the till short by
+    -- an amount that never moved.
+    ('b0000001-ldgr-0000-0000-000000000008', 'Store Credit',          'LIABILITY', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed');
 
 -- One settlement tender per portal, not one shared "Aggregator" tender:
 -- reconciling a payout statement means answering what ONE portal owes us.
@@ -827,6 +844,23 @@ INSERT IGNORE INTO pos_portal (Id, Name, Code, ChannelId, Adapter, ColorHex, Sho
     ('p0000001-prtl-0000-0000-000000000001', 'Zomato',   'ZOMATO',   'c0000001-chan-0000-0000-000000000003', 'manual', '#E23744', 'ZO', 18.000, 'b0000001-ldgr-0000-0000-000000000007', 'm0000001-ldgr-0000-0000-000000000005', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
     ('p0000001-prtl-0000-0000-000000000002', 'Swiggy',   'SWIGGY',   'c0000001-chan-0000-0000-000000000003', 'manual', '#F58220', 'SW', 17.000, 'b0000001-ldgr-0000-0000-000000000007', 'm0000001-ldgr-0000-0000-000000000006', 2, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
     ('p0000001-prtl-0000-0000-000000000003', 'District', 'DISTRICT', 'c0000001-chan-0000-0000-000000000003', 'manual', '#5A6472', 'DI', 15.000, 'b0000001-ldgr-0000-0000-000000000007', 'm0000001-ldgr-0000-0000-000000000007', 3, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
+-- 11h-3) Why goods came back.
+--
+-- The refund reason was free text on the reversing tender's comment field.
+-- Twelve cashiers produce twelve spellings of "wrong item", so returns could
+-- not be grouped and "what are we refunding for?" went unasked.
+--
+-- IsFault separates "we got it wrong" from "they changed their mind" — that one
+-- flag is what turns a refund report into a kitchen-quality signal.
+INSERT IGNORE INTO pos_return_reason (Id, Name, Code, Description, IsFault, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('n0000001-rrsn-0000-0000-000000000001', 'Wrong item served',     'WRONG_ITEM',    'The kitchen or counter sent the wrong dish', 1, 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('n0000001-rrsn-0000-0000-000000000002', 'Quality complaint',     'QUALITY',       'Cold, undercooked, stale or otherwise not right', 1, 2, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('n0000001-rrsn-0000-0000-000000000003', 'Item arrived late',     'LATE',          'Served too late to be accepted', 1, 3, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('n0000001-rrsn-0000-0000-000000000004', 'Item unavailable',      'UNAVAILABLE',   'Billed but could not be made', 1, 4, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('n0000001-rrsn-0000-0000-000000000005', 'Billed in error',       'BILLING_ERROR', 'Keyed onto the wrong bill or at the wrong price', 1, 5, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('n0000001-rrsn-0000-0000-000000000006', 'Customer changed mind', 'CHANGED_MIND',  'Nothing was wrong with the order', 0, 6, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('n0000001-rrsn-0000-0000-000000000007', 'Other',                 'OTHER',         'Use the note to say what happened', 0, 7, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
 
 -- 11i) Asset categories — the analysis axis for the equipment register.
 INSERT IGNORE INTO asset_category (Id, Name, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
