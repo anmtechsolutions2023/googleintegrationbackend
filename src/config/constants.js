@@ -2063,11 +2063,20 @@ module.exports = {
       UPDATE_LOG_STATUS:
         'UPDATE transactiondetaillog SET TransactionTypeStatusId = ?, SettledAt = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       SELECT_LOG_FULL: `
-        SELECT l.*, s.Name AS StatusName, t.Name AS TypeName, b.BranchName
+        SELECT l.*, s.Name AS StatusName, t.Name AS TypeName, b.BranchName,
+               -- The sale a credit note came off. A note is meaningless
+               -- without it, and carrying the number here saves the UI a
+               -- second read just to label the link back.
+               orig.TransactionNo AS OriginalNo,
+               rr.Name AS ReasonName, rr.Code AS ReasonCode, rr.IsFault
           FROM transactiondetaillog l
           LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
           LEFT JOIN transactiontype t       ON t.Id = l.TransactionTypeId
           LEFT JOIN branchdetail b          ON b.Id = l.BranchId
+          LEFT JOIN transactiondetaillog orig
+                 ON orig.Id = l.ReversesLogId AND orig.TenantId = l.TenantId
+          LEFT JOIN pos_return_reason rr
+                 ON rr.Id = l.ReturnReasonId AND rr.TenantId = l.TenantId
          WHERE l.Id = ? AND l.TenantId = ?`,
       SELECT_LOG_LIST: `
         SELECT l.Id, l.TransactionNo, l.TransactionDate, l.GrossAmount, l.NetAmount,
@@ -2213,7 +2222,7 @@ module.exports = {
       SELECT_PENDING_SETTLEMENTS: `
         SELECT l.Id, l.TransactionNo, l.TransactionDate, l.GrossAmount,
                l.SettlementStatus, l.CreatedOn, l.CreatedBy,
-               orig.TransactionNo AS SaleNo, l.ReversesLogId,
+               orig.TransactionNo AS SaleNo, l.ReversesLogId, l.ReversesLogId AS SaleId,
                l.CustomerName, l.CustomerMobile, b.BranchName
           FROM transactiondetaillog l
           JOIN transactiontype t ON t.Id = l.TransactionTypeId
@@ -2222,6 +2231,78 @@ module.exports = {
          WHERE l.TenantId = ? AND t.Name = ? AND l.Active = 1
            AND COALESCE(l.SettlementStatus, 'PENDING') = 'PENDING'
          ORDER BY l.CreatedOn ASC`,
+
+      // ── The returns register ───────────────────────────────────────────
+      //
+      // Every credit note, with everything a business needs to trace one:
+      // WHAT came back, off WHICH invoice, for WHOSE order, WHY, to WHICH
+      // tender, and WHO did it. That last one is the standard shrinkage
+      // control and the reason CreatedBy is selected rather than left in the
+      // audit log where nobody joins it.
+      //
+      // The refund tender is DERIVED from the negative breakups rather than
+      // stored: money can go back across two modes (cash first, then card),
+      // and a single stored "destination" column could not say so. Store
+      // credit shows as its account name because no payment mode moved.
+      SELECT_RETURNS_LIST: `
+        SELECT l.Id, l.TransactionNo, l.TransactionDate, l.CreatedOn, l.CreatedBy,
+               l.GrossAmount, l.NetAmount, l.TaxAmount,
+               l.SettlementStatus, l.SettlementRef, l.Remarks,
+               l.ReversesLogId                       AS SaleId,
+               orig.TransactionNo                    AS SaleNo,
+               orig.GrossAmount                      AS SaleGross,
+               l.ContactDetailId, l.CustomerName, l.CustomerMobile,
+               l.BranchId, b.BranchName,
+               rr.Id AS ReasonId, rr.Name AS ReasonName, rr.Code AS ReasonCode, rr.IsFault,
+               s.Name AS StatusName,
+               (SELECT COUNT(*) FROM transactionitemdetail ti
+                 WHERE ti.TransactionDetailLogId = l.Id AND ti.TenantId = l.TenantId) AS LineCount,
+               (SELECT COALESCE(SUM(ti.Quantity), 0) FROM transactionitemdetail ti
+                 WHERE ti.TransactionDetailLogId = l.Id AND ti.TenantId = l.TenantId) AS QuantityReturned,
+               (SELECT GROUP_CONCAT(DISTINCT ti.Comment ORDER BY ti.LineNo SEPARATOR ', ')
+                  FROM transactionitemdetail ti
+                 WHERE ti.TransactionDetailLogId = l.Id AND ti.TenantId = l.TenantId) AS ItemNames,
+               -- Where the money actually went. COALESCE so store credit —
+               -- which moves no payment mode — still names its account.
+               (SELECT GROUP_CONCAT(DISTINCT COALESCE(pm.Type, acc.Name) SEPARATOR ', ')
+                  FROM paymentdetail pd
+                  JOIN paymentbreakup pb ON pb.PaymentDetailId = pd.Id AND pb.TenantId = pd.TenantId
+                  LEFT JOIN paymentmodetransactiondetail pmtd
+                         ON pmtd.Id = pb.PaymentModeTransactionDetailId
+                  LEFT JOIN paymentmode pm ON pm.Id = pmtd.PaymentModeId
+                  LEFT JOIN accounttypebase acc ON acc.Id = pb.AccountTypeBaseId
+                 WHERE pd.TransactionDetailLogId = l.Id AND pd.TenantId = l.TenantId
+                   AND pb.Amount < 0) AS RefundedTo
+          FROM transactiondetaillog l
+          JOIN transactiontype t ON t.Id = l.TransactionTypeId
+          LEFT JOIN transactiondetaillog orig ON orig.Id = l.ReversesLogId
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+          LEFT JOIN pos_return_reason rr ON rr.Id = l.ReturnReasonId AND rr.TenantId = l.TenantId
+          LEFT JOIN branchdetail b ON b.Id = l.BranchId AND b.TenantId = l.TenantId
+         WHERE l.TenantId = ? AND t.Name = ? AND l.Active = 1`,
+
+      COUNT_RETURNS_LIST: `
+        SELECT COUNT(*) AS total
+          FROM transactiondetaillog l
+          JOIN transactiontype t ON t.Id = l.TransactionTypeId
+          LEFT JOIN transactiondetaillog orig ON orig.Id = l.ReversesLogId
+          LEFT JOIN pos_return_reason rr ON rr.Id = l.ReturnReasonId AND rr.TenantId = l.TenantId
+         WHERE l.TenantId = ? AND t.Name = ? AND l.Active = 1`,
+
+      // The same filtered set, totalled. Read alongside the page so the header
+      // reports the WHOLE selection rather than the fifty rows on screen —
+      // "₹6,240 returned this month" must not change when you turn the page.
+      SUM_RETURNS_LIST: `
+        SELECT COALESCE(SUM(l.GrossAmount), 0) AS ReturnedAmount,
+               COALESCE(SUM(l.NetAmount), 0)   AS ReturnedNet,
+               COALESCE(SUM(l.TaxAmount), 0)   AS ReturnedTax,
+               COUNT(*)                        AS ReturnCount,
+               COALESCE(SUM(CASE WHEN rr.IsFault = 1 THEN l.GrossAmount ELSE 0 END), 0) AS FaultAmount
+          FROM transactiondetaillog l
+          JOIN transactiontype t ON t.Id = l.TransactionTypeId
+          LEFT JOIN transactiondetaillog orig ON orig.Id = l.ReversesLogId
+          LEFT JOIN pos_return_reason rr ON rr.Id = l.ReturnReasonId AND rr.TenantId = l.TenantId
+         WHERE l.TenantId = ? AND t.Name = ? AND l.Active = 1`,
 
       SET_SETTLEMENT_STATUS: `
         UPDATE transactiondetaillog
@@ -2381,6 +2462,7 @@ module.exports = {
       // cashiers — see pos_return_reason.
       RETURN_REASONS: `
         SELECT
+          rr.Id                               AS ReasonId,
           COALESCE(rr.Name, 'Unspecified')    AS ReasonName,
           COALESCE(rr.Code, 'NONE')           AS ReasonCode,
           COALESCE(rr.IsFault, 0)             AS IsFault,

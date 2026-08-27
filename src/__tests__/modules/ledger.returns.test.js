@@ -308,6 +308,36 @@ describe('tender apportionment — cash first, never beyond capacity', () => {
   });
 });
 
+describe('the note owns its own money movement', () => {
+  // A credit note is a DOCUMENT, so the money leaving belongs to it — not to
+  // the sale's payment record. Without this "refunded to Cash, Card" is
+  // underivable per note: every reversal would sit under the sale and no query
+  // could say which note took which tender.
+  it('writes the reversal against the NOTE, not the sale', async () => {
+    route();
+    await returns.createReturnTx(mockConn, {
+      saleLogId: 'log-1', lines: [{ lineId: 'line-dosa', quantity: 1 }],
+    }, TENANT, USER);
+
+    const notePaymentDetail = firstCall(/INSERT INTO paymentdetail/i)[1][0];
+    expect(breakups()[0][3]).toBe(notePaymentDetail);
+    expect(breakups()[0][3]).not.toBe('pd-1'); // the sale's
+  });
+
+  // Capacity has to span the sale AND every note already raised against it, or
+  // it is only correct on the first return.
+  it('reads remaining capacity across the sale and all its notes', async () => {
+    route();
+    await returns.createReturnTx(mockConn, {
+      saleLogId: 'log-1', lines: [{ lineId: 'line-dosa', quantity: 1 }],
+    }, TENANT, USER);
+
+    const [sql, params] = calls(/FROM paymentbreakup b/i)[0];
+    expect(String(sql)).toMatch(/Id = \? OR ReversesLogId = \?/);
+    expect(params).toContain('log-1');
+  });
+});
+
 describe('store credit — a liability, not money out of the drawer', () => {
   it('books to Store Credit rather than the original tender', async () => {
     route();

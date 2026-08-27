@@ -1974,6 +1974,54 @@ const swaggerSpec = {
           CreatedBy: { type: 'string' },
         },
       },
+      // A register row is a credit note PLUS everything needed to act on it
+      // without a second call: which sale it came off, which customer, which
+      // dishes, and where the money went.
+      LedgerReturnRow: {
+        type: 'object',
+        properties: {
+          Id: { type: 'string', format: 'uuid' },
+          TransactionNo: { type: 'string', example: 'CN-0007' },
+          TransactionDate: { type: 'string', format: 'date' },
+          CreatedOn: { type: 'string', format: 'date-time' },
+          CreatedBy: { type: 'string', description: 'Who refunded. The standard shrinkage control — a cashier refunding far more than their colleagues is the question this column answers.' },
+          GrossAmount: { type: 'number', description: 'Positive. The sign lives in the document type, not the amount.' },
+          NetAmount: { type: 'number' },
+          TaxAmount: { type: 'number' },
+          StatusName: { type: 'string', nullable: true },
+          SettlementStatus: { type: 'string', enum: ['PENDING', 'SETTLED', 'FAILED'], nullable: true },
+          SettlementRef: { type: 'string', nullable: true },
+          Remarks: { type: 'string', nullable: true },
+          SaleId: { type: 'string', format: 'uuid', description: 'The invoice this came off — open it straight from the row.' },
+          SaleNo: { type: 'string', nullable: true, example: 'INV-0418' },
+          SaleGross: { type: 'number', nullable: true },
+          ShareOfSale: { type: 'number', nullable: true, description: 'Percent of the original invoice this note took back. What separates "a whole meal" from "one side dish" at a glance.' },
+          ContactDetailId: { type: 'string', format: 'uuid', nullable: true },
+          CustomerName: { type: 'string', nullable: true },
+          CustomerMobile: { type: 'string', nullable: true },
+          BranchId: { type: 'string', format: 'uuid', nullable: true },
+          BranchName: { type: 'string', nullable: true },
+          ReasonId: { type: 'string', format: 'uuid', nullable: true },
+          ReasonName: { type: 'string', nullable: true },
+          ReasonCode: { type: 'string', nullable: true },
+          IsFault: { type: 'boolean', description: 'Whether the reason means WE got it wrong. The split that turns a refund register into a kitchen-quality signal.' },
+          LineCount: { type: 'integer' },
+          QuantityReturned: { type: 'number' },
+          ItemNames: { type: 'string', nullable: true, example: '2 x Naan, 1 x Paneer Tikka' },
+          RefundedTo: { type: 'string', nullable: true, example: 'Cash, Card', description: 'Derived from the note\'s own signed payment rows — which tenders actually gave money back. Store credit names its account instead, because nothing left the drawer.' },
+        },
+      },
+      LedgerReturnTotals: {
+        type: 'object',
+        description: 'Totals for the WHOLE filtered set, not the page. "₹6,240 returned this month" must not change when somebody turns the page.',
+        properties: {
+          ReturnedAmount: { type: 'number' },
+          ReturnedNet: { type: 'number' },
+          ReturnedTax: { type: 'number' },
+          ReturnCount: { type: 'integer' },
+          FaultAmount: { type: 'number', description: 'How much of it was our fault. The number a kitchen is judged on.' },
+        },
+      },
       LedgerSettlementUpdate: {
         type: 'object', required: ['SettlementStatus'],
         properties: {
@@ -3063,6 +3111,54 @@ const swaggerSpec = {
             } } },
           },
           ...responses.notFound, ...responses.unauthorized,
+        },
+      },
+    },
+    '/api/ledger/returns': {
+      get: {
+        tags: ['Ledger'],
+        summary: 'The credit-note register — every return, searchable on any axis',
+        description:
+          'One place that answers "what came back, when, why, from whom, and where did the money '
+          + 'go". Every credit note across every invoice, rather than one invoice at a time.\n\n'
+          + '**Why a register and not a report.** The return reports aggregate — by reason, by '
+          + 'product, by day. This lists the DOCUMENTS, so a figure in any of those reports can be '
+          + 'traced to the individual refunds behind it, and each row carries its sale, its '
+          + 'customer, its items and its tender so the next click is possible without another call.'
+          + '\n\n**Totals cover the whole filtered set, not the page** — turning the page must not '
+          + 'move "₹6,240 returned this month".\n\n'
+          + 'Filters combine (all AND). Gated on TRANSACTIONS:READ/WRITE.',
+        security,
+        parameters: [
+          ...paginationParams,
+          { name: 'fromDate', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Date-wise or any custom span, on the transaction date.' },
+          { name: 'toDate', in: 'query', schema: { type: 'string', format: 'date' } },
+          { name: 'branchId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Which outlet the refund was given at.' },
+          { name: 'reasonId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'One specific reason, from /api/pos/return-reasons.' },
+          { name: 'isFault', in: 'query', schema: { type: 'boolean' }, description: 'true = reasons that mean we got it wrong (quality, wrong item, delay); false = the customer changed their mind. The single most useful cut on this screen.' },
+          { name: 'settlementStatus', in: 'query', schema: { type: 'string', enum: ['PENDING', 'SETTLED', 'FAILED'] }, description: 'Money owed but not yet handed back. Notes written before the column existed read as PENDING rather than dropping out of the worklist.' },
+          { name: 'contactDetailId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Everything ONE customer has ever returned — the repeat-refunder question.' },
+          { name: 'itemId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Which dish came back. Matched with EXISTS, so a two-line note is still one row and totals stay right.' },
+          { name: 'createdBy', in: 'query', schema: { type: 'string' }, description: 'Who refunded.' },
+          { name: 'minAmount', in: 'query', schema: { type: 'number' }, description: 'High-value refunds, for the same reason.' },
+          { name: 'maxAmount', in: 'query', schema: { type: 'number' } },
+          { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Whatever they remember: credit-note number, the invoice number it came off, customer name or mobile.' },
+        ],
+        responses: {
+          200: {
+            description: 'Success',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: {
+                success: { type: 'boolean' },
+                message: { type: 'string' },
+                data: { type: 'array', items: { $ref: '#/components/schemas/LedgerReturnRow' } },
+                totals: { $ref: '#/components/schemas/LedgerReturnTotals' },
+                pagination: { $ref: '#/components/schemas/Pagination' },
+              },
+            } } },
+          },
+          ...responses.validation, ...responses.unauthorized, ...responses.forbidden,
         },
       },
     },

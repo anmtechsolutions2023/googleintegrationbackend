@@ -5,7 +5,7 @@ const { asyncHandler } = require('../../utils/controllerHelper');
 const { successResponse, paginatedResponse, createdResponse } = require('../../utils/responseHelper');
 const { validateQuery, validateBody, validateParams } = require('../../middleware/validation');
 const {
-  listQuerySchema, refundSchema, returnSchema, settlementSchema,
+  listQuerySchema, returnsListQuerySchema, refundSchema, returnSchema, settlementSchema,
   reportQuerySchema, uuidParamSchema,
 } = require('./ledger.schemas');
 const { withTransaction } = require('../../utils/dbHelper');
@@ -57,6 +57,25 @@ const createReturn = asyncHandler(async (req, res) => {
   createdResponse(res, 'Return recorded', result);
 });
 
+/**
+ * The returns register — every credit note, filtered however you remember it.
+ *
+ * Paginated like the ledger list, but carries TOTALS for the whole filtered
+ * set alongside the page: "₹6,240 returned this month" must not change when
+ * somebody turns the page.
+ */
+const listReturns_ = asyncHandler(async (req, res) => {
+  const { page, limit, ...filters } = req.validatedQuery;
+  const result = await readService.listReturns(filters, page, limit, req.user.tid);
+  res.status(200).json({
+    success: true,
+    message: 'Returns retrieved',
+    data: result.data,
+    totals: result.totals,
+    pagination: result.pagination,
+  });
+});
+
 /** Every credit note raised against one sale. */
 const listReturns = asyncHandler(async (req, res) => {
   const data = await readService.listReturnsForSale(req.params.id, req.user.tid);
@@ -99,6 +118,7 @@ module.exports = {
   refund: [validateParams(uuidParamSchema), validateBody(refundSchema), refund],
   createReturn: [validateParams(uuidParamSchema), validateBody(returnSchema), createReturn],
   listReturns: [validateParams(uuidParamSchema), listReturns],
+  returnsRegister: [validateQuery(returnsListQuerySchema), listReturns_],
   settlementQueue: [settlementQueue],
   setSettlement: [validateParams(uuidParamSchema), validateBody(settlementSchema), setSettlement],
   returnReasonsReport: [validateQuery(reportQuerySchema), report(reportService.returnReasonsReport, 'Return reasons report retrieved')],

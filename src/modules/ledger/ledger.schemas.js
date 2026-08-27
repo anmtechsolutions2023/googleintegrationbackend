@@ -6,10 +6,61 @@ const { LEDGER } = require('../../config/constants');
 const listQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).optional().default(1),
   limit: Joi.number().integer().min(1).max(100).optional().default(10),
+  // The DOCUMENT's own status: DRAFT / PARTIALLY_PAID / SETTLED / CANCELLED /
+  // REFUNDED. Distinct from refundState below, which is a different axis.
   status: Joi.string().max(30).optional(),
+  // WHICH KIND of document. Added because the ledger holds sales, expenses AND
+  // credit notes, and without this a CN-0007 sat in the list looking exactly
+  // like a sale of the same value.
+  docType: Joi.string().valid(
+    LEDGER.TYPE_POS_SALE, LEDGER.TYPE_EXPENSE, LEDGER.TYPE_POS_RETURN,
+  ).optional(),
+  // How much of a SALE has come back. A separate axis from `status`, because a
+  // partly-refunded sale is still SETTLED — that is exactly what lets a second
+  // return happen against it.
+  refundState: Joi.string()
+    .valid(...Object.values(LEDGER.REFUND_STATE))
+    .optional(),
   fromDate: Joi.date().iso().optional(),
   toDate: Joi.date().iso().optional(),
+  branchId: Joi.string().uuid().optional(),
   contactDetailId: Joi.string().uuid().optional(),
+  search: Joi.string().max(100).optional().allow(''),
+});
+
+/**
+ * The returns register's filter contract.
+ *
+ * Deliberately wide. A return is a financial event a business has to be able to
+ * find again months later, from whatever it happens to remember: the credit
+ * note number, the invoice it came off, the customer's mobile, the dish, the
+ * cashier who did it, the week it happened, or just "everything above ₹1,000".
+ * A register you cannot query by the thing you remember is a register nobody
+ * uses.
+ */
+const returnsListQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).optional().default(1),
+  limit: Joi.number().integer().min(1).max(100).optional().default(25),
+  // Date-wise, or any custom span.
+  fromDate: Joi.date().iso().optional(),
+  toDate: Joi.date().iso().optional(),
+  branchId: Joi.string().uuid().optional(),
+  // Why it came back, and whether that reason means WE got it wrong.
+  reasonId: Joi.string().uuid().optional(),
+  isFault: Joi.boolean().optional(),
+  // Money owed but not yet handed back.
+  settlementStatus: Joi.string().valid(...LEDGER.SETTLEMENT_STATUSES).optional(),
+  // Which customer.
+  contactDetailId: Joi.string().uuid().optional(),
+  // Which dish came back.
+  itemId: Joi.string().uuid().optional(),
+  // WHO refunded. The standard shrinkage control: a cashier refunding far more
+  // than their colleagues is the question this answers.
+  createdBy: Joi.string().max(100).optional().allow(''),
+  // High-value returns, for the same reason.
+  minAmount: Joi.number().min(0).optional(),
+  maxAmount: Joi.number().min(0).optional(),
+  // Free text across the credit note no, the invoice no, and the customer.
   search: Joi.string().max(100).optional().allow(''),
 });
 
@@ -115,6 +166,6 @@ const reportQuerySchema = Joi.object({
 const uuidParamSchema = Joi.object({ id: Joi.string().uuid().required() });
 
 module.exports = {
-  listQuerySchema, refundSchema, returnSchema, settlementSchema,
+  listQuerySchema, returnsListQuerySchema, refundSchema, returnSchema, settlementSchema,
   reportQuerySchema, uuidParamSchema,
 };

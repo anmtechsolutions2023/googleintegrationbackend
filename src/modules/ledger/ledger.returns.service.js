@@ -135,11 +135,16 @@ const apportionRefund = (tenders, amountMinor) => {
 /**
  * What each tender still has capacity to refund.
  *
- * Reads the original positive breakups and nets off every negative one already
- * written against the same payment detail — so this is correct on the fifth
- * return, not just the first.
+ * Spans the SALE **and every credit note already raised against it**, netting
+ * the positives against the negatives. That span is the point: each note owns
+ * its own money movement (a credit note is a document, so its payment rows
+ * belong to it, not to the sale), and capacity is only correct on the fifth
+ * return if all five are counted.
+ *
+ * Keyed on the sale's log id rather than a payment-detail id for the same
+ * reason — the rows are spread across several documents by then.
  */
-const tenderCapacity = async (conn, paymentDetailId, tenantId) => {
+const tenderCapacity = async (conn, saleLogId, tenantId) => {
   const [rows] = await conn.execute(
     `SELECT pmtd.PaymentModeId,
             b.AccountTypeBaseId,
@@ -147,14 +152,20 @@ const tenderCapacity = async (conn, paymentDetailId, tenantId) => {
             SUM(b.Amount) AS NetAmount,
             MIN(b.CreatedOn) AS FirstSeen
        FROM paymentbreakup b
+       JOIN paymentdetail pd
+         ON pd.Id = b.PaymentDetailId AND pd.TenantId = b.TenantId
        JOIN paymentmodetransactiondetail pmtd
          ON pmtd.Id = b.PaymentModeTransactionDetailId
        LEFT JOIN paymentmode pm ON pm.Id = pmtd.PaymentModeId
-      WHERE b.PaymentDetailId = ? AND b.TenantId = ?
+      WHERE b.TenantId = ?
+        AND pd.TransactionDetailLogId IN (
+              SELECT Id FROM transactiondetaillog
+               WHERE TenantId = ? AND (Id = ? OR ReversesLogId = ?)
+            )
       GROUP BY pmtd.PaymentModeId, b.AccountTypeBaseId, pm.Type
       HAVING SUM(b.Amount) > 0
       ORDER BY FirstSeen ASC`,
-    [paymentDetailId, tenantId],
+    [tenantId, tenantId, saleLogId, saleLogId],
   );
 
   return (rows || []).map((r) => ({
@@ -483,6 +494,8 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
     // received. Negative amounts, so the daily drawer reconciliation and the
     // tender mix pick this up with NO new code — that convention, chosen long
     // before returns existed, is why cash sessions need no change at all.
+    // Read to confirm the sale was actually paid for — there is nothing to
+    // refund against otherwise. The reversal itself lands on the note.
     const [payments] = await conn.execute(
       QUERIES.LEDGER.SELECT_PAYMENT_DETAIL_BY_LOG, [saleLogId, tenantId],
     );
@@ -492,7 +505,7 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
         MESSAGES.HTTP_STATUS.CONFLICT,
       );
     }
-    const capacity = await tenderCapacity(conn, payments[0].Id, tenantId);
+    const capacity = await tenderCapacity(conn, saleLogId, tenantId);
     const splits = apportionRefund(capacity, priced.grossMinor);
 
     for (const split of splits) {
@@ -505,9 +518,11 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
       // account nets to zero rather than leaving cash that was never there.
       await conn.execute(QUERIES.LEDGER.INSERT_BREAKUP, [
         uuidv4(), tenantId, split.accountTypeBaseId || salesAccount.Id,
-        // Against the ORIGINAL payment detail: that is what makes the tender's
-        // remaining capacity computable on the next return.
-        payments[0].Id, pmtdId,
+        // Against the NOTE's own payment detail. A credit note is a document,
+        // so the money leaving belongs to it — which is what makes "refunded to
+        // Cash, Card" answerable per note. Capacity still spans the sale and
+        // all its notes; see tenderCapacity.
+        paymentDetailId, pmtdId,
         refundType.Id, -fromMinor(split.amountMinor), null, userEmail, userEmail,
       ]);
     }

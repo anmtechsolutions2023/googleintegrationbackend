@@ -67,6 +67,26 @@ const listDocuments = (filters, page, limit, tenantId) =>
     if (filters.fromDate) { where.push('l.TransactionDate >= ?'); params.push(filters.fromDate); }
     if (filters.toDate) { where.push('l.TransactionDate <= ?'); params.push(filters.toDate); }
     if (filters.contactDetailId) { where.push('l.ContactDetailId = ?'); params.push(filters.contactDetailId); }
+    if (filters.branchId) { where.push('l.BranchId = ?'); params.push(filters.branchId); }
+    // WHICH KIND of document. The ledger holds sales, expenses and credit
+    // notes; without this a CN-0007 sits in the list looking exactly like a
+    // sale of the same value.
+    if (filters.docType) { where.push('t.Name = ?'); params.push(filters.docType); }
+    // How much of a SALE has come back — a different axis from its status, and
+    // derived rather than stored, so it is expressed as EXISTS over the credit
+    // notes rather than a column comparison.
+    if (filters.refundState === LEDGER.REFUND_STATE.NONE) {
+      where.push(`NOT EXISTS (SELECT 1 FROM transactiondetaillog cn
+                               WHERE cn.ReversesLogId = l.Id AND cn.TenantId = l.TenantId AND cn.Active = 1)`);
+    } else if (filters.refundState === LEDGER.REFUND_STATE.PARTIAL) {
+      where.push(`(SELECT COALESCE(SUM(cn.GrossAmount), 0) FROM transactiondetaillog cn
+                    WHERE cn.ReversesLogId = l.Id AND cn.TenantId = l.TenantId AND cn.Active = 1)
+                  BETWEEN 0.01 AND l.GrossAmount - 0.01`);
+    } else if (filters.refundState === LEDGER.REFUND_STATE.FULL) {
+      where.push(`(SELECT COALESCE(SUM(cn.GrossAmount), 0) FROM transactiondetaillog cn
+                    WHERE cn.ReversesLogId = l.Id AND cn.TenantId = l.TenantId AND cn.Active = 1)
+                  >= l.GrossAmount - 0.01`);
+    }
     if (filters.search) {
       where.push('(l.TransactionNo LIKE ? OR l.CustomerName LIKE ? OR l.CustomerMobile LIKE ?)');
       const like = `%${filters.search}%`;
@@ -77,6 +97,7 @@ const listDocuments = (filters, page, limit, tenantId) =>
     const [[{ total }]] = await conn.execute(
       `SELECT COUNT(*) AS total FROM transactiondetaillog l
          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+         LEFT JOIN transactiontype t ON t.Id = l.TransactionTypeId
         WHERE l.TenantId = ?${clause}`,
       params,
     );
@@ -199,8 +220,105 @@ const getDocument = (id, tenantId) =>
       // screen that renders a document. 'token' wins when one was issued: a
       // counter customer is holding a number, not a table.
       Source: describeSource(orders),
+      // Null on a sale — only a credit note carries a reason.
+      IsFault: log.ReturnReasonId ? !!log.IsFault : null,
       // Drives whether the UI offers any action at all.
       IsImmutable: LEDGER.IMMUTABLE_STATUSES.includes(log.StatusName),
+    };
+  });
+
+/**
+ * The returns register: every credit note, filtered however the business
+ * happens to remember it.
+ *
+ * Its own read rather than a filter over listDocuments, because the two answer
+ * different questions with different columns. The ledger asks "what documents
+ * exist"; this asks "what came back, off what, for whom, why, to which tender,
+ * and who did it" — and every one of those is a filter as well as a column,
+ * because a register you cannot query by what you remember is one nobody uses.
+ *
+ * The totals are computed over the WHOLE filtered set, not the page: "₹6,240
+ * returned this month" must not change when somebody turns the page.
+ *
+ * @param {Object} filters - see returnsListQuerySchema.
+ */
+const listReturns = (filters, page, limit, tenantId) =>
+  withConnection(async (conn) => {
+    const { pageNum, limitNum, offset } = calculatePagination(page, limit);
+
+    const where = [];
+    const params = [tenantId, LEDGER.TYPE_POS_RETURN];
+
+    if (filters.fromDate) { where.push('l.TransactionDate >= ?'); params.push(filters.fromDate); }
+    if (filters.toDate) { where.push('l.TransactionDate <= ?'); params.push(filters.toDate); }
+    if (filters.branchId) { where.push('l.BranchId = ?'); params.push(filters.branchId); }
+    if (filters.reasonId) { where.push('l.ReturnReasonId = ?'); params.push(filters.reasonId); }
+    // Whether the reason means WE got it wrong. The split that turns a refund
+    // register into a kitchen-quality signal.
+    if (filters.isFault !== undefined) {
+      where.push('COALESCE(rr.IsFault, 0) = ?');
+      params.push(filters.isFault ? 1 : 0);
+    }
+    if (filters.settlementStatus) {
+      // A note written before the column existed reads as PENDING rather than
+      // dropping out of the worklist.
+      where.push("COALESCE(l.SettlementStatus, 'PENDING') = ?");
+      params.push(filters.settlementStatus);
+    }
+    if (filters.contactDetailId) { where.push('l.ContactDetailId = ?'); params.push(filters.contactDetailId); }
+    if (filters.createdBy) { where.push('l.CreatedBy = ?'); params.push(filters.createdBy); }
+    if (filters.minAmount !== undefined) { where.push('l.GrossAmount >= ?'); params.push(filters.minAmount); }
+    if (filters.maxAmount !== undefined) { where.push('l.GrossAmount <= ?'); params.push(filters.maxAmount); }
+    // WHICH DISH came back. EXISTS rather than a join: joining the lines would
+    // fan a two-line note into two rows and double every total on the page.
+    if (filters.itemId) {
+      where.push(`EXISTS (SELECT 1 FROM transactionitemdetail ti
+                           WHERE ti.TransactionDetailLogId = l.Id
+                             AND ti.TenantId = l.TenantId AND ti.ItemId = ?)`);
+      params.push(filters.itemId);
+    }
+    // Whatever they remember: the note number, the invoice it came off, or the
+    // customer.
+    if (filters.search) {
+      where.push(`(l.TransactionNo LIKE ? OR orig.TransactionNo LIKE ?
+                   OR l.CustomerName LIKE ? OR l.CustomerMobile LIKE ?)`);
+      const like = `%${filters.search}%`;
+      params.push(like, like, like, like);
+    }
+
+    const clause = where.length > 0 ? ` AND ${where.join(' AND ')}` : '';
+
+    const [[{ total }]] = await conn.execute(
+      `${QUERIES.LEDGER.COUNT_RETURNS_LIST}${clause}`, params,
+    );
+    const [[totals]] = await conn.execute(
+      `${QUERIES.LEDGER.SUM_RETURNS_LIST}${clause}`, params,
+    );
+
+    // LIMIT/OFFSET are numbers from calculatePagination, never user text.
+    const [rows] = await conn.execute(
+      `${QUERIES.LEDGER.SELECT_RETURNS_LIST}${clause} ORDER BY l.CreatedOn DESC LIMIT ${limitNum} OFFSET ${offset}`,
+      params,
+    );
+
+    return {
+      data: rows.map((r) => ({
+        ...r,
+        IsFault: !!r.IsFault,
+        // What proportion of the original invoice this note took back — the
+        // figure that says "a whole meal" apart from "one side dish".
+        ShareOfSale: Number(r.SaleGross) > 0
+          ? Math.round((Number(r.GrossAmount) / Number(r.SaleGross)) * 10000) / 100
+          : null,
+      })),
+      totals: {
+        ReturnedAmount: Number(totals?.ReturnedAmount || 0),
+        ReturnedNet: Number(totals?.ReturnedNet || 0),
+        ReturnedTax: Number(totals?.ReturnedTax || 0),
+        ReturnCount: Number(totals?.ReturnCount || 0),
+        FaultAmount: Number(totals?.FaultAmount || 0),
+      },
+      pagination: getPaginationMetadata(total, pageNum, limitNum),
     };
   });
 
@@ -252,6 +370,7 @@ const setSettlementStatus = (noteId, body, tenantId, userEmail) =>
 module.exports = {
   listDocuments,
   getDocument,
+  listReturns,
   listReturnsForSale,
   pendingSettlements,
   setSettlementStatus,

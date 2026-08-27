@@ -235,14 +235,22 @@ const returnProductReport = (query, tenantId) =>
 
     // What each of those dishes sold in the same window, so the rate is real
     // rather than an unanchored count.
+    //
+    // PRODUCT_SALES takes THREE bind parameters — it names no transaction type,
+    // because it already excludes credit notes with `l.ReversesLogId IS NULL`
+    // and restricts to settled statuses. Passing a type here as well shifted
+    // every parameter by one and the read failed outright.
     const [sold] = await conn.execute(
       `${QUERIES.LEDGER_REPORT.PRODUCT_SALES}${branchClause} GROUP BY ti.ItemId, i.Name, c.Name`,
-      [tenantId, LEDGER.TYPE_POS_SALE, range.from, range.to, ...branchParam],
+      [tenantId, range.from, range.to, ...branchParam],
     );
     const soldByItem = new Map(
       (sold || []).map((r) => [r.ItemId, {
         qty: Number(r.QuantitySold) || 0,
         amount: Number(r.GrossAmount) || 0,
+        // Only the sales side joins the category, so the returns side borrows
+        // it rather than carrying a second join for one label.
+        category: r.CategoryName || null,
       }]),
     );
 
@@ -252,9 +260,10 @@ const returnProductReport = (query, tenantId) =>
         const row = numeric(r, [
           'QuantityReturned', 'ReturnedAmount', 'ReturnCount', 'QuantityRestockable',
         ]);
-        const s = soldByItem.get(row.ItemId) || { qty: 0, amount: 0 };
+        const s = soldByItem.get(row.ItemId) || { qty: 0, amount: 0, category: null };
         return {
           ...row,
+          CategoryName: s.category,
           QuantitySold: s.qty,
           SoldAmount: round2(s.amount),
           ReturnRate: s.qty > 0 ? round2((row.QuantityReturned / s.qty) * 100) : null,

@@ -39,6 +39,16 @@ router.get('/reports/return-reasons', authenticateToken, checkScope(...READ), ..
 router.get('/reports/return-products', authenticateToken, checkScope(...READ), ...controller.returnProductReport);
 // Money owed but not yet handed back — the operational worklist.
 router.get('/returns/settlement-queue', authenticateToken, checkScope(...READ), ...controller.settlementQueue);
+/**
+ * GET /returns — the returns register.
+ *
+ * Declared before /returns/:id/settlement so neither swallows the other.
+ * Every credit note, filterable by date, branch, reason, fault, settlement,
+ * customer, item, who did it and value — because a return is a financial event
+ * a business has to be able to find again months later, from whatever it
+ * happens to remember.
+ */
+router.get('/returns', authenticateToken, checkScope(...READ), ...controller.returnsRegister);
 // Customer reports — same guard as the rest. Reading who bought is reading the
 // books, and a tenancy that may see its revenue may see whose revenue it was.
 router.get('/reports/customers', authenticateToken, checkScope(...READ), ...controller.customerReport);
