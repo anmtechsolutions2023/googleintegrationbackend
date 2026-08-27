@@ -30,8 +30,9 @@ const uom = require('../uom/uom.service');
 const taxGroup = require('../taxgroup/taxgroup.service');
 const costInfo = require('../costinfo/costinfo.service');
 const itemDetail = require('../itemdetail/itemdetail.service');
-const taxType = require('../taxtype/taxtype.service');
-const taxMapper = require('../taxgrouptaxtypemapper/taxgrouptaxtypemapper.service');
+// The rates a tax group carries. Shared with the first-time setup wizard so the
+// two cannot disagree about what a tax type IS — see taxgroup.components.js.
+const taxComponents = require('../taxgroup/taxgroup.components');
 // The publish pass calls positemmeta's ORDINARY create(), which already opens
 // its own transaction and syncs the channel/variant links. That is exactly the
 // per-row atomicity this import wants, so the module needs no changes at all.
@@ -62,10 +63,7 @@ const normaliseLabel = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g
  * @param {Array<{name: string, value: string|number}>} components
  * @returns {string}
  */
-const taxSignature = (components) => components
-  .map((c) => `${normaliseLabel(c.name)}:${Number(c.value)}`)
-  .sort()
-  .join('|');
+const taxSignature = (components) => taxComponents.signature(components);
 
 // ─── Row outcomes ────────────────────────────────────────────────────────────
 // Every row comes back as exactly one of these. The caller reports them; it
@@ -103,53 +101,6 @@ const ensureByName = async (conn, ctx, kind, lookupSql, name, create) => {
   return record.id;
 };
 
-/**
- * Ensure a tax group actually holds the rates it is named for.
- *
- * A tax group is a container: the rates live in TaxTypes mapped into it. The
- * import used to create the group and stop, so "GST 5%" meant 5% to a human and
- * 0% to the pricing engine — a menu that looked imported and charged no tax.
- *
- * Components are stated by the file (`CGST:2.5|SGST:2.5`). When a row states
- * none, IMPORT.DEFAULT_TAX_COMPONENTS is applied — a deliberate product
- * decision that a menu priced at 0% is the worse outcome. The preview reports
- * how many rows that will touch, so it is never applied silently.
- *
- * Idempotent in both directions: an existing tax type is reused by name, and an
- * existing mapping is left alone.
- *
- * @param {Object} conn - Active transaction connection.
- * @param {Object} ctx
- * @param {string} taxGroupId
- * @param {Array<{name: string, value: string}>} components
- * @returns {Promise<void>}
- */
-const ensureTaxComponents = async (conn, ctx, taxGroupId, components) => {
-  for (const component of components) {
-    const name = String(component.name).trim();
-    // eslint-disable-next-line no-await-in-loop
-    const typeId = await ensureByName(
-      conn, ctx, 'taxTypes', QUERIES.TAX_TYPES.SELECT_BY_NAME, name,
-      (c) => taxType.createTx(c, { Name: name, Value: String(component.value), Active: true },
-        ctx.tenantId, ctx.userEmail),
-    );
-
-    // No unique key on (group, type), so nothing else would stop a second run
-    // mapping the same rate in twice and doubling the tax.
-    // eslint-disable-next-line no-await-in-loop
-    const [mapped] = await conn.execute(
-      QUERIES.TAX_GROUP_TAX_TYPE_MAPPER.SELECT_BY_GROUP_AND_TYPE,
-      [taxGroupId, typeId, ctx.tenantId],
-    );
-    if (mapped.length > 0) continue;
-
-    // eslint-disable-next-line no-await-in-loop
-    await taxMapper.createTx(conn, {
-      TaxGroupId: taxGroupId, TaxTypeId: typeId, Active: true,
-    }, ctx.tenantId, ctx.userEmail);
-    ctx.created.taxMappings = (ctx.created.taxMappings || 0) + 1;
-  }
-};
 
 /**
  * Import catalogue items — pass one.
@@ -253,7 +204,11 @@ const importItems = async (rows, options, tenantId, userEmail) => {
 
         if (already === null) {
           // Empty group: fill it, whether from the file or from the default.
-          await ensureTaxComponents(conn, ctx, taxGroupId, wanted);
+          const added = await taxComponents.attachComponentsTx(conn, {
+            taxGroupId, components: wanted, tenantId, userEmail, cache: ctx.cache,
+          });
+          ctx.created.taxTypes = (ctx.created.taxTypes || 0) + added.taxTypes;
+          ctx.created.taxMappings = (ctx.created.taxMappings || 0) + added.mappings;
         } else if (already !== signature && row.taxComponents?.length) {
           // The group is configured and the file explicitly asks for something
           // else. Adding would stack; ignoring would make the column a lie.

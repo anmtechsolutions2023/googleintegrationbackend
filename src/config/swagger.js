@@ -1359,7 +1359,33 @@ const swaggerSpec = {
               uom: { type: 'object', required: ['UnitName'], properties: { UnitName: { type: 'string' } } },
               costInfo: {
                 type: 'object', required: ['Amount', 'taxGroup'],
-                properties: { Amount: { type: 'number' }, taxGroup: { type: 'object', required: ['Name'], properties: { Name: { type: 'string' } } } },
+                properties: {
+                  Amount: { type: 'number' },
+                  taxGroup: {
+                    type: 'object', required: ['Name'],
+                    description:
+                      'A tax group is a CONTAINER — the rates live in TaxTypes mapped into it, and a group with none prices at 0%. Naming one "GST 18%" and stopping there produced a starter item that billed no tax at all, which is why `taxTypes` exists here.',
+                    properties: {
+                      Name: { type: 'string', example: 'GST 18%', description: 'A label. The rates below are what actually gets charged.' },
+                      taxTypes: {
+                        type: 'array', minItems: 1, maxItems: 10,
+                        description:
+                          'The rates inside the group. OMIT to accept the standard intra-state split (CGST 2.5 + SGST 2.5) — the same default the bulk import applies, because a menu priced at 0% is the worse failure. For inter-state, send a single IGST rate instead of a split.\n\nA tax type is identified by its NAME **and** its RATE: `CGST 2.5` and `CGST 9` are two different types, so a tenancy can run a 5% and an 18% slab side by side.',
+                        items: {
+                          type: 'object', required: ['Name', 'Value'],
+                          properties: {
+                            Name: { type: 'string', maxLength: 50, example: 'CGST' },
+                            Value: {
+                              oneOf: [{ type: 'number' }, { type: 'string' }],
+                              example: 9,
+                              description: 'Percentage. Stored as a string; 9, "9" and "9.0" are the same rate.',
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
               },
             },
           },

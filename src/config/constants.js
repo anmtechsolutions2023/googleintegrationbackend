@@ -113,6 +113,11 @@ module.exports = {
       // menu naming 'CGST' must produce a single CGST row, not one per item.
       SELECT_BY_NAME:
         'SELECT * FROM TaxTypes WHERE Name = ? AND TenantId = ? LIMIT 1',
+      // A tax type is its NAME AND ITS RATE together, which is what the unique
+      // key says. Resolving on the name alone handed a GST 18% group the CGST
+      // row already standing at 2.5%, and every 18% item silently billed 5%.
+      SELECT_BY_NAME_AND_VALUE:
+        'SELECT * FROM TaxTypes WHERE Name = ? AND Value = ? AND TenantId = ? LIMIT 1',
       SELECT_ALL:
         'SELECT * FROM TaxTypes WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM TaxTypes WHERE TenantId = ?',

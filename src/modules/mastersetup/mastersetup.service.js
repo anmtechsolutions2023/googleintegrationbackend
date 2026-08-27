@@ -23,6 +23,9 @@ const contactDetail = require('../contactdetail/contactdetail.service');
 const transactionTypeConfig = require('../transactiontypeconfig/transactiontypeconfig.service');
 const branchDetail = require('../branchdetail/branchdetail.service');
 const taxGroup = require('../taxgroup/taxgroup.service');
+// The rates that make a tax group mean something. Shared with the bulk import,
+// so the wizard and the CSV cannot disagree about what a tax type is.
+const taxComponents = require('../taxgroup/taxgroup.components');
 const costInfo = require('../costinfo/costinfo.service');
 const category = require('../category/category.service');
 const uom = require('../uom/uom.service');
@@ -139,7 +142,26 @@ const bootstrap = async (payload, tenantId, userEmail) => {
       const it = payload.item;
       const cat = await category.createTx(conn, it.category, tenantId, userEmail);
       const unit = await uom.createTx(conn, it.uom, tenantId, userEmail);
-      const tax = await taxGroup.createTx(conn, it.costInfo.taxGroup, tenantId, userEmail);
+
+      // The tax group, and the RATES inside it.
+      //
+      // `taxTypes` is deliberately not part of the taxgroup row — the group is a
+      // container and the rates are mapped into it. Creating the container and
+      // stopping is what this did, so a group named "GST 18%" charged 0% and the
+      // starter item's price was wrong from the first bill onwards.
+      //
+      // A payload that states no rates gets the same standard split the bulk
+      // import applies, for the same reason: a menu priced at 0% is the worse
+      // failure. The wizard announces it before sending.
+      const { taxTypes, ...taxGroupRow } = it.costInfo.taxGroup;
+      const tax = await taxGroup.createTx(conn, taxGroupRow, tenantId, userEmail);
+      const rates = (taxTypes && taxTypes.length > 0)
+        ? taxTypes.map((t) => ({ name: t.Name, value: t.Value }))
+        : taxComponents.defaultComponents();
+      await taxComponents.attachComponentsTx(conn, {
+        taxGroupId: tax.id, components: rates, tenantId, userEmail,
+      });
+
       const cost = await costInfo.createTx(conn, { ...it.costInfo, TaxGroupId: tax.id }, tenantId, userEmail);
       const item = await itemDetail.createTx(
         conn,

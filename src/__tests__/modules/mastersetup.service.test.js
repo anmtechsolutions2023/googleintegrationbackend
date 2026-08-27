@@ -26,6 +26,11 @@ jest.mock('../../modules/transactiontypeconfig/transactiontypeconfig.service', (
 }));
 jest.mock('../../modules/branchdetail/branchdetail.service', () => ({ createTx: jest.fn(async (_c, d) => ({ id: 'branch-id', ...d })) }));
 jest.mock('../../modules/taxgroup/taxgroup.service', () => ({ createTx: jest.fn(async (_c, d) => ({ id: 'tax-id', ...d })) }));
+// The rates inside a tax group. Mocked at the leaf like every other
+// collaborator, so this stays a pure orchestrator test — taxgroup.components
+// has its own.
+jest.mock('../../modules/taxtype/taxtype.service', () => ({ createTx: jest.fn(async (_c, d) => ({ id: `taxtype-${String(d.Name).toLowerCase()}-${d.Value}`, ...d })) }));
+jest.mock('../../modules/taxgrouptaxtypemapper/taxgrouptaxtypemapper.service', () => ({ createTx: jest.fn(async (_c, d) => ({ id: 'taxmap-id', ...d })) }));
 jest.mock('../../modules/costinfo/costinfo.service', () => ({ createTx: jest.fn(async (_c, d) => ({ id: 'cost-id', ...d })) }));
 jest.mock('../../modules/category/category.service', () => ({ createTx: jest.fn(async (_c, d) => ({ id: 'cat-id', ...d })) }));
 jest.mock('../../modules/uom/uom.service', () => ({ createTx: jest.fn(async (_c, d) => ({ id: 'uom-id', ...d })) }));
@@ -56,8 +61,15 @@ const addressDetail = require('../../modules/addressdetail/addressdetail.service
 const branchDetail = require('../../modules/branchdetail/branchdetail.service');
 const costInfo = require('../../modules/costinfo/costinfo.service');
 const itemDetail = require('../../modules/itemdetail/itemdetail.service');
+const taxType = require('../../modules/taxtype/taxtype.service');
+const taxMapper = require('../../modules/taxgrouptaxtypemapper/taxgrouptaxtypemapper.service');
+const taxGroup = require('../../modules/taxgroup/taxgroup.service');
 
-const FAKE_CONN = { fake: 'conn' };
+// `execute` answers "nothing found" for every lookup, so the tax-rate path
+// takes its create branch. A plain function rather than jest.fn(): resetMocks
+// strips implementations off the latter, and every lookup would return
+// undefined halfway through the suite.
+const FAKE_CONN = { fake: 'conn', execute: async () => [[]] };
 const TENANT = 'tenant-1';
 const USER = 'admin@test.com';
 
@@ -215,6 +227,85 @@ describe('mastersetup.service — bootstrap orchestrator', () => {
   });
 
   // ── First-time setup gate ──────────────────────────────────────────────────
+  // ── The rates inside the tax group ─────────────────────────────────────────
+  // A tax group is a CONTAINER: the rates live in TaxTypes mapped into it.
+  // Creating the container and stopping is what this used to do, so a group
+  // named "GST 18%" charged 0% and the starter item's price was wrong from the
+  // very first bill — with nothing anywhere to say so.
+  describe('tax rates on the starter item', () => {
+    const withRates = (taxTypes) => {
+      const p = payload();
+      p.item.costInfo.taxGroup = { Name: 'GST 18%', ...(taxTypes ? { taxTypes } : {}) };
+      return p;
+    };
+
+    it('creates the rates the payload states, and maps them into the group', async () => {
+      await service.bootstrap(withRates([
+        { Name: 'CGST', Value: 9 }, { Name: 'SGST', Value: 9 },
+      ]), TENANT, USER);
+
+      expect(taxType.createTx).toHaveBeenCalledWith(
+        FAKE_CONN, expect.objectContaining({ Name: 'CGST', Value: '9' }), TENANT, USER,
+      );
+      expect(taxType.createTx).toHaveBeenCalledWith(
+        FAKE_CONN, expect.objectContaining({ Name: 'SGST', Value: '9' }), TENANT, USER,
+      );
+      expect(taxMapper.createTx).toHaveBeenCalledTimes(2);
+      expect(taxMapper.createTx).toHaveBeenCalledWith(
+        FAKE_CONN,
+        expect.objectContaining({ TaxGroupId: 'tax-id', TaxTypeId: 'taxtype-cgst-9' }),
+        TENANT, USER,
+      );
+    });
+
+    // A menu priced at 0% is the worse failure, so a payload that states no
+    // rates gets the same standard split the bulk import applies.
+    it('falls back to the standard split when the payload states none', async () => {
+      await service.bootstrap(withRates(null), TENANT, USER);
+
+      expect(taxType.createTx).toHaveBeenCalledWith(
+        FAKE_CONN, expect.objectContaining({ Name: 'CGST', Value: '2.5' }), TENANT, USER,
+      );
+      expect(taxType.createTx).toHaveBeenCalledWith(
+        FAKE_CONN, expect.objectContaining({ Name: 'SGST', Value: '2.5' }), TENANT, USER,
+      );
+    });
+
+    // The group NEVER ends up empty. This is the assertion that would have
+    // caught the original bug.
+    it('never leaves the group without rates', async () => {
+      await service.bootstrap(withRates(null), TENANT, USER);
+      expect(taxMapper.createTx.mock.calls.length).toBeGreaterThan(0);
+    });
+
+    // `taxTypes` is not a taxgroup column. It must be consumed here, not
+    // handed to the row insert.
+    it('does not pass taxTypes into the taxgroup row', async () => {
+      await service.bootstrap(withRates([{ Name: 'IGST', Value: 18 }]), TENANT, USER);
+      const [, row] = taxGroup.createTx.mock.calls[0];
+      expect(row).toEqual({ Name: 'GST 18%' });
+      expect(row.taxTypes).toBeUndefined();
+    });
+
+    // Inter-state is one IGST row rather than a split — the shape has to allow
+    // it, because the default never will.
+    it('takes a single IGST rate for an inter-state group', async () => {
+      await service.bootstrap(withRates([{ Name: 'IGST', Value: 18 }]), TENANT, USER);
+      expect(taxType.createTx).toHaveBeenCalledTimes(1);
+      expect(taxType.createTx).toHaveBeenCalledWith(
+        FAKE_CONN, expect.objectContaining({ Name: 'IGST', Value: '18' }), TENANT, USER,
+      );
+    });
+
+    it('creates the item with no item at all when the payload omits one', async () => {
+      const p = payload();
+      delete p.item;
+      await service.bootstrap(p, TENANT, USER);
+      expect(taxType.createTx).not.toHaveBeenCalled();
+      expect(taxMapper.createTx).not.toHaveBeenCalled();
+    });
+  });
+
   describe('tenancy setup completion', () => {
     it('marks the tenant COMPLETED on the same transaction connection', async () => {
       await service.bootstrap(payload(), TENANT, USER);

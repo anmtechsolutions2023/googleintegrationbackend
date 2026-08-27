@@ -366,7 +366,16 @@ CREATE TABLE TaxTypes (
     UpdatedOn  DATETIME,
     UpdatedBy  VARCHAR(50),
     PRIMARY KEY (Id),
-    UNIQUE (Name, TenantId)
+    -- A tax type is its NAME AND ITS RATE together.
+    --
+    -- Keyed on Name alone, a tenancy could hold exactly one CGST — so a
+    -- restaurant selling 5% food and 18% packaged goods could not express both
+    -- slabs. Worse, it failed silently: resolving a rate by name handed the
+    -- GST 18% group the CGST row already standing at 2.5%, and every 18% item
+    -- billed 5% with no error anywhere.
+    --
+    -- CGST at 2.5 and CGST at 9 are different tax types. The key says so.
+    UNIQUE (Name, Value, TenantId)
 );
 
 -- 3.2 UOM (Unit of Measure)

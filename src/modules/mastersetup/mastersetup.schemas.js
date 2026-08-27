@@ -41,8 +41,26 @@ const transactionTypeConfigSchema = Joi.object({
   TagName: Joi.string().max(100).trim().required(),
 }).unknown(true);
 
+// A tax group is a CONTAINER — the rates live in TaxTypes mapped into it, and a
+// group with none prices at 0%. Naming one "GST 18%" and stopping there is what
+// produced a starter item that billed no tax at all, so the rates are part of
+// the payload rather than something the wizard hopes somebody adds later.
+//
+// Optional, not required: when absent the orchestrator applies the same
+// standard split the bulk import applies, and the UI announces it before
+// sending. Requiring it would break every caller that already posts a bare
+// { Name }.
+const taxTypeSchema = Joi.object({
+  Name: Joi.string().max(50).trim().required(),
+  // A string in the column, so a number and '9' both land the same way.
+  Value: Joi.alternatives()
+    .try(Joi.number().min(0).max(100), Joi.string().max(50).trim())
+    .required(),
+}).unknown(true);
+
 const taxGroupSchema = Joi.object({
   Name: Joi.string().max(100).trim().required(),
+  taxTypes: Joi.array().items(taxTypeSchema).min(1).max(10).optional(),
 }).unknown(true);
 
 const categorySchema = Joi.object({
