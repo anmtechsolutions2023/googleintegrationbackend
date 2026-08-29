@@ -81,6 +81,21 @@ const FOOD_TYPES = [
   ['Non-Veg', 'NONVEG', 0, 3],
 ];
 
+// A tax group with NO tax types mapped into it — which is exactly how the
+// pricing chain already expresses "no tax on this item".
+//
+// WHY A NAMED GROUP RATHER THAN AN EMPTY FIELD
+// costinfo.TaxGroupId is NOT NULL, so a tax-free item needs *something* in the
+// column. It could have been made nullable — but then null would mean both "no
+// GST applies here" and "nobody filled this in", and once those are the same
+// value no report can separate a deliberate exemption from an incomplete
+// record. "We sold ₹40,000 tax-free this month" is a question a GST return asks
+// and a null cannot answer.
+//
+// Nothing else needed changing: the pricing repository already treats a group
+// with no components as a valid 0%, and says so in a comment of its own.
+const EXEMPT_TAX_GROUP = 'Exempt (0%)';
+
 // One numbering series PER DOCUMENT TYPE. Sales and expenses must not share a
 // counter: each series has to be gap-free in its own right.
 //
@@ -239,6 +254,15 @@ const provisionPosMasters = async (conn, { tenantId }, userEmail) => {
     );
   }
 
+  // The zero-rate group. Deliberately created with no mappers: an empty group
+  // IS the exemption, and picking it is a decision somebody made rather than a
+  // setup step they skipped.
+  await ensureByName(
+    conn, 'taxgroup', 'Name', EXEMPT_TAX_GROUP, tenantId,
+    'INSERT INTO taxgroup (Id, Name, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, 1, NOW(), ?, ?)',
+    (id) => [id, EXEMPT_TAX_GROUP, tenantId, by, by],
+  );
+
   // Menu food types. Without at least one row the Menu Items form cannot be
   // submitted at all, since pos_item_meta.FoodTypeId is NOT NULL.
   for (const [Name, Code, IsVeg, SortOrder] of FOOD_TYPES) {
@@ -366,6 +390,7 @@ module.exports = {
   EXPENSE_CATEGORIES,
   ASSET_CATEGORIES,
   FOOD_TYPES,
+  EXEMPT_TAX_GROUP,
   CHANNELS,
   PORTALS,
 };

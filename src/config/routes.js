@@ -77,6 +77,7 @@ const posfeedbackRoutes = require('../modules/posfeedback/posfeedback.routes');
 const postokenRoutes = require('../modules/postoken/postoken.routes');
 const possettingRoutes = require('../modules/possetting/possetting.routes');
 const receiptFormatRoutes = require('../modules/posreceipt/receipt.format.routes');
+const offerRoutes = require('../modules/posoffer/offer.routes');
 const posbranchRoutes = require('../modules/posbranch/posbranch.routes');
 const posexpenseRoutes = require('../modules/posexpense/posexpense.routes');
 const posreportRoutes = require('../modules/posreport/posreport.routes');
@@ -280,6 +281,10 @@ const registerRoutes = (app) => {
   // is — but its own module: the catalogue of printable fields, their legal
   // locks and their defaults is a different concern from token numbering.
   app.use('/api/pos/receipt-format', receiptFormatRoutes);
+  // Campaigns and the offers inside them. An offer is not a second way to price
+  // a bill — the engine produces the same per-line discounts the till already
+  // takes, so posbill.recomputeTotals stays the only pricing path.
+  app.use('/api/pos', offerRoutes);
   app.use('/api/pos/branches', posbranchRoutes);
   app.use('/api/pos/expenses', posexpenseRoutes);
   app.use('/api/pos/reports', posreportRoutes);

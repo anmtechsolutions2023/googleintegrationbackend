@@ -862,6 +862,25 @@ INSERT IGNORE INTO pos_return_reason (Id, Name, Code, Description, IsFault, Sort
     ('n0000001-rrsn-0000-0000-000000000006', 'Customer changed mind', 'CHANGED_MIND',  'Nothing was wrong with the order', 0, 6, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
     ('n0000001-rrsn-0000-0000-000000000007', 'Other',                 'OTHER',         'Use the note to say what happened', 0, 7, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
 
+-- 11h-4) The zero-rate tax group.
+--
+-- A tax group with NO tax types mapped into it, which is exactly how the
+-- pricing chain already expresses "no tax on this item" — the pricing
+-- repository LEFT JOINs the mappers and treats an empty result as a valid 0%.
+--
+-- WHY A NAMED GROUP RATHER THAN A NULLABLE COLUMN
+-- costinfo.TaxGroupId is NOT NULL, so a tax-free item needs something in the
+-- column. Making it nullable would have worked, but then null would mean both
+-- "no GST applies here" and "nobody filled this in" — and once those share a
+-- value, no report can separate a deliberate exemption from an incomplete
+-- record. "We sold Rs.40,000 tax-free this month" is a question a GST return
+-- asks and a null cannot answer.
+--
+-- Mirrored per-tenant by EXEMPT_TAX_GROUP in
+-- modules/mastersetup/posMasters.provision.js.
+INSERT IGNORE INTO taxgroup (Id, Name, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('g0000001-txgp-0000-0000-000000000001', 'Exempt (0%)', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
 -- 11i) Asset categories — the analysis axis for the equipment register.
 INSERT IGNORE INTO asset_category (Id, Name, Active, TenantId, CreatedOn, CreatedBy, UpdatedBy) VALUES
     ('a0000001-ldgr-0000-0000-000000000001', 'Kitchen Equipment', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', NOW(), 'system-seed', 'system-seed'),

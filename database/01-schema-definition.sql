@@ -12,7 +12,7 @@
 -- These two files are the ONLY source of truth for the database. Schema changes
 -- are made HERE, in place; no ALTER scripts and no migration directory.
 --
--- Verified against an empty database: 72 tables, MySQL 8.0.32.
+-- Verified against an empty database: 78 tables, MySQL 8.0.32.
 --
 -- NOTE ON COLUMN NAMES: avoid MySQL RESERVED WORDS. `Lines` was one
 -- (LOAD DATA ... LINES TERMINATED BY) and cost a 1064 at deploy time; it is
@@ -171,6 +171,7 @@ DROP TABLE IF EXISTS tenant_invitation_roles;
 DROP TABLE IF EXISTS tenant_invitations;
 DROP TABLE IF EXISTS roles;
 DROP TABLE IF EXISTS onboarding_requests;
+DROP TABLE IF EXISTS app_settings;
 
 -- 2.1 onboarding_requests
 -- One row per Gmail address that has signed in but is not yet provisioned into
@@ -1242,6 +1243,7 @@ DROP TABLE IF EXISTS pos_token;
 DROP TABLE IF EXISTS pos_token_counter;
 DROP TABLE IF EXISTS pos_setting;
 DROP TABLE IF EXISTS pos_expense;
+DROP TABLE IF EXISTS pos_loyalty_ledger;
 
 -- 4.1 pos_floor — dining floors/sections within a branch
 CREATE TABLE pos_floor (
@@ -2146,6 +2148,200 @@ CREATE TABLE asset (
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- =============================================================================
+-- SECTION 5c: Campaigns and offers
+-- =============================================================================
+-- A promotion is NOT a second way to price a bill.
+--
+-- The till already carries per-LINE discounts, applied BEFORE tax, with
+-- SUM(line.DiscountAmount) forced to equal the document's. "Buy one get one
+-- free" IS a 100% discount on one line. So these tables describe RULES, and the
+-- engine turns them into exactly the line discounts a cashier would have typed —
+-- posbill.recomputeTotals keeps deciding how the money actually works.
+--
+-- One pricing path. Tax, rounding, the ledger, refunds and reprints all keep
+-- working, with nothing for a promotion to drift away from.
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- Reverse dependency order, as everywhere else in this file. The guard above
+-- makes the order unnecessary; it is kept correct anyway so the drops still
+-- read as the dependency graph they describe.
+DROP TABLE IF EXISTS pos_offer_redemption;
+DROP TABLE IF EXISTS pos_offer;
+DROP TABLE IF EXISTS pos_campaign_branch;
+DROP TABLE IF EXISTS pos_campaign;
+
+-- 5c.1 A campaign: the container, and the switch.
+--
+-- Offers live inside one. Pausing the campaign pauses every offer in it — one
+-- control when something goes wrong at 8pm on a Friday.
+CREATE TABLE pos_campaign (
+    Id             VARCHAR(50)   NOT NULL,
+    TenantId       VARCHAR(50)   NOT NULL,
+    Name           VARCHAR(150)  NOT NULL,
+    Code           VARCHAR(50)   NOT NULL,
+    Description    VARCHAR(500)  NULL,
+
+    -- WHEN it runs. Dates are inclusive.
+    StartsOn       DATE          NOT NULL,
+    EndsOn         DATE          NULL,          -- NULL = runs until stopped
+    -- Comma-separated ISO weekday numbers, 1=Mon .. 7=Sun. NULL = every day.
+    -- "Weekends only" is data, not a second kind of campaign.
+    DaysOfWeek     VARCHAR(20)   NULL,
+    -- Happy hour. Both NULL = all day. StartTime > EndTime legitimately means a
+    -- window that crosses midnight.
+    StartTime      TIME          NULL,
+    EndTime        TIME          NULL,
+
+    -- WHAT IT MAY SPEND. NULL is an open tab with a marketing name on it, so it
+    -- is allowed but deliberately not the default in the UI.
+    BudgetAmount   DECIMAL(18,4) NULL,
+    -- Maintained as redemptions are written, so the cap can be enforced without
+    -- summing the redemption table on every bill.
+    SpentAmount    DECIMAL(18,4) NOT NULL DEFAULT 0,
+
+    -- INTENT, not observed state: DRAFT | ACTIVE | PAUSED.
+    -- Whether a campaign is live RIGHT NOW is derived from this plus the dates,
+    -- the day, the time and the budget — storing that would be a fact with five
+    -- ways to go stale.
+    Status         VARCHAR(20)   NOT NULL DEFAULT 'DRAFT',
+
+    Active         TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn      DATETIME,
+    CreatedBy      VARCHAR(50),
+    UpdatedOn      DATETIME,
+    UpdatedBy      VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Code, TenantId)
+);
+
+-- 5c.2 Which outlets a campaign runs at.
+-- No rows for a campaign means EVERY branch — the common case, stored as
+-- nothing rather than as a row per branch that has to be maintained.
+CREATE TABLE pos_campaign_branch (
+    Id             VARCHAR(50)   NOT NULL,
+    TenantId       VARCHAR(50)   NOT NULL,
+    CampaignId     VARCHAR(50)   NOT NULL,
+    BranchDetailId VARCHAR(50)   NOT NULL,
+    CreatedOn      DATETIME,
+    CreatedBy      VARCHAR(50),
+    UpdatedOn      DATETIME,
+    UpdatedBy      VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (CampaignId, BranchDetailId, TenantId),
+    FOREIGN KEY (CampaignId)     REFERENCES pos_campaign(Id),
+    FOREIGN KEY (BranchDetailId) REFERENCES branchdetail(Id)
+);
+
+-- 5c.3 One offer: a trigger, a reward, and its limits.
+--
+-- Every offer anybody described is this one shape with different values:
+--   buy 2 chai get 1 free      → ITEM_QTY(chai, 2)     → SAME_ITEM, 1, 100%
+--   buy X get Y free           → ITEM_QTY(X, 1)        → SPECIFIC_ITEM(Y), 1, 100%
+--   second one at half price   → ITEM_QTY(X, 2)        → SAME_ITEM, 1, 50%
+--   spend 500, free dessert    → BILL_AMOUNT(500)      → SPECIFIC_ITEM(D), 1, 100%
+--   spend 500, 50% off a dish  → BILL_AMOUNT(500)      → SPECIFIC_ITEM(D), 1, 50%
+CREATE TABLE pos_offer (
+    Id                  VARCHAR(50)   NOT NULL,
+    TenantId            VARCHAR(50)   NOT NULL,
+    CampaignId          VARCHAR(50)   NOT NULL,
+    Name                VARCHAR(150)  NOT NULL,
+    SortOrder           INT           NOT NULL DEFAULT 0,
+
+    -- ── WHEN ────────────────────────────────────────────────────────────────
+    -- ITEM_QTY | CATEGORY_QTY | BILL_AMOUNT
+    TriggerKind         VARCHAR(20)   NOT NULL,
+    TriggerItemId       VARCHAR(50)   NULL,
+    TriggerCategoryId   VARCHAR(50)   NULL,
+    TriggerMinQty       DECIMAL(18,4) NULL,
+    TriggerMinAmount    DECIMAL(18,4) NULL,
+
+    -- ── THEN ────────────────────────────────────────────────────────────────
+    -- SAME_ITEM | SPECIFIC_ITEM
+    RewardKind          VARCHAR(20)   NOT NULL,
+    RewardItemId        VARCHAR(50)   NULL,
+    RewardQuantity      DECIMAL(18,4) NOT NULL DEFAULT 1,
+    -- 100 = free. 50 = half price. The reward is always expressed as a PERCENT
+    -- so a price change never silently turns a free item into a paid one.
+    RewardPercent       DECIMAL(9,4)  NOT NULL DEFAULT 100,
+    -- CHEAPEST | DEAREST. Which qualifying line is discounted when several
+    -- could be. Stated, because a ₹15 chai and a ₹20 masala chai both qualify
+    -- and two tills must not answer differently in front of a customer.
+    ApplyTo             VARCHAR(20)   NOT NULL DEFAULT 'CHEAPEST',
+
+    -- ── BUT ─────────────────────────────────────────────────────────────────
+    MaxPerBill          INT           NOT NULL DEFAULT 1,
+    MaxPerCustomerPerDay INT          NULL,   -- NULL = no limit
+    MaxTotalRedemptions INT           NULL,   -- NULL = no limit
+    RedemptionCount     INT           NOT NULL DEFAULT 0,
+
+    Active              TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn           DATETIME,
+    CreatedBy           VARCHAR(50),
+    UpdatedOn           DATETIME,
+    UpdatedBy           VARCHAR(50),
+    PRIMARY KEY (Id),
+    FOREIGN KEY (CampaignId)        REFERENCES pos_campaign(Id),
+    FOREIGN KEY (TriggerItemId)     REFERENCES itemdetail(Id),
+    FOREIGN KEY (TriggerCategoryId) REFERENCES categorydetail(Id),
+    FOREIGN KEY (RewardItemId)      REFERENCES itemdetail(Id)
+);
+
+-- 5c.4 Which offer produced which discount, on which line, of which bill.
+--
+-- WITHOUT THIS THE DASHBOARD IS GUESSWORK. A discount with no reason attached
+-- is indistinguishable from a cashier being generous, and "what did this
+-- campaign cost" becomes a number nobody can defend.
+--
+-- Written inside the settle transaction, so a redemption cannot exist for a
+-- bill that was never posted.
+CREATE TABLE pos_offer_redemption (
+    Id                     VARCHAR(50)   NOT NULL,
+    TenantId               VARCHAR(50)   NOT NULL,
+    OfferId                VARCHAR(50)   NOT NULL,
+    -- Denormalised on purpose: every campaign report groups by it, and an offer
+    -- moved between campaigns must not rewrite the history of what it cost.
+    CampaignId             VARCHAR(50)   NOT NULL,
+    BranchDetailId         VARCHAR(50)   NULL,
+    BillId                 VARCHAR(50)   NULL,
+    -- The posted document. NULL only for a bill that failed to post, which
+    -- cannot happen inside the settle transaction — kept nullable so a future
+    -- non-POS redemption path is not blocked by this column.
+    TransactionDetailLogId VARCHAR(50)   NULL,
+    -- The POS customer, NOT a master contactdetail. The settle path resolves a
+    -- bill's customer as a pos_customer, and that is also the row campaign
+    -- analysis needs: Visits and TotalSpent live there, so "is this a returning
+    -- customer or a first visit" is answerable without another join.
+    PosCustomerId          VARCHAR(50)   NULL,
+
+    -- Which line, and what it cost. LineRef is "<orderId>#<index>", the same
+    -- key the till uses for a hand-typed line discount.
+    LineRef                VARCHAR(120)  NULL,
+    ItemId                 VARCHAR(50)   NULL,
+    Quantity               DECIMAL(18,4) NOT NULL DEFAULT 1,
+    DiscountAmount         DECIMAL(18,4) NOT NULL DEFAULT 0,
+    -- What the bill came to. Lets "cost per redemption" and "revenue on bills
+    -- that used an offer" be answered without joining back to the ledger.
+    BillGrossAmount        DECIMAL(18,4) NULL,
+
+    RedeemedOn             DATETIME,
+    RedeemedBy             VARCHAR(50),
+    Active                 TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn              DATETIME,
+    CreatedBy              VARCHAR(50),
+    UpdatedOn              DATETIME,
+    UpdatedBy              VARCHAR(50),
+    PRIMARY KEY (Id),
+    FOREIGN KEY (OfferId)                REFERENCES pos_offer(Id),
+    FOREIGN KEY (CampaignId)             REFERENCES pos_campaign(Id),
+    FOREIGN KEY (BillId)                 REFERENCES pos_bill(Id),
+    FOREIGN KEY (TransactionDetailLogId) REFERENCES transactiondetaillog(Id),
+    FOREIGN KEY (PosCustomerId)          REFERENCES pos_customer(Id)
+);
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- =============================================================================
 -- SECTION 6: Reporting indexes
 -- =============================================================================
 -- Every report filters TenantId + a date, and until now not one business table
@@ -2157,6 +2353,15 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- date-first index would scan other tenants' rows to find this one's.
 
 -- Financial — the sales, product, pending and cash-flow reports.
+-- Campaigns: the engine reads every LIVE offer on every bill, so the lookup
+-- from tenant+status to offers has to be an index rather than a scan.
+CREATE INDEX idx_campaign_tenant_status ON pos_campaign (TenantId, Status, StartsOn, EndsOn);
+CREATE INDEX idx_offer_tenant_campaign  ON pos_offer (TenantId, CampaignId, Active);
+CREATE INDEX idx_redemption_campaign    ON pos_offer_redemption (TenantId, CampaignId, RedeemedOn);
+CREATE INDEX idx_redemption_offer       ON pos_offer_redemption (TenantId, OfferId, RedeemedOn);
+-- "Has this customer already used it today" is checked before every redemption.
+CREATE INDEX idx_redemption_customer    ON pos_offer_redemption (TenantId, PosCustomerId, OfferId, RedeemedOn);
+
 CREATE INDEX idx_tdl_tenant_date    ON transactiondetaillog (TenantId, TransactionDate, TransactionTypeStatusId);
 CREATE INDEX idx_tdl_tenant_branch  ON transactiondetaillog (TenantId, BranchId, TransactionDate);
 CREATE INDEX idx_tdl_tenant_type    ON transactiondetaillog (TenantId, TransactionTypeId, TransactionDate);

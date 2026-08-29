@@ -9,6 +9,9 @@ const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const pricingService = require('../pricing/pricing.service');
 const ledgerService = require('../ledger/ledger.service');
+// Campaign offers. The engine produces the same per-line discounts a cashier
+// types by hand, so nothing below this line had to change to support them.
+const offerEngine = require('../posoffer/offer.engine.service');
 const tokenService = require('../postoken/postoken.service');
 const customerStats = require('../poscustomer/poscustomer.stats.service');
 const loyalty = require('../loyalty/loyalty.service');
@@ -199,8 +202,42 @@ class PosBillService extends BaseCRUDService {
       // Re-price against the bill's rounds so a discount entered at settle time
       // reduces the taxable base.
       const orderIds = await repository.getBillOrderIdsTx(connection, id, tenantId);
+
+      // Resolved once and used THREE times: the ledger records WHO bought (as a
+      // contact), the CRM records THAT they bought (as a visit), and a
+      // per-customer offer cap needs to know whether this person has already
+      // had theirs today. Reading it once is what stops the three disagreeing.
+      const posCustomerId = await repository.getSessionCustomerIdTx(connection, orderIds, tenantId);
+
+      // ── Campaign offers ────────────────────────────────────────────────
+      // Re-evaluated HERE, inside the settle transaction, from the live rules —
+      // never trusted from the request. A till that never pressed "Check
+      // offers" still gets the same bill as one that did, and a client cannot
+      // ask for a discount no campaign is actually offering.
+      //
+      // The engine returns per-line discounts in exactly the shape a cashier's
+      // hand-typed ones already take, which is why the pricing below is
+      // untouched: there is one way to price a bill, not two.
+      const cartLines = await repository.getOrderLinesTx(
+        connection, orderIds, tenantId, lineDiscounts,
+      );
+      const cartValue = cartLines.reduce(
+        (sum, l) => sum + (Number(l.unitAmount || 0) * Number(l.quantity || 0)), 0,
+      );
+      const offers = await offerEngine.evaluateTx(connection, {
+        lines: cartLines,
+        billAmount: cartValue,
+        branchId: existing.BranchDetailId,
+        posCustomerId,
+      }, tenantId);
+      // Manual wins where both touch a line — the evaluator already refuses
+      // such lines, so this is the belt to that pair of braces.
+      const effectiveLineDiscounts = offerEngine.mergeLineDiscounts(
+        lineDiscounts, offers.lineDiscounts,
+      );
+
       const recomputed = await this.recomputeTotals(
-        connection, orderIds, discount, tenantId, lineDiscounts,
+        connection, orderIds, discount, tenantId, effectiveLineDiscounts,
       );
 
       // Every settle posts a document. A bill with no priced lines cannot be
@@ -219,11 +256,6 @@ class PosBillService extends BaseCRUDService {
 
       // ── Post to the accounting ledger ──────────────────────────────────
       const lines = await repository.toLedgerLinesTx(connection, recomputed.Lines, tenantId);
-      // Resolved once and used twice: the ledger records WHO bought (as a
-      // contact), and the CRM records THAT they bought (as a visit). Querying
-      // for the same customer twice would let the two disagree.
-      const posCustomerId = await repository.getSessionCustomerIdTx(connection, orderIds, tenantId);
-
       const posted = await ledgerService.postSaleFromBill(
         connection,
         {
@@ -237,6 +269,18 @@ class PosBillService extends BaseCRUDService {
         tenantId,
         userEmail,
       );
+
+      // What the campaigns actually gave away, against the document that gave
+      // it. On this transaction on purpose: a redemption that survived a
+      // rolled-back sale would charge a campaign for a bill nobody paid.
+      await offerEngine.recordRedemptionsTx(connection, {
+        applied: offers.applied,
+        billId: id,
+        transactionDetailLogId: posted.transactionDetailLogId,
+        branchId: existing.BranchDetailId,
+        posCustomerId,
+        billGrossAmount: posted.payable,
+      }, tenantId, userEmail);
 
       // ── CRM ────────────────────────────────────────────────────────────
       // Visits, spend and loyalty. On this transaction on purpose: a sale that
@@ -259,7 +303,7 @@ class PosBillService extends BaseCRUDService {
       await connection.execute(this.queries.SETTLE, [
         toJson(data.Payments ?? data.Tenders),
         discount,
-        toJson(lineDiscounts),
+        toJson(effectiveLineDiscounts),
         posted.payable,
         // A part-tendered bill stays open — "paid" would be a lie.
         posted.balanceDue > 0 ? POS_BILL_STATUS.PARTIALLY_PAID : POS_BILL_STATUS.PAID,
@@ -276,7 +320,13 @@ class PosBillService extends BaseCRUDService {
       // Read back on the transaction's own connection, or the caller gets the
       // bill as it looked BEFORE it was settled.
       const bill = await this.getByIdTx(connection, id, tenantId);
-      return { ...bill, ...posted, ...token };
+      // `posted` speaks camelCase and the bill row speaks PascalCase, and the
+      // till reads the PascalCase name. Without this the invoice number simply
+      // never appeared on the "Posted to ledger" confirmation — the one screen
+      // whose entire job is to say WHICH invoice was just raised.
+      return {
+        ...bill, ...posted, ...token, TransactionNo: posted.transactionNo,
+      };
     });
   }
 

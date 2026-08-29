@@ -8,6 +8,7 @@ const {
   bucketExpression,
   weekendPredicate,
   toDateTimeBounds,
+  localOffsetMinutes,
   toISODate,
   VALID_PRESETS,
   VALID_BUCKETS,
@@ -101,13 +102,65 @@ describe('weekendPredicate', () => {
 });
 
 describe('toDateTimeBounds', () => {
-  it('widens a date range to cover whole days', () => {
+  // The pool writes DATETIMEs in UTC (config/db.js, timezone: 'Z') while a
+  // business day is local, so these bounds are the UTC INSTANTS that bracket
+  // the local day. Written against the running machine's own offset rather
+  // than a hard-coded zone, so the suite states the rule instead of the
+  // author's timezone.
+  const utcStamp = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
+
+  it('brackets the local day in the frame the column is stored in', () => {
+    expect(toDateTimeBounds({ from: '2026-08-01', to: '2026-08-02' })).toEqual({
+      from: utcStamp(new Date(2026, 7, 1, 0, 0, 0)),
+      to: utcStamp(new Date(2026, 7, 2, 23, 59, 59)),
+    });
+  });
+
+  it('covers the last day fully — the whole point of widening', () => {
     // BETWEEN '2026-08-01' AND '2026-08-02' on a DATETIME silently drops
     // everything after midnight on the last day.
-    expect(toDateTimeBounds({ from: '2026-08-01', to: '2026-08-02' })).toEqual({
-      from: '2026-08-01 00:00:00',
-      to: '2026-08-02 23:59:59',
-    });
+    const { to } = toDateTimeBounds({ from: '2026-08-01', to: '2026-08-02' });
+    const lastLocalSecond = utcStamp(new Date(2026, 7, 2, 23, 59, 59));
+    expect(to).toBe(lastLocalSecond);
+    expect(new Date(`${to.replace(' ', 'T')}Z`).getDate()).toBe(
+      new Date(2026, 7, 2, 23, 59, 59).getUTCDate(),
+    );
+  });
+
+  it('spans a whole day, however the offset falls', () => {
+    // The window is 24h minus the one second between 23:59:59 and midnight.
+    const { from, to } = toDateTimeBounds({ from: '2026-08-01', to: '2026-08-01' });
+    const ms = new Date(`${to.replace(' ', 'T')}Z`) - new Date(`${from.replace(' ', 'T')}Z`);
+    expect(ms).toBe((24 * 60 * 60 - 1) * 1000);
+  });
+
+  it('an evening sale east of Greenwich stays on its own business day', () => {
+    // The regression this exists for: at IST a 20:00 local sale is stored as
+    // 14:30 UTC, and naive bounds put it in the wrong day's Z-report.
+    const evening = new Date(2026, 7, 1, 20, 0, 0);
+    const { from, to } = toDateTimeBounds({ from: '2026-08-01', to: '2026-08-01' });
+    expect(utcStamp(evening) >= from && utcStamp(evening) <= to).toBe(true);
+  });
+});
+
+describe('weekendPredicate', () => {
+  it('is empty unless the weekend filter is on', () => {
+    expect(weekendPredicate(false, 'l.TransactionDate')).toBe('');
+  });
+
+  it('reads a local date column as it stands', () => {
+    expect(weekendPredicate(true, 'l.TransactionDate'))
+      .toBe(' AND WEEKDAY(l.TransactionDate) IN (5, 6)');
+  });
+
+  it('shifts a UTC column into local time before asking the weekday', () => {
+    // A Saturday 11pm sale in IST is a SUNDAY instant in UTC. Asking
+    // WEEKDAY() of the raw column files late trade under the wrong day.
+    const sql = weekendPredicate(true, 'b.Timestamp', { utc: true });
+    expect(sql).toBe(
+      ` AND WEEKDAY(b.Timestamp + INTERVAL ${localOffsetMinutes()} MINUTE) IN (5, 6)`,
+    );
+    expect(sql).toMatch(/^ AND WEEKDAY\(b\.Timestamp \+ INTERVAL -?\d+ MINUTE\) IN \(5, 6\)$/);
   });
 });
 

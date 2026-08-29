@@ -355,7 +355,7 @@ const tenderReport = (query, tenantId) =>
     // GROUP BY rather than appended after ORDER BY.
     const sql = QUERIES.LEDGER_REPORT.TENDER_MIX.replace(
       'GROUP BY',
-      `${weekendPredicate(range.weekendOnly, 'b.Timestamp')} GROUP BY`,
+      `${weekendPredicate(range.weekendOnly, 'b.Timestamp', { utc: true })} GROUP BY`,
     );
     const [rows] = await conn.execute(sql, [tenantId, bounds.from, bounds.to]);
     return {
@@ -371,7 +371,7 @@ const cashFlowReport = (query, tenantId) =>
     const bounds = toDateTimeBounds(range);
     const sql = QUERIES.LEDGER_REPORT.CASH_FLOW.replace(
       'GROUP BY',
-      `${weekendPredicate(range.weekendOnly, 'b.Timestamp')} GROUP BY`,
+      `${weekendPredicate(range.weekendOnly, 'b.Timestamp', { utc: true })} GROUP BY`,
     );
     const [rows] = await conn.execute(sql, [tenantId, bounds.from, bounds.to]);
     const accounts = rows.map((r) => numeric(r, ['Inflow', 'Outflow', 'NetMovement']));

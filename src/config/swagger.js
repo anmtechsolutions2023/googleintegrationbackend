@@ -921,7 +921,20 @@ const swaggerSpec = {
       },
       PaymentMode: {
         type: 'object',
-        properties: { ...auditFields, Type: { type: 'string' } },
+        properties: {
+          ...auditFields,
+          Type: { type: 'string' },
+          DefaultAccountTypeBaseId: { type: 'string', format: 'uuid', nullable: true },
+          AccountName: {
+            type: 'string', nullable: true, readOnly: true,
+            description: 'The account this tender lands in, resolved from DefaultAccountTypeBaseId. The till shows it under each payment option: a portal settlement books to Aggregator Receivable rather than the drawer, and a cashier who cannot see that leaves the cash session short by a whole sale.',
+          },
+          AccountKind: {
+            type: 'string', nullable: true, readOnly: true,
+            enum: ['ASSET', 'LIABILITY', 'INCOME', 'EXPENSE'],
+            description: 'Kind of the account above.',
+          },
+        },
       },
 
       // ─── PaymentModeTransactionDetail ──────────────────────────────────────
@@ -1301,6 +1314,14 @@ const swaggerSpec = {
           FoodTypeId: {"type":"string","format":"uuid"},
           FoodTypeName: {"type":"string","nullable":true},
           FoodTypeIsVeg: {"type":"boolean","nullable":true},
+          CategoryId: {
+            type: 'string', format: 'uuid', nullable: true, readOnly: true,
+            description: 'The dish\'s category, resolved through itemdetail. The till groups its menu by this. Null for an item with no category — which is a real state, not an error: the item is still sellable and groups under "Uncategorised".',
+          },
+          CategoryName: {
+            type: 'string', nullable: true, readOnly: true,
+            description: 'Display name for CategoryId. Null alongside it.',
+          },
           CostInfoId: {
             type: 'string', format: 'uuid', nullable: true,
             description: 'Resolved from the selected item unless explicitly overridden.',
@@ -1979,6 +2000,235 @@ const swaggerSpec = {
           totalReturned: { type: 'number' },
           saleGross: { type: 'number', description: 'Unchanged. The original total is what the customer\'s printed bill says.' },
           duplicate: { type: 'boolean', description: 'True when an idempotency key replayed — no second note was issued.' },
+        },
+      },
+      // ── Campaigns and offers ────────────────────────────────────────────
+      Campaign: {
+        type: 'object',
+        description:
+          'The container, and the switch. Offers live inside one, and pausing it pauses every offer in it — one control when something goes wrong at 8pm on a Friday.',
+        properties: {
+          Id: { type: 'string', format: 'uuid', readOnly: true },
+          Name: { type: 'string', maxLength: 150, example: 'Monsoon Chai Fest' },
+          Code: { type: 'string', maxLength: 50, example: 'MONSOON26' },
+          Description: { type: 'string', nullable: true },
+          StartsOn: { type: 'string', format: 'date' },
+          EndsOn: { type: 'string', format: 'date', nullable: true, description: 'Null runs until stopped.' },
+          DaysOfWeek: {
+            type: 'string', nullable: true, example: '6,7',
+            description: 'ISO weekday numbers, 1=Mon..7=Sun. Null is every day. "Weekends only" is data, not a second kind of campaign.',
+          },
+          StartTime: { type: 'string', nullable: true, example: '16:00' },
+          EndTime: {
+            type: 'string', nullable: true, example: '18:00',
+            description: 'With StartTime, a happy hour. StartTime later than EndTime legitimately means a window that crosses midnight.',
+          },
+          BudgetAmount: {
+            type: 'number', nullable: true,
+            description: 'What it may give away in total. Null is permitted but is an open tab with a marketing name on it — the campaign stops giving away when this is reached, and says so.',
+          },
+          SpentAmount: { type: 'number', readOnly: true, description: 'Maintained as redemptions are written.' },
+          Status: {
+            type: 'string', enum: ['DRAFT', 'ACTIVE', 'PAUSED'],
+            description: 'INTENT — what a person decided.',
+          },
+          LiveState: {
+            type: 'string', readOnly: true,
+            enum: ['DRAFT', 'SCHEDULED', 'LIVE', 'PAUSED', 'BUDGET_SPENT', 'ENDED'],
+            description: 'What is actually happening, DERIVED from Status plus the dates, the weekday, the hour and the budget. A stored "live" flag is a fact with five ways to go stale.',
+          },
+          BudgetRemaining: { type: 'number', nullable: true, readOnly: true },
+          branchIds: {
+            type: 'array', items: { type: 'string', format: 'uuid' },
+            description: 'Which outlets. EMPTY MEANS EVERY BRANCH — the common case, stored as nothing rather than a row per branch to maintain as outlets open.',
+          },
+          OfferCount: { type: 'integer', readOnly: true },
+          RedemptionCount: { type: 'integer', readOnly: true },
+        },
+      },
+      Offer: {
+        type: 'object',
+        description:
+          'One rule: a trigger, a reward, and its limits. Every offer anybody describes is this shape with different values — buy 2 get 1 free, buy X get Y free, second at half price, spend ₹500 get a free dessert.',
+        required: ['Name', 'TriggerKind', 'RewardKind'],
+        properties: {
+          Id: { type: 'string', format: 'uuid', readOnly: true },
+          CampaignId: { type: 'string', format: 'uuid', readOnly: true },
+          Name: { type: 'string', maxLength: 150, example: 'Buy 2 chai, get 1 free' },
+          SortOrder: { type: 'integer', default: 0 },
+
+          TriggerKind: { type: 'string', enum: ['ITEM_QTY', 'CATEGORY_QTY', 'BILL_AMOUNT'] },
+          TriggerItemId: { type: 'string', format: 'uuid', nullable: true },
+          TriggerCategoryId: { type: 'string', format: 'uuid', nullable: true },
+          TriggerMinQty: {
+            type: 'number', nullable: true, example: 2,
+            description: 'How many are needed. Six chai on a "buy 2 get 1" is THREE redemptions, not one.',
+          },
+          TriggerMinAmount: { type: 'number', nullable: true, example: 500, description: 'A bill over this earns the reward ONCE, not once per multiple.' },
+
+          RewardKind: {
+            type: 'string', enum: ['SAME_ITEM', 'SPECIFIC_ITEM'],
+            description: 'SAME_ITEM discounts one of the very lines that triggered it. SPECIFIC_ITEM discounts a different named item, which must be in the cart — see the `earned` list on preview.',
+          },
+          RewardItemId: { type: 'string', format: 'uuid', nullable: true },
+          RewardQuantity: { type: 'number', default: 1 },
+          RewardPercent: {
+            type: 'number', minimum: 0, maximum: 100, default: 100,
+            description: '100 is free, 50 is half price. Always a PERCENT, so a price change never silently turns a free item into a paid one.',
+          },
+          ApplyTo: {
+            type: 'string', enum: ['CHEAPEST', 'DEAREST'], default: 'CHEAPEST',
+            description: 'Which qualifying line is discounted when several could be. Stated, because a ₹15 chai and a ₹20 masala chai both qualify and two tills answering differently is a customer being right both times.',
+          },
+
+          MaxPerBill: { type: 'integer', default: 1 },
+          MaxPerCustomerPerDay: {
+            type: 'integer', nullable: true,
+            description: 'How many times one identified customer may take this offer in a day. Enforced on both the preview and the settle path, counted from the redemptions already written today. Walk-ins are not capped — an anonymous sale identifies no customer. Null is no per-customer limit.',
+          },
+          MaxTotalRedemptions: { type: 'integer', nullable: true },
+          RedemptionCount: { type: 'integer', readOnly: true },
+          Sentence: {
+            type: 'string', readOnly: true,
+            example: 'When a bill has 2 or more of Masala Chai, make 1 of them free — the cheapest one. At most 2 per bill.',
+            description: 'The rule in one sentence, built on the server so the till, the campaign screen and the audit log describe an offer the same way.',
+          },
+        },
+      },
+      OfferPreviewRequest: {
+        type: 'object', required: ['lines'],
+        properties: {
+          branchId: { type: 'string', format: 'uuid', nullable: true },
+          posCustomerId: {
+            type: 'string', format: 'uuid', nullable: true,
+            description: 'The customer on the bill, when one is identified. Only with this can a per-customer daily cap be honoured — the server counts what this customer has already taken today. Omit for a walk-in: an anonymous sale identifies no customer, so no per-customer limit applies to it.',
+          },
+          lines: {
+            type: 'array', maxItems: 500,
+            items: {
+              type: 'object', required: ['ref', 'unitAmount', 'quantity'],
+              properties: {
+                ref: { type: 'string', example: 'order-1#0', description: 'The line key the till already uses for a hand-typed discount.' },
+                itemId: { type: 'string', format: 'uuid', nullable: true },
+                categoryId: { type: 'string', format: 'uuid', nullable: true },
+                name: { type: 'string', nullable: true },
+                unitAmount: { type: 'number' },
+                quantity: { type: 'number' },
+                hasManualDiscount: {
+                  type: 'boolean',
+                  description: 'A line somebody has already discounted by hand is off limits to every offer — goodwill plus a buy-one-get-one is how a dish costs less than nothing.',
+                },
+              },
+            },
+          },
+        },
+      },
+      OfferPreviewResult: {
+        type: 'object',
+        properties: {
+          lineDiscounts: {
+            type: 'object',
+            additionalProperties: {
+              type: 'object',
+              properties: { type: { type: 'string', enum: ['percent'] }, value: { type: 'number' } },
+            },
+            description: 'Exactly the shape posbill already takes for a hand-typed line discount. An offer is not a second way to price a bill.',
+          },
+          applied: {
+            type: 'array',
+            description: 'Offers that fired, with the lines they discounted.',
+            items: {
+              type: 'object',
+              properties: {
+                offerId: { type: 'string', format: 'uuid' },
+                campaignId: { type: 'string', format: 'uuid' },
+                name: { type: 'string' },
+                campaignName: { type: 'string', nullable: true },
+                discountAmount: { type: 'number' },
+                awards: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      ref: { type: 'string' }, itemId: { type: 'string', nullable: true },
+                      itemName: { type: 'string', nullable: true },
+                      quantity: { type: 'number' }, percent: { type: 'number' },
+                      discountAmount: { type: 'number' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          earned: {
+            type: 'array',
+            description:
+              'Qualifies, but the reward item is not in the order. NOT a failure — a free item has to exist as a line before it can be discounted, so this is what the till offers to add rather than inventing a phantom line the kitchen never sees.',
+            items: {
+              type: 'object',
+              properties: {
+                offerId: { type: 'string' }, name: { type: 'string' },
+                rewardItemId: { type: 'string', nullable: true },
+                earned: { type: 'boolean' },
+              },
+            },
+          },
+          skipped: {
+            type: 'array',
+            description: 'Why each other offer did not fire. A silent "no" is what makes staff stop trusting an offer engine and go back to typing discounts by hand.',
+            items: {
+              type: 'object',
+              properties: {
+                offerId: { type: 'string' }, name: { type: 'string' },
+                reason: {
+                  type: 'string',
+                  enum: ['NOT_ENOUGH_ITEMS', 'BILL_TOO_SMALL', 'REWARD_NOT_IN_CART',
+                    'LINE_ALREADY_DISCOUNTED', 'BEATEN_BY_ANOTHER_OFFER', 'LIMIT_REACHED'],
+                  description: 'The machine-readable code a client branches on.',
+                },
+                message: { type: 'string', nullable: true, description: 'The sentence a cashier reads.' },
+                needed: { type: 'number', nullable: true },
+                have: { type: 'number', nullable: true },
+                shortBy: { type: 'number', nullable: true, description: 'How much more is needed — so the till can say "₹15 more and it qualifies" rather than only "it does not".' },
+              },
+            },
+          },
+          totalDiscount: { type: 'number' },
+          considered: { type: 'integer' },
+        },
+      },
+      CampaignReport: {
+        type: 'object',
+        description:
+          'What a campaign cost, and what it moved. The two are NOT the same kind of fact and are never added together: what was given away is exact, what was caused is an estimate.',
+        properties: {
+          campaignId: { type: 'string', format: 'uuid' },
+          summary: {
+            type: 'object',
+            properties: {
+              redemptions: { type: 'integer' },
+              bills: { type: 'integer' },
+              givenAway: { type: 'number', description: 'Exact — every redemption is written against its offer.' },
+              revenueOnThoseBills: {
+                type: 'number',
+                description: 'What those bills came to. NOT uplift, and never labelled as such — the people who order two chai were always going to spend more.',
+              },
+              averageBill: { type: 'number' },
+              costPerRedemption: { type: 'number' },
+              costAsShareOfRevenue: { type: 'number', description: 'The one ratio that says whether a promotion is a discount or a business model.' },
+            },
+          },
+          offers: { type: 'array', items: { type: 'object' } },
+          byHour: {
+            type: 'array',
+            description: 'When it fires. An offer running all day is being paid for at hours it is not changing anybody\'s mind.',
+            items: { type: 'object', properties: { hour: { type: 'integer' }, redemptions: { type: 'integer' } } },
+          },
+          recent: {
+            type: 'array',
+            description: 'Every redemption, so any figure above can be traced to the bills behind it.',
+            items: { type: 'object' },
+          },
         },
       },
       // ── Receipt format ──────────────────────────────────────────────────
@@ -4227,6 +4477,91 @@ const swaggerSpec = {
         parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PosSettings' } } } },
         responses: { ...singleResponse('PosSettings'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── Campaigns and offers ───────────────────────────────────────────────
+    // Writes are POS_CONFIG:WRITE and audited — creating an offer authorises
+    // the business to give money away on every till at once. The preview is
+    // open to any till scope, because the cashier pressing "Check offers" holds
+    // no config scope at all.
+    '/api/pos/campaigns': {
+      get: {
+        tags: ['Campaigns'], summary: 'Every campaign, with its live state', security,
+        description: 'LiveState is derived — DRAFT, SCHEDULED, LIVE, PAUSED, BUDGET_SPENT or ENDED — from the stored intent plus the dates, the weekday, the hour and the budget.',
+        responses: { ...listResponse('Campaign'), ...responses.unauthorized, ...responses.forbidden },
+      },
+      post: {
+        tags: ['Campaigns'], summary: 'Create a campaign', security,
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/Campaign' } } } },
+        responses: { ...singleResponse('Campaign', 201), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/campaigns/{id}': {
+      get: {
+        tags: ['Campaigns'], summary: 'One campaign, its branches and its offers', security,
+        parameters: [idParam],
+        responses: { ...singleResponse('Campaign'), ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+      put: {
+        tags: ['Campaigns'], summary: 'Update a campaign', security, parameters: [idParam],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/Campaign' } } } },
+        responses: { ...responses.success, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+      delete: {
+        tags: ['Campaigns'], summary: 'Retire a campaign', security, parameters: [idParam],
+        description: 'Soft delete. A campaign that gave money away is a historical fact — removing the row would orphan every redemption written against it and make last month\'s cost unanswerable.',
+        responses: { ...responses.success, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/campaigns/{id}/status': {
+      put: {
+        tags: ['Campaigns'], summary: 'Pause or resume a campaign', security, parameters: [idParam],
+        description: 'Its own route, audited at WARN. This is the switch somebody reaches for when a promotion is going wrong, and pausing the campaign pauses every offer inside it at once.',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['Status'], properties: { Status: { type: 'string', enum: ['DRAFT', 'ACTIVE', 'PAUSED'] } } } } } },
+        responses: { ...responses.success, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/campaigns/{id}/report': {
+      get: {
+        tags: ['Campaigns'], summary: 'What a campaign cost, and what those bills came to', security,
+        parameters: [idParam],
+        responses: { ...singleResponse('CampaignReport'), ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/campaigns/{id}/offers': {
+      get: {
+        tags: ['Campaigns'], summary: 'The offers in one campaign', security, parameters: [idParam],
+        responses: { ...listResponse('Offer'), ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+      post: {
+        tags: ['Campaigns'], summary: 'Add an offer to a campaign', security, parameters: [idParam],
+        description: 'Refused with 400 when the rule cannot fire — a trigger naming no item, a bill trigger rewarding "the same item", or a free quantity that would make every qualifying item free. Each message names the field and what it needs.',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/Offer' } } } },
+        responses: { ...singleResponse('Offer', 201), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/offers/{id}': {
+      put: {
+        tags: ['Campaigns'], summary: 'Update an offer', security, parameters: [idParam],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/Offer' } } } },
+        responses: { ...responses.success, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+      delete: {
+        tags: ['Campaigns'], summary: 'Retire an offer', security, parameters: [idParam],
+        description: 'Soft delete — its redemptions are history, and history keeps its reasons.',
+        responses: { ...responses.success, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/preview': {
+      post: {
+        tags: ['Campaigns'],
+        summary: 'What would apply to this cart — the “Check offers” button',
+        description:
+          'Runs every live offer against a cart and writes NOTHING.\n\n**Deliberately not the authority.** The settle path re-runs the same evaluation inside its own transaction, from the live rules, and writes the discounts itself — so a till that never calls this still produces the same bill, and a client cannot ask for a discount no campaign is offering. It exists so a cashier can SEE what is about to happen.\n\nThe reply has three lists: `applied`, `earned` (qualifies but the reward is not in the cart yet) and `skipped` (with the reason, because a silent “no” is what makes staff stop trusting an offer engine).',
+        security,
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/OfferPreviewRequest' } } } },
+        responses: { ...singleResponse('OfferPreviewResult'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
       },
     },
 

@@ -92,6 +92,25 @@ const getOrderLinesTx = async (conn, orderIds, tenantId, lineDiscounts = null) =
   // ordered; what was taken off it is the document's decision.
   const discounts = lineDiscounts && typeof lineDiscounts === 'object' ? lineDiscounts : {};
 
+  // ── The catalogue behind each menu entry ──────────────────────────────────
+  // A round records the MENU entry it was tapped from (pos_item_meta.Id). An
+  // offer triggers on the CATALOGUE item (itemdetail.Id) and its category, so
+  // without this resolution the two id spaces never meet: every ITEM_QTY
+  // trigger counted zero on a real bill, and no offer could ever apply at
+  // settle. One batched read for the whole cart, not one per line.
+  const metaIds = [...new Set(
+    rows.flatMap((row) => asArray(row.Items).map((i) => i.id ?? i.Id).filter(Boolean)),
+  )];
+  const catalogue = new Map();
+  if (metaIds.length > 0) {
+    const catSql = expandIds(QUERIES.POS_ITEM_META.SELECT_CATALOGUE_IDS, metaIds.length);
+    const [catRows] = await conn.execute(catSql, [tenantId, ...metaIds]);
+    (catRows || []).forEach((r) => catalogue.set(r.MetaId, {
+      itemId: r.ItemDetailId || null,
+      categoryId: r.CategoryId || null,
+    }));
+  }
+
   const lines = [];
   rows.forEach((row) => {
     asArray(row.Items).forEach((item, index) => {
@@ -100,6 +119,11 @@ const getOrderLinesTx = async (conn, orderIds, tenantId, lineDiscounts = null) =
         ref: `${row.Id}#${index}`,
         discount: discounts[`${row.Id}#${index}`] || null,
         id: item.id ?? item.Id ?? null,
+        // The catalogue ids an offer matches on. Resolved from the menu entry
+        // above rather than trusted from the order, because a round written
+        // before offers existed carries neither.
+        itemId: catalogue.get(item.id ?? item.Id)?.itemId ?? null,
+        categoryId: catalogue.get(item.id ?? item.Id)?.categoryId ?? null,
         name: item.name ?? null,
         costInfoId: item.costInfoId ?? null,
         // Options as charged, carried through so a printed bill can itemise

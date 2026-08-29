@@ -618,7 +618,7 @@ module.exports = {
         SELECT tdl.*, 
           ttc.Prefix AS TransactionTypeConfigPrefix, ttc.Format AS TransactionTypeConfigFormat,
           tts.Name AS TransactionStatusName,
-          bd.Name AS BranchName
+          bd.BranchName AS BranchName
         FROM transactiondetaillog tdl
         LEFT JOIN transactiontypeconfig ttc ON tdl.TransactionTypeConfigId = ttc.Id AND ttc.TenantId = tdl.TenantId
         LEFT JOIN transactiontypestatus tts ON tdl.TransactionTypeStatusId = tts.Id AND tts.TenantId = tdl.TenantId
@@ -632,7 +632,7 @@ module.exports = {
         SELECT tdl.*, 
           ttc.Prefix AS TransactionTypeConfigPrefix, ttc.Format AS TransactionTypeConfigFormat,
           tts.Name AS TransactionStatusName,
-          bd.Name AS BranchName
+          bd.BranchName AS BranchName
         FROM transactiondetaillog tdl
         LEFT JOIN transactiontypeconfig ttc ON tdl.TransactionTypeConfigId = ttc.Id AND ttc.TenantId = tdl.TenantId
         LEFT JOIN transactiontypestatus tts ON tdl.TransactionTypeStatusId = tts.Id AND tts.TenantId = tdl.TenantId
@@ -738,8 +738,17 @@ module.exports = {
 
     // Payment Mode Queries
     PAYMENT_MODE: {
-      SELECT_ALL:
-        'SELECT * FROM paymentmode WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      // The ACCOUNT a tender lands in rides along with the mode. The till shows
+      // it under each payment option, which is what stops a counter sale being
+      // settled to 'Zomato Settlement' — that books to Aggregator Receivable,
+      // money we are owed for weeks, and leaves the cash session short by the
+      // whole sale with nothing on screen to explain it.
+      SELECT_ALL: `SELECT pm.*,
+          a.Name AS AccountName, a.Kind AS AccountKind
+        FROM paymentmode pm
+        LEFT JOIN accounttypebase a
+          ON a.Id = pm.DefaultAccountTypeBaseId AND a.TenantId = pm.TenantId
+        WHERE pm.TenantId = ? ORDER BY pm.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM paymentmode WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM paymentmode WHERE Id = ? AND TenantId = ?',
       INSERT:
@@ -930,26 +939,49 @@ module.exports = {
       // failing on the constraint.
       SELECT_BY_ITEM_BRANCH:
         'SELECT Id FROM pos_item_meta WHERE ItemDetailId = ? AND BranchDetailId = ? AND TenantId = ? LIMIT 1',
+      // A round stores the MENU entry's id in its Items JSON, but an offer
+      // triggers on the CATALOGUE item and its category. Without this the two
+      // id spaces never meet and every item trigger counts zero — see
+      // posbill.repository.getOrderLinesTx.
+      SELECT_CATALOGUE_IDS: `
+        SELECT im.Id AS MetaId, im.ItemDetailId, i.CategoryId
+          FROM pos_item_meta im
+          LEFT JOIN itemdetail i ON i.Id = im.ItemDetailId AND i.TenantId = im.TenantId
+         WHERE im.TenantId = ? AND im.Id IN (:ids)`,
       // SELECT_ALL/SELECT_BY_ID aggregate linked channel/variant ids and the
       // linked costinfo amount so the client can pre-select and price.
       SELECT_ALL: `SELECT im.*,
           (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c WHERE c.ItemMetaId = im.Id) AS ChannelIds,
           (SELECT JSON_ARRAYAGG(v.VariantId) FROM pos_item_meta_variant v WHERE v.ItemMetaId = im.Id) AS VariantIds,
           ci.Amount AS CostInfoAmount,
-          ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg
+          ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg,
+          -- The till groups its menu by these. A dish's category lives on
+          -- itemdetail, not on the POS extension row, so it takes two joins to
+          -- reach — which is why the menu payload carried no category at all
+          -- and the grid had nothing to group by.
+          cat.Id AS CategoryId, cat.Name AS CategoryName
         FROM pos_item_meta im
         LEFT JOIN costinfo ci ON ci.Id = im.CostInfoId
         LEFT JOIN pos_food_type ft ON ft.Id = im.FoodTypeId
+        LEFT JOIN itemdetail idt ON idt.Id = im.ItemDetailId AND idt.TenantId = im.TenantId
+        LEFT JOIN categorydetail cat ON cat.Id = idt.CategoryId AND cat.TenantId = im.TenantId
         WHERE im.TenantId = ? ORDER BY im.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM pos_item_meta WHERE TenantId = ?',
       SELECT_BY_ID: `SELECT im.*,
           (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c WHERE c.ItemMetaId = im.Id) AS ChannelIds,
           (SELECT JSON_ARRAYAGG(v.VariantId) FROM pos_item_meta_variant v WHERE v.ItemMetaId = im.Id) AS VariantIds,
           ci.Amount AS CostInfoAmount,
-          ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg
+          ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg,
+          -- The till groups its menu by these. A dish's category lives on
+          -- itemdetail, not on the POS extension row, so it takes two joins to
+          -- reach — which is why the menu payload carried no category at all
+          -- and the grid had nothing to group by.
+          cat.Id AS CategoryId, cat.Name AS CategoryName
         FROM pos_item_meta im
         LEFT JOIN costinfo ci ON ci.Id = im.CostInfoId
         LEFT JOIN pos_food_type ft ON ft.Id = im.FoodTypeId
+        LEFT JOIN itemdetail idt ON idt.Id = im.ItemDetailId AND idt.TenantId = im.TenantId
+        LEFT JOIN categorydetail cat ON cat.Id = idt.CategoryId AND cat.TenantId = im.TenantId
         WHERE im.Id = ? AND im.TenantId = ?`,
       INSERT: 'INSERT INTO pos_item_meta (Id, TenantId, ItemDetailId, FoodTypeId, CostInfoId, Channels, Prices, Variants, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE: 'UPDATE pos_item_meta SET ItemDetailId = ?, FoodTypeId = ?, CostInfoId = ?, Channels = ?, Prices = ?, Variants = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
@@ -1466,6 +1498,178 @@ module.exports = {
 
     // Per-branch POS preferences. A missing row is a valid state meaning "use
     // the default", so reads never assume one exists.
+    // ── Campaigns and offers ────────────────────────────────────────────
+    // An offer is not a second way to price a bill: the engine turns these
+    // rules into the same per-line discounts a cashier types by hand, and
+    // posbill.recomputeTotals keeps deciding how the money works.
+    POS_CAMPAIGN: {
+      SELECT_ALL: `
+        SELECT c.*,
+               (SELECT COUNT(*) FROM pos_offer o
+                 WHERE o.CampaignId = c.Id AND o.TenantId = c.TenantId AND o.Active = 1) AS OfferCount,
+               (SELECT COUNT(*) FROM pos_offer_redemption r
+                 WHERE r.CampaignId = c.Id AND r.TenantId = c.TenantId AND r.Active = 1) AS RedemptionCount
+          FROM pos_campaign c
+         WHERE c.TenantId = ? AND c.Active = 1
+         ORDER BY c.StartsOn DESC, c.Name ASC`,
+      SELECT_BY_ID: 'SELECT * FROM pos_campaign WHERE Id = ? AND TenantId = ?',
+      INSERT: `
+        INSERT INTO pos_campaign
+          (Id, TenantId, Name, Code, Description, StartsOn, EndsOn, DaysOfWeek,
+           StartTime, EndTime, BudgetAmount, Status, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+      UPDATE: `
+        UPDATE pos_campaign
+           SET Name = ?, Description = ?, StartsOn = ?, EndsOn = ?, DaysOfWeek = ?,
+               StartTime = ?, EndTime = ?, BudgetAmount = ?, Status = ?,
+               UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE Id = ? AND TenantId = ?`,
+      SET_STATUS:
+        'UPDATE pos_campaign SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      // Maintained as redemptions are written, so the budget cap is enforced
+      // without summing the redemption table on every bill.
+      ADD_SPEND:
+        'UPDATE pos_campaign SET SpentAmount = SpentAmount + ?, UpdatedOn = NOW() WHERE Id = ? AND TenantId = ?',
+      SOFT_DELETE:
+        'UPDATE pos_campaign SET Active = 0, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      SELECT_BRANCHES:
+        'SELECT BranchDetailId FROM pos_campaign_branch WHERE CampaignId = ? AND TenantId = ?',
+      INSERT_BRANCH: `
+        INSERT INTO pos_campaign_branch (Id, TenantId, CampaignId, BranchDetailId, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, NOW(), ?, ?)`,
+      DELETE_BRANCHES:
+        'DELETE FROM pos_campaign_branch WHERE CampaignId = ? AND TenantId = ?',
+    },
+
+    POS_OFFER: {
+      SELECT_BY_CAMPAIGN: `
+        SELECT o.*, ti.Name AS TriggerItemName, tc.Name AS TriggerCategoryName,
+               ri.Name AS RewardItemName
+          FROM pos_offer o
+          LEFT JOIN itemdetail ti     ON ti.Id = o.TriggerItemId
+          LEFT JOIN categorydetail tc ON tc.Id = o.TriggerCategoryId
+          LEFT JOIN itemdetail ri     ON ri.Id = o.RewardItemId
+         WHERE o.CampaignId = ? AND o.TenantId = ? AND o.Active = 1
+         ORDER BY o.SortOrder ASC, o.Name ASC`,
+      SELECT_BY_ID: `
+        SELECT o.*, ti.Name AS TriggerItemName, tc.Name AS TriggerCategoryName,
+               ri.Name AS RewardItemName
+          FROM pos_offer o
+          LEFT JOIN itemdetail ti     ON ti.Id = o.TriggerItemId
+          LEFT JOIN categorydetail tc ON tc.Id = o.TriggerCategoryId
+          LEFT JOIN itemdetail ri     ON ri.Id = o.RewardItemId
+         WHERE o.Id = ? AND o.TenantId = ?`,
+      INSERT: `
+        INSERT INTO pos_offer
+          (Id, TenantId, CampaignId, Name, SortOrder, TriggerKind, TriggerItemId,
+           TriggerCategoryId, TriggerMinQty, TriggerMinAmount, RewardKind, RewardItemId,
+           RewardQuantity, RewardPercent, ApplyTo, MaxPerBill, MaxPerCustomerPerDay,
+           MaxTotalRedemptions, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+      UPDATE: `
+        UPDATE pos_offer
+           SET Name = ?, SortOrder = ?, TriggerKind = ?, TriggerItemId = ?,
+               TriggerCategoryId = ?, TriggerMinQty = ?, TriggerMinAmount = ?,
+               RewardKind = ?, RewardItemId = ?, RewardQuantity = ?, RewardPercent = ?,
+               ApplyTo = ?, MaxPerBill = ?, MaxPerCustomerPerDay = ?,
+               MaxTotalRedemptions = ?, UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE Id = ? AND TenantId = ?`,
+      SOFT_DELETE:
+        'UPDATE pos_offer SET Active = 0, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      BUMP_REDEMPTIONS:
+        'UPDATE pos_offer SET RedemptionCount = RedemptionCount + ? WHERE Id = ? AND TenantId = ?',
+
+      // Every offer that could fire on this bill, right now.
+      //
+      // The whole "is it running" question is ONE query rather than a status
+      // column somebody has to keep true: within its dates, on the right
+      // weekday, inside its hours, under its budget, at this branch.
+      // A campaign with no branch rows runs everywhere — the common case,
+      // stored as nothing rather than a row per branch to maintain.
+      SELECT_ACTIVE: `
+        SELECT o.*, c.Name AS CampaignName, c.BudgetAmount, c.SpentAmount
+          FROM pos_offer o
+          JOIN pos_campaign c ON c.Id = o.CampaignId AND c.TenantId = o.TenantId
+         WHERE o.TenantId = ? AND o.Active = 1
+           AND c.Active = 1 AND c.Status = 'ACTIVE'
+           AND c.StartsOn <= ? AND (c.EndsOn IS NULL OR c.EndsOn >= ?)
+           AND (c.DaysOfWeek IS NULL OR c.DaysOfWeek = ''
+                OR FIND_IN_SET(?, c.DaysOfWeek) > 0)
+           AND (c.StartTime IS NULL OR c.EndTime IS NULL
+                OR (c.StartTime <= c.EndTime AND ? BETWEEN c.StartTime AND c.EndTime)
+                OR (c.StartTime >  c.EndTime AND (? >= c.StartTime OR ? <= c.EndTime)))
+           AND (c.BudgetAmount IS NULL OR c.SpentAmount < c.BudgetAmount)
+           AND (o.MaxTotalRedemptions IS NULL OR o.RedemptionCount < o.MaxTotalRedemptions)
+           AND (NOT EXISTS (SELECT 1 FROM pos_campaign_branch b
+                             WHERE b.CampaignId = c.Id AND b.TenantId = c.TenantId)
+                OR EXISTS (SELECT 1 FROM pos_campaign_branch b
+                            WHERE b.CampaignId = c.Id AND b.TenantId = c.TenantId
+                              AND b.BranchDetailId = ?))
+         ORDER BY o.SortOrder ASC`,
+    },
+
+    POS_OFFER_REDEMPTION: {
+      INSERT: `
+        INSERT INTO pos_offer_redemption
+          (Id, TenantId, OfferId, CampaignId, BranchDetailId, BillId,
+           TransactionDetailLogId, PosCustomerId, LineRef, ItemId, Quantity,
+           DiscountAmount, BillGrossAmount, RedeemedOn, RedeemedBy,
+           Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, 1, NOW(), ?, ?)`,
+      // "Has this customer already used it today" — checked before a redemption
+      // is allowed, which is why the (TenantId, ContactDetailId, OfferId) index
+      // exists.
+      // How many times THIS customer has already taken THIS offer today.
+      // Batched per offer rather than per line: one read answers the whole cart.
+      COUNT_FOR_CUSTOMER_TODAY: `
+        SELECT OfferId, COUNT(*) AS n FROM pos_offer_redemption
+         WHERE TenantId = ? AND PosCustomerId = ?
+           AND Active = 1 AND DATE(RedeemedOn) = CURDATE()
+         GROUP BY OfferId`,
+      SELECT_BY_CAMPAIGN: `
+        SELECT r.*, o.Name AS OfferName, i.Name AS ItemName,
+               l.TransactionNo, b.BranchName,
+               pc.Name AS CustomerName, pc.Phone AS CustomerPhone, pc.Visits AS CustomerVisits
+          FROM pos_offer_redemption r
+          JOIN pos_offer o ON o.Id = r.OfferId
+          LEFT JOIN itemdetail i ON i.Id = r.ItemId
+          LEFT JOIN transactiondetaillog l ON l.Id = r.TransactionDetailLogId
+          LEFT JOIN branchdetail b ON b.Id = r.BranchDetailId
+          LEFT JOIN pos_customer pc ON pc.Id = r.PosCustomerId
+         WHERE r.TenantId = ? AND r.CampaignId = ? AND r.Active = 1
+         ORDER BY r.RedeemedOn DESC
+         LIMIT 200`,
+      // What the campaign cost, and what it moved. Cost is exact; the revenue
+      // beside it is what those bills came to, never presented as uplift.
+      SUMMARY: `
+        SELECT COUNT(*) AS Redemptions,
+               COUNT(DISTINCT r.TransactionDetailLogId) AS Bills,
+               COALESCE(SUM(r.DiscountAmount), 0) AS GivenAway,
+               COALESCE(SUM(DISTINCT_BILLS.Gross), 0) AS RevenueOnThoseBills
+          FROM pos_offer_redemption r
+          LEFT JOIN (SELECT DISTINCT TransactionDetailLogId, BillGrossAmount AS Gross
+                       FROM pos_offer_redemption
+                      WHERE TenantId = ? AND CampaignId = ? AND Active = 1) DISTINCT_BILLS
+                 ON DISTINCT_BILLS.TransactionDetailLogId = r.TransactionDetailLogId
+         WHERE r.TenantId = ? AND r.CampaignId = ? AND r.Active = 1`,
+      BY_OFFER: `
+        SELECT r.OfferId, o.Name AS OfferName,
+               COUNT(*) AS Redemptions,
+               COALESCE(SUM(r.DiscountAmount), 0) AS GivenAway,
+               COUNT(DISTINCT r.TransactionDetailLogId) AS Bills
+          FROM pos_offer_redemption r
+          JOIN pos_offer o ON o.Id = r.OfferId
+         WHERE r.TenantId = ? AND r.CampaignId = ? AND r.Active = 1
+         GROUP BY r.OfferId, o.Name
+         ORDER BY GivenAway DESC`,
+      BY_HOUR: `
+        SELECT HOUR(r.RedeemedOn) AS Hour, COUNT(*) AS Redemptions
+          FROM pos_offer_redemption r
+         WHERE r.TenantId = ? AND r.CampaignId = ? AND r.Active = 1
+         GROUP BY HOUR(r.RedeemedOn)
+         ORDER BY Hour ASC`,
+    },
+
     POS_SETTING: {
       SELECT_ALL: 'SELECT * FROM pos_setting WHERE TenantId = ? ORDER BY BranchDetailId, SettingKey',
       SELECT_BY_BRANCH: 'SELECT SettingKey, SettingValue FROM pos_setting WHERE TenantId = ? AND BranchDetailId = ?',

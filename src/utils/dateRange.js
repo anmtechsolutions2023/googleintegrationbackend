@@ -123,23 +123,73 @@ const bucketExpression = (bucket, column) =>
  * @param {string} column
  * @returns {string} SQL fragment, prefixed with AND, or ''.
  */
-const weekendPredicate = (weekendOnly, column) =>
-  (weekendOnly ? ` AND WEEKDAY(${column}) IN (5, 6)` : '');
+/**
+ * Minutes to add to a UTC DATETIME to read it as local wall-clock time.
+ * Computed from the app's own offset, so it tracks the machine the reports run
+ * on — the same clock resolveRange() built the day from.
+ */
+const localOffsetMinutes = () => -new Date().getTimezoneOffset();
 
 /**
- * Widens a date-only range to cover whole days on a DATETIME column.
- * `BETWEEN '2026-08-01' AND '2026-08-02'` on a DATETIME silently excludes
- * everything after midnight on the last day.
+ * ` AND WEEKDAY(...) IN (5, 6)` — Saturday and Sunday.
+ *
+ * `utc: true` for a column the pool wrote in UTC (see toDateTimeBounds). A
+ * Saturday 11pm sale in IST is a SUNDAY instant in UTC, so asking WEEKDAY() of
+ * the raw column moves late trade onto the wrong day of the week — the same
+ * frame mistake as pasting midnight onto a local date. The interval is a number
+ * this module computes, never user input, so interpolating it is safe.
+ *
+ * @param {boolean} weekendOnly
+ * @param {string} column
+ * @param {{utc?: boolean}} [opts]
+ */
+const weekendPredicate = (weekendOnly, column, { utc = false } = {}) => {
+  if (!weekendOnly) return '';
+  const expr = utc ? `${column} + INTERVAL ${localOffsetMinutes()} MINUTE` : column;
+  return ` AND WEEKDAY(${expr}) IN (5, 6)`;
+};
+
+/** 'YYYY-MM-DD HH:MM:SS' in UTC — the frame the pool writes DATETIMEs in. */
+const asUtcStamp = (date) => date.toISOString().slice(0, 19).replace('T', ' ');
+
+/** The instant a local calendar day starts, or the last second it ends. */
+const localEdge = (isoDate, endOfDay) => {
+  const [y, m, d] = String(isoDate).split('-').map(Number);
+  return endOfDay
+    ? new Date(y, m - 1, d, 23, 59, 59)
+    : new Date(y, m - 1, d, 0, 0, 0);
+};
+
+/**
+ * Widens a date-only range to cover whole days on a DATETIME column, IN THE
+ * FRAME THAT COLUMN IS STORED IN.
+ *
+ * Two things are true at once here, and both are correct:
+ *   - a business day is LOCAL. "Today's takings" means the restaurant's today,
+ *     which is why TransactionDate is written as the local calendar date.
+ *   - a DATETIME is an INSTANT, and the pool is pinned to UTC (config/db.js
+ *     sets timezone: 'Z'), so every Timestamp lands in UTC.
+ *
+ * Pasting ` 00:00:00` onto a local date and comparing it to a UTC column
+ * silently compares two different clocks. East of Greenwich the offset eats the
+ * end of the day: at IST (+5:30) a sale rung up at 20:00 local is stored as
+ * 14:30 UTC — but one rung at 20:00 on the 27th is stored on the 27th while its
+ * own invoice is dated the 28th. The Z-report and the sales report then land on
+ * DIFFERENT DAYS for the whole of dinner service, and never reconcile.
+ *
+ * So the local day is converted to the UTC instants that bracket it.
+ *
  * @param {{from:string,to:string}} range
  * @returns {{from:string,to:string}}
  */
 const toDateTimeBounds = ({ from, to }) => ({
-  from: `${from} 00:00:00`,
-  to: `${to} 23:59:59`,
+  from: asUtcStamp(localEdge(from, false)),
+  to: asUtcStamp(localEdge(to, true)),
 });
 
 module.exports = {
   resolveRange,
+  localOffsetMinutes,
   bucketExpression,
   weekendPredicate,
   toDateTimeBounds,
