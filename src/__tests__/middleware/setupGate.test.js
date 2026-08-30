@@ -56,7 +56,6 @@ describe('isAllowedPath', () => {
     '/api/itemdetails',
     '/api/pos/orders',
     '/api/admin/users',
-    '/api/reports',
   ])('blocks %s', (path) => {
     expect(isAllowedPath(path)).toBe(false);
   });

@@ -1291,24 +1291,6 @@ describe('A cashier, with only the scopes their role grants', () => {
   it('cannot read the audit trail', () => refused('/api/audit/logs'));
 });
 
-describe('Reports — who may read them', () => {
-  it('GET /api/reports — no token → 401', async () => {
-    expect((await request(server).get('/api/reports')).status).toBe(401);
-  });
-
-  it('GET /api/reports — tenant admin → not refused', async () => {
-    mockConnection.execute.mockImplementation(defaultExecuteImpl);
-    mockConnection.query.mockImplementation(defaultQueryImpl);
-    const res = await request(server).get('/api/reports').set('Authorization', adminToken());
-    expect(res.status).toBe(200);
-  });
-
-  it('GET /api/reports — a user with neither REPORTS:READ nor administration → 403', async () => {
-    const res = await request(server).get('/api/reports').set('Authorization', guestToken());
-    expect(res.status).toBe(403);
-  });
-});
-
 describe('Master-data bootstrap — POST /api/master-data/bootstrap', () => {
   const validBootstrap = () => ({
     organization: { Name: 'ANM Tech' },
@@ -1731,7 +1713,6 @@ describe('First-time setup gate', () => {
     '/api/itemdetails',
     '/api/organizations',
     '/api/pos/orders',
-    '/api/reports',
   ])('blocks %s with 403 TENANT_SETUP_REQUIRED', async (path) => {
     const res = await request(server).get(path).set('Authorization', gatedAdminToken());
     expect(res.status).toBe(403);

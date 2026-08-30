@@ -10,7 +10,6 @@ const adminRoutes = require('../modules/admin/admin.routes');
 const appconfigRoutes = require('../modules/appconfig/appconfig.routes');
 const invitationRoutes = require('../modules/invitation/invitation.routes');
 const tenantRoutes = require('../modules/tenant/tenant.routes');
-const reportsRoutes = require('../modules/reports/reports.routes');
 const dataRoutes = require('../modules/data/data.routes');
 const auditRoutes = require('../modules/audit/audit.routes');
 const userRoutes = require('../modules/user/user.routes');
@@ -114,7 +113,6 @@ const registerRoutes = (app) => {
   app.use('/api/tenants', tenantRoutes);
 
   // Reports module - Reports and billing data
-  app.use('/api/reports', reportsRoutes);
 
   // Data module - Admin settings and general data access
   app.use('/api/data', dataRoutes);
@@ -300,7 +298,6 @@ const registerRoutes = (app) => {
         { name: 'onboarding', path: '/api/onboarding' },
         { name: 'admin', path: '/api/admin' },
         { name: 'tenants', path: '/api/tenants' },
-        { name: 'reports', path: '/api/reports' },
         { name: 'data', path: '/api/data' },
         { name: 'audit', path: '/api/audit' },
         { name: 'user', path: '/api/user' },
