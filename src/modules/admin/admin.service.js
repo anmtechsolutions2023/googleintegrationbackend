@@ -148,7 +148,7 @@ const provisionTenantIam = async (
 const approveRequest = (requestId, tenantId, roleIds, reviewerEmail) =>
   withTransaction(async (conn) => {
     const [reqRows] = await conn.execute(
-      'SELECT * FROM onboarding_requests WHERE id = ? AND status = "PENDING"',
+      "SELECT * FROM onboarding_requests WHERE id = ? AND status = 'PENDING'",
       [requestId]
     );
     if (reqRows.length === 0) {
@@ -216,7 +216,7 @@ const autoApproveOnboarding = ({ email, name, googleSub }) =>
 const rejectRequest = (requestId, reason, reviewerEmail) =>
   withConnection(async (conn) => {
     const [reqRows] = await conn.execute(
-      'SELECT * FROM onboarding_requests WHERE id = ? AND status = "PENDING"',
+      "SELECT * FROM onboarding_requests WHERE id = ? AND status = 'PENDING'",
       [requestId]
     );
     if (reqRows.length === 0) {
@@ -236,7 +236,7 @@ const rejectRequest = (requestId, reason, reviewerEmail) =>
 const reopenRequest = (requestId, reviewerEmail) =>
   withConnection(async (conn) => {
     const [reqRows] = await conn.execute(
-      'SELECT * FROM onboarding_requests WHERE id = ? AND status = "REJECTED"',
+      "SELECT * FROM onboarding_requests WHERE id = ? AND status = 'REJECTED'",
       [requestId]
     );
     if (reqRows.length === 0) {

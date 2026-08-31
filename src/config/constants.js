@@ -1848,9 +1848,9 @@ module.exports = {
       SELECT_ALL:
         'SELECT * FROM onboarding_requests WHERE 1=1',
       INSERT:
-        'INSERT INTO onboarding_requests (id, email, name, google_sub, status) VALUES (?, ?, ?, ?, "PENDING")',
+        "INSERT INTO onboarding_requests (id, email, name, google_sub, status) VALUES (?, ?, ?, ?, 'PENDING')",
       UPDATE_NOTE:
-        'UPDATE onboarding_requests SET request_note = ?, updated_at = NOW() WHERE email = ? AND status = "PENDING"',
+        "UPDATE onboarding_requests SET request_note = ?, updated_at = NOW() WHERE email = ? AND status = 'PENDING'",
       UPDATE_STATUS:
         'UPDATE onboarding_requests SET status = ?, rejection_reason = ?, reviewed_by = ?, reviewed_at = NOW(), tenant_id = ?, updated_at = NOW() WHERE id = ?',
     },
@@ -2182,11 +2182,11 @@ module.exports = {
         WHERE ut.user_email = ? AND ut.tenant_id = ?
         GROUP BY ut.user_email, ut.tenant_id`,
       INSERT_USER_TENANT:
-        'INSERT INTO user_tenants (id, user_email, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, 0, 0, 1, "ACTIVE")',
+        "INSERT INTO user_tenants (id, user_email, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, 0, 0, 1, 'ACTIVE')",
       // Parametrized variant: caller supplies is_admin / is_super_admin flags.
       // Used by the shared provisioning core (manual approve → 0/0, auto-approve → 1/0).
       INSERT_USER_TENANT_FLAGS:
-        'INSERT INTO user_tenants (id, user_email, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, ?, ?, 1, "ACTIVE")',
+        "INSERT INTO user_tenants (id, user_email, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, ?, ?, 1, 'ACTIVE')",
       UPDATE_STATUS:
         'UPDATE user_tenants SET is_active = ?, status = ?, updated_at = NOW() WHERE user_email = ? AND tenant_id = ?',
       DELETE:
