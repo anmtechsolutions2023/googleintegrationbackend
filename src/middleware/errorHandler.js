@@ -19,6 +19,33 @@ class HttpError extends Error {
 const errorHandler = (err, req, res, next) => {
   logger.error('Unhandled error:', err)
 
+  // Handle an unreachable database. These are socket-level failures raised
+  // before any query runs — a wrong host or port, a firewall or IP allowlist
+  // blocking us, or the server being down. They carry no statusCode of their
+  // own, so without this branch they land in whatever default the caller set and
+  // get reported as an application error, which sends debugging in exactly the
+  // wrong direction.
+  const DB_UNREACHABLE_CODES = [
+    'ETIMEDOUT',
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'EHOSTUNREACH',
+    'ECONNRESET',
+    'PROTOCOL_CONNECTION_LOST',
+  ]
+  if (DB_UNREACHABLE_CODES.includes(err.code)) {
+    logger.error(
+      `Database unreachable (${err.code}) — check DB_HOST/DB_PORT, the provider's IP allowlist, and that the service is running.`
+    )
+    return res.status(MESSAGES.HTTP_STATUS.SERVICE_UNAVAILABLE).json({
+      success: false,
+      status: MESSAGES.HTTP_STATUS.SERVICE_UNAVAILABLE,
+      message: MESSAGES.ERROR.DB_UNAVAILABLE,
+      error: 'DB_UNAVAILABLE',
+      code: 'DB_UNAVAILABLE',
+    })
+  }
+
   // Handle MySQL duplicate entry error (ER_DUP_ENTRY, errno 1062)
   if (err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
     const match = err.message?.match(/for key '([^']+)'/)

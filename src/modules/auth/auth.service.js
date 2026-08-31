@@ -9,6 +9,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../../config/db');
 const config = require('../../config/config');
 const { logger } = require('../../utils/logger');
+const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const { QUERIES, STATUSES, SCOPES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('../../config/constants');
 const { GOOGLE_CLIENT_ID, JWT_SECRET } = require('../../config/envConfig');
@@ -48,8 +49,12 @@ const validateGoogleToken = async (idToken) => {
     return { email: payload.email, name: payload.name, googleId: payload.sub };
   } catch (error) {
     logger.error('Google token validation error:', error.message);
-    throw new Error(
-      `${MESSAGES.ERROR.GOOGLE_VALIDATION_FAILED}${error.message}`
+    // 401 belongs here, on the one failure that genuinely means "we do not
+    // accept this caller". Everything further down the sign-in path is an
+    // infrastructure failure and must not borrow this status.
+    throw new HttpError(
+      `${MESSAGES.ERROR.GOOGLE_VALIDATION_FAILED}${error.message}`,
+      MESSAGES.HTTP_STATUS.UNAUTHORIZED
     );
   }
 };

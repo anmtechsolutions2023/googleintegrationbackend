@@ -8,8 +8,13 @@ module.exports = {
   // ============================================
   DATABASE: {
     // Connection pool settings
-    CONNECTION_LIMIT: 10, // Maximum number of connections in the pool
+    // Per *instance*, not per deployment: every warm serverless instance holds
+    // its own pool, so this multiplies by concurrency. Managed plans cap total
+    // connections (Aiven's smaller MySQL plans in the low tens), and exhausting
+    // that trades timeouts for "too many connections" — which is harder to read.
+    CONNECTION_LIMIT: 2, // Maximum number of connections in the pool
     QUEUE_LIMIT: 0, // Maximum number of connection requests to queue (0 = unlimited)
+    CONNECT_TIMEOUT_MS: 5000, // Give up on an unreachable host well before the platform does
 
     // Cache configuration
     CACHE_TTL: 5 * 60 * 1000, // User tenants cache time-to-live: 5 minutes (in milliseconds)

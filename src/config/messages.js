@@ -37,6 +37,7 @@ module.exports = {
     USER_NOT_ASSOCIATED: 'User is not associated with any active tenant.',
     INVALID_PAYLOAD: 'Invalid token payload or missing email.',
     GOOGLE_VALIDATION_FAILED: 'Google token validation failed: ',
+    DB_UNAVAILABLE: 'Database is unreachable. Please try again shortly.',
     AUDIT_LOGS_FAILED: 'Failed to retrieve audit logs.',
     TENANT_SWITCH_FAILED: 'Tenant switch failed',
     FORBIDDEN_NO_SCOPES: 'Forbidden. No active permissions found for tenant ',
@@ -156,6 +157,10 @@ module.exports = {
     // from 500: nothing failed, the capability simply is not built for that
     // portal yet.
     NOT_IMPLEMENTED: 501,
+    // The app is fine but a dependency it cannot run without (the database) is
+    // unreachable. Distinct from 500: nothing in our code failed, and a retry
+    // may well succeed.
+    SERVICE_UNAVAILABLE: 503,
   },
   // JWT Configuration
   JWT: {

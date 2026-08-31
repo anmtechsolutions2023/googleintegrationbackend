@@ -16,6 +16,13 @@ const { assertSchemaIsCurrent } = require('./src/config/schemaCheck');
 
 const app = express();
 
+// Serverless platforms and reverse proxies terminate TLS and forward the real
+// client IP in X-Forwarded-For. Without this, express-rate-limit refuses to read
+// that header (ERR_ERL_FORWARDED_HEADER) and every rate-limited route throws.
+// 1 = trust exactly one hop, the platform's own proxy; trusting all hops would
+// let a caller spoof the header and dodge the limiter.
+app.set('trust proxy', 1);
+
 // Middleware setup
 app.use(cors());
 app.use(express.json());

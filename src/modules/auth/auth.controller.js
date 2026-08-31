@@ -90,7 +90,12 @@ const googleAuth = async (req, res, next) => {
       AUDIT_CATEGORIES.AUTH, 'ERROR', null
     );
 
-    error.statusCode = error.statusCode || MESSAGES.HTTP_STATUS.UNAUTHORIZED;
+    // Deliberately no default status here. This catch sees Google rejections
+    // (already 401 from the service) alongside database and audit failures; a
+    // blanket 401 relabelled every outage as a rejected user, and the UI dutifully
+    // reported "user does not exist" for a database that was simply unreachable.
+    // Errors without a status fall through to the handler's 500, or its 503 for
+    // an unreachable database.
     next(error);
   }
 };
