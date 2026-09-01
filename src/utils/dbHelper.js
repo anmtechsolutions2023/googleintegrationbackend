@@ -18,7 +18,16 @@ const { HttpError } = require('../middleware/errorHandler');
  *   return rows;
  * });
  */
-const withConnection = async (callback) => {
+const withConnection = async (callback, existingConn) => {
+  // Borrowing the caller's connection is what keeps a request to one connection.
+  // A helper that always took its own turned every caller holding one into a
+  // two-connection request, and a pool where each request needs two deadlocks as
+  // soon as enough requests overlap: all of them hold one and wait for another
+  // that nobody is left to release. mysql2 has no acquire timeout, so that wait
+  // never ends. Callers already inside a connection pass it; everyone else does
+  // not and is unaffected.
+  if (existingConn) return callback(existingConn);
+
   const connection = await db.getConnection();
   try {
     return await callback(connection);

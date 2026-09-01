@@ -92,7 +92,13 @@ describe('findAndGetPermissions — guest path auto-approval', () => {
 
     // Drives setupCompleted:false into the JWT, so the new tenant admin is sent
     // straight to the setup wizard rather than into an unconfigured app.
-    expect(setupRepository.isSetupComplete).toHaveBeenCalledWith('new-tenant');
+    // The connection is passed rather than left out: this lookup must borrow the
+    // sign-in's own connection instead of taking a second one from the pool, or
+    // concurrent logins deadlock it.
+    expect(setupRepository.isSetupComplete).toHaveBeenCalledWith(
+      'new-tenant',
+      mockConn
+    );
     expect(result.setupCompleted).toBe(false);
   });
 

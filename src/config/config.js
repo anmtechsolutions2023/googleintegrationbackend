@@ -12,8 +12,26 @@ module.exports = {
     // its own pool, so this multiplies by concurrency. Managed plans cap total
     // connections (Aiven's smaller MySQL plans in the low tens), and exhausting
     // that trades timeouts for "too many connections" — which is harder to read.
-    CONNECTION_LIMIT: 2, // Maximum number of connections in the pool
-    QUEUE_LIMIT: 0, // Maximum number of connection requests to queue (0 = unlimited)
+    //
+    // Sized against the server's real ceiling, which is what this multiplies
+    // into: Aiven reports max_connections = 46, and a few of those belong to the
+    // provider's own monitoring rather than to us. At 4 per instance roughly ten
+    // instances can be warm at once before the server is the thing that refuses,
+    // which is far more headroom than this workload needs. Raise it only after
+    // re-checking max_connections — the pool is per instance, so this number is
+    // multiplied by however many Vercel has warm, never a total.
+    //
+    // A request must cost exactly ONE connection for this arithmetic to hold.
+    // Helpers that take a second one while the caller holds the first deadlock
+    // the pool once enough requests overlap, at any size: everyone holds one and
+    // waits for another that nobody is left to release, and mysql2 has no
+    // acquire timeout to break the tie. withConnection takes an existing
+    // connection for exactly this reason — pass yours down rather than nesting.
+    CONNECTION_LIMIT: 4, // Maximum number of connections in the pool
+    // Bounded so an overloaded instance fails fast instead of queueing without
+    // limit. Unlimited queueing turns a busy minute into requests that hang until
+    // the caller times out, which reads as an outage; a refusal reads as load.
+    QUEUE_LIMIT: 20, // Maximum number of connection requests to queue
     CONNECT_TIMEOUT_MS: 5000, // Give up on an unreachable host well before the platform does
 
     // Cache configuration

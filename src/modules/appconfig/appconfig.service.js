@@ -13,19 +13,19 @@ const AUTO_APPROVE_KEY = ONBOARDING.SETTING_AUTO_APPROVE;
  * @param {string} key
  * @returns {Promise<string|null>}
  */
-const getSetting = (key) =>
+const getSetting = (key, existingConn) =>
   withConnection(async (conn) => {
     const [rows] = await conn.execute(QUERIES.APP_SETTINGS.SELECT_BY_KEY, [key]);
     return rows.length > 0 ? rows[0].setting_value : null;
-  });
+  }, existingConn);
 
 /**
  * True when onboarding auto-approval is enabled. Defaults to false when the
  * setting has never been written (safe default — no behavior change).
  * @returns {Promise<boolean>}
  */
-const isAutoApproveEnabled = async () => {
-  const value = await getSetting(AUTO_APPROVE_KEY);
+const isAutoApproveEnabled = async (existingConn) => {
+  const value = await getSetting(AUTO_APPROVE_KEY, existingConn);
   return value === 'true';
 };
 

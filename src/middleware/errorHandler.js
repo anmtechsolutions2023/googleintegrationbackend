@@ -33,6 +33,21 @@ const errorHandler = (err, req, res, next) => {
     'ECONNRESET',
     'PROTOCOL_CONNECTION_LOST',
   ]
+  // The pool refusing a waiter is overload, not breakage: mysql2 raises a plain
+  // Error with no code when queueLimit is hit, so the message is the only handle.
+  if (err.message === 'Queue limit reached.' || err.message === 'No connections available.') {
+    logger.error(
+      'Connection pool exhausted — every pooled connection is busy and the wait queue is full.'
+    )
+    return res.status(MESSAGES.HTTP_STATUS.SERVICE_UNAVAILABLE).json({
+      success: false,
+      status: MESSAGES.HTTP_STATUS.SERVICE_UNAVAILABLE,
+      message: MESSAGES.ERROR.DB_BUSY,
+      error: 'DB_BUSY',
+      code: 'DB_BUSY',
+    })
+  }
+
   if (DB_UNREACHABLE_CODES.includes(err.code)) {
     logger.error(
       `Database unreachable (${err.code}) — check DB_HOST/DB_PORT, the provider's IP allowlist, and that the service is running.`

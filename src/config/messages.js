@@ -38,6 +38,7 @@ module.exports = {
     INVALID_PAYLOAD: 'Invalid token payload or missing email.',
     GOOGLE_VALIDATION_FAILED: 'Google token validation failed: ',
     DB_UNAVAILABLE: 'Database is unreachable. Please try again shortly.',
+    DB_BUSY: 'The server is busy right now. Please try again in a moment.',
     AUDIT_LOGS_FAILED: 'Failed to retrieve audit logs.',
     TENANT_SWITCH_FAILED: 'Tenant switch failed',
     FORBIDDEN_NO_SCOPES: 'Forbidden. No active permissions found for tenant ',

@@ -94,7 +94,9 @@ const getScopesForTenant = async (connection, tenantId, userEmail) => {
  * @returns {Promise<Object>} User permissions object.
  */
 const findAndGetPermissions = async (req, userData) => {
-  const connection = await db.getConnection();
+  // `let`, not `const`: the auto-approval path below gives this connection back
+  // before opening its own transaction, then takes a fresh one.
+  let connection = await db.getConnection();
   try {
     const { email, name, googleId } = userData;
 
@@ -151,7 +153,10 @@ const findAndGetPermissions = async (req, userData) => {
         permissions,
         roles: roleRows.map((r) => r.role_name),
         associatedTenants: tenantRows,
-        setupCompleted: await setupRepository.isSetupComplete(tenantId),
+        setupCompleted: await setupRepository.isSetupComplete(
+          tenantId,
+          connection
+        ),
       };
     }
 
@@ -172,9 +177,21 @@ const findAndGetPermissions = async (req, userData) => {
       // Brand-new email. When the super-admin has enabled auto-approval, provision
       // the user immediately into a new tenant as its TENANT_ADMIN and return an
       // APPROVED result. Any failure falls back to the manual PENDING flow below.
-      if (await appConfig.isAutoApproveEnabled()) {
+      if (await appConfig.isAutoApproveEnabled(connection)) {
         try {
-          await adminService.autoApproveOnboarding({ email, name, googleSub: googleId });
+          // autoApproveOnboarding opens its own transaction, which cannot share
+          // this connection. Hold both at once and a single sign-in costs two
+          // connections — the shape that deadlocks the pool under concurrent
+          // logins. Give this one back for the duration and take a fresh one
+          // after; nothing below depends on session state, only on committed
+          // rows, which is why swapping connections here is safe.
+          connection.release();
+          connection = null;
+          try {
+            await adminService.autoApproveOnboarding({ email, name, googleSub: googleId });
+          } finally {
+            connection = await db.getConnection();
+          }
 
           // Re-read the now-provisioned user exactly like the provisioned path.
           const [newTenantRows] = await connection.execute(
@@ -209,7 +226,10 @@ const findAndGetPermissions = async (req, userData) => {
             associatedTenants: newTenantRows,
             // A freshly auto-provisioned tenant has no tenant_setup row, so this
             // resolves to false and the new tenant admin lands in the wizard.
-            setupCompleted: await setupRepository.isSetupComplete(newTenantId),
+            setupCompleted: await setupRepository.isSetupComplete(
+              newTenantId,
+              connection
+            ),
           };
         } catch (autoErr) {
           logger.error(
@@ -251,7 +271,7 @@ const findAndGetPermissions = async (req, userData) => {
     logger.error('Multi-Tenant Auth Error:', error);
     throw error;
   } finally {
-    connection.release();
+    if (connection) connection.release();
   }
 };
 
@@ -306,7 +326,10 @@ const switchTenantPermissions = async (
       associatedTenants: tenantRows,
       // Resolved for the TARGET tenant: a user who belongs to a set-up tenant
       // and an unfinished one must be gated after switching into the latter.
-      setupCompleted: await setupRepository.isSetupComplete(targetTenantId),
+      setupCompleted: await setupRepository.isSetupComplete(
+        targetTenantId,
+        connection
+      ),
     };
   } catch (error) {
     logger.error('Switch Tenant Error:', error);

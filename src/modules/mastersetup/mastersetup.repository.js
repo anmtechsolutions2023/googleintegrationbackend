@@ -15,13 +15,13 @@ const { QUERIES, TENANT_SETUP } = require('../../config/constants');
  * @param {string} tenantId - Tenant ID.
  * @returns {Promise<Object|null>} Row, or null when the tenant has no row yet.
  */
-const findByTenant = (tenantId) =>
+const findByTenant = (tenantId, existingConn) =>
   withConnection(async (conn) => {
     const [rows] = await conn.execute(QUERIES.TENANT_SETUP.SELECT_BY_TENANT, [
       tenantId,
     ]);
     return rows.length > 0 ? rows[0] : null;
-  });
+  }, existingConn);
 
 /**
  * Returns the setup status for a tenant in the shape the API exposes.
@@ -46,9 +46,9 @@ const getStatus = async (tenantId) => {
  * @param {string} tenantId - Tenant ID.
  * @returns {Promise<boolean>}
  */
-const isSetupComplete = async (tenantId) => {
+const isSetupComplete = async (tenantId, existingConn) => {
   if (!tenantId) return false;
-  const row = await findByTenant(tenantId);
+  const row = await findByTenant(tenantId, existingConn);
   return !!row && row.status === TENANT_SETUP.STATUS_COMPLETED;
 };
 
