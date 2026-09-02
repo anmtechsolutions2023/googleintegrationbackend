@@ -21,6 +21,8 @@ const mockConn = {
     const q = String(sql);
     if (/FROM user_tenants WHERE user_email/.test(q)) return [state.membership];
     if (/SELECT id FROM roles WHERE tenant_id/.test(q)) return [state.tenantRoles];
+    // roleGuard resolves the NAMES behind the ids, to refuse SUPER_ADMIN.
+    if (/SELECT name FROM roles WHERE tenant_id/.test(q)) return [state.roleNames];
     if (/FROM tenant_invitations\s*\n?\s*WHERE email/.test(q) || /SELECT id, tenant_id, email, is_admin/.test(q)) {
       return [state.claimable];
     }
@@ -56,6 +58,7 @@ beforeEach(() => {
   state = {
     membership: [], tenantRoles: [{ id: 'role-1' }, { id: 'role-2' }],
     claimable: [], inviteRoles: [], list: [],
+    roleNames: [{ name: 'POS_MANAGER' }],
     insertDuplicates: false, membershipExists: false, revokeHits: true,
   };
 });

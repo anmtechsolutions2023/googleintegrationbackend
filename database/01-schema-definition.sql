@@ -114,7 +114,11 @@ CREATE TABLE features (
     feature_id          CHAR(36)                        NOT NULL,
     name                VARCHAR(100)                    NOT NULL,
     feature_short_name  VARCHAR(50)                     NOT NULL,
-    scope               ENUM('READ', 'WRITE', 'UPDATE') NOT NULL,
+    -- APPROVE is a real action, not a synonym for WRITE: the person who raises
+    -- an expense must not be the one who signs it off. It was missing from this
+    -- enum while the seed inserted it, so MySQL silently stored '' and
+    -- EXPENSE:APPROVE became a permission nobody could ever hold.
+    scope               ENUM('READ', 'WRITE', 'UPDATE', 'APPROVE') NOT NULL,
     display_name        VARCHAR(100)                    NULL,
     category            VARCHAR(50)                     NULL,
     description         TEXT                            NULL,

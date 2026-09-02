@@ -122,6 +122,7 @@ describe('approveRequest', () => {
     mockConn.execute
       .mockResolvedValueOnce([[{ id: 'req-1', email: 'u@t.com', name: 'U' }]])
       .mockResolvedValueOnce([[]])                    // no existing user_tenant
+      .mockResolvedValueOnce([[{ name: 'POS_MANAGER' }]]) // roleGuard: resolve role names
       .mockResolvedValueOnce([{ affectedRows: 1 }])  // INSERT user_tenant
       .mockResolvedValueOnce([{ affectedRows: 1 }])  // INSERT user_role
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE onboarding_requests
@@ -163,14 +164,20 @@ describe('autoApproveOnboarding', () => {
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT role
       .mockResolvedValueOnce([[]])                  // features for role (none)
       .mockResolvedValueOnce([[]])                  // dup user_tenant check → none
+      .mockResolvedValueOnce([[{ name: 'POS_MANAGER' }]]) // roleGuard: resolve role names
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT user_tenant (flags)
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT user_role
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE onboarding status
     const result = await service.autoApproveOnboarding({ email: 'new@user.com', name: 'New', googleSub: 'g1' });
     expect(result).toMatchObject({ roleName: 'TENANT_ADMIN' });
     expect(result.tenantId).toBeDefined();
-    // user_tenant insert (call index 5) carries is_admin=1
-    expect(mockConn.execute.mock.calls[5][1][3]).toBe(1);
+    // Located by query rather than by call index: the index moved when the role
+    // guard added a lookup ahead of the insert, and it will move again.
+    const { QUERIES } = require('../../config/constants');
+    const insert = mockConn.execute.mock.calls
+      .find(([sql]) => sql === QUERIES.ADMIN_USERS.INSERT_USER_TENANT_FLAGS);
+    expect(insert[1][3]).toBe(1);   // is_admin
+    expect(insert[1][4]).toBe(0);   // is_super_admin — never 1 from any request
   });
 
   it('throws when the template tenant lacks the TENANT_ADMIN role', async () => {

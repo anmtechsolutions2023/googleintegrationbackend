@@ -4,6 +4,9 @@
 
 const { logger } = require('../../utils/logger');
 const MESSAGES = require('../../config/messages');
+const { successResponse } = require('../../utils/responseHelper');
+const { asyncHandler } = require('../../utils/controllerHelper');
+const capability = require('./capability.service');
 
 /**
  * Handles user logout.
@@ -28,6 +31,22 @@ const logout = async (req, res, next) => {
   }
 };
 
+/**
+ * What the signed-in user can do, in words.
+ *
+ * Reads the caller's OWN scopes off the verified token — there is no parameter
+ * to tamper with, so this needs no scope of its own beyond being signed in.
+ * Gating it would be self-defeating: the people least able to guess what their
+ * access means are the ones with the least of it.
+ */
+const capabilities = [
+  asyncHandler(async (req, res) => {
+    const data = await capability.resolveForScopes(req.user?.scopes || []);
+    successResponse(res, 'Capabilities retrieved', data);
+  }),
+];
+
 module.exports = {
   logout,
+  capabilities,
 };

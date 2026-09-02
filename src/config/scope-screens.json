@@ -1,0 +1,106 @@
+{
+  "generatedFrom": "src/config/navigation.js",
+  "subjects": [
+    {
+      "subject": "admin",
+      "group": "Analytics & Admin",
+      "screens": [
+        "People & Access"
+      ]
+    },
+    {
+      "subject": "ASSET",
+      "group": "Setup",
+      "screens": [
+        "Asset Categories",
+        "Asset Register"
+      ]
+    },
+    {
+      "subject": "EXPENSE",
+      "group": "Setup",
+      "screens": [
+        "Expense Categories"
+      ]
+    },
+    {
+      "subject": "INVENTORY",
+      "group": "Setup",
+      "screens": [
+        "Inventory"
+      ]
+    },
+    {
+      "subject": "POS_BILLING",
+      "group": "Finance",
+      "screens": [
+        "Cash Sessions"
+      ]
+    },
+    {
+      "subject": "POS_CONFIG",
+      "group": "Setup",
+      "screens": [
+        "Menu Master",
+        "Food Types",
+        "Channels",
+        "Portals",
+        "Variants",
+        "Floors",
+        "POS Settings",
+        "Receipt Format",
+        "Campaigns"
+      ]
+    },
+    {
+      "subject": "POS_CRM",
+      "group": "CRM",
+      "screens": [
+        "Customers",
+        "Feedback"
+      ]
+    },
+    {
+      "subject": "POS_KITCHEN",
+      "group": "Operations",
+      "screens": [
+        "Kitchen (KDS)"
+      ]
+    },
+    {
+      "subject": "POS_OPS",
+      "group": "Operations",
+      "screens": [
+        "Token Queue",
+        "Online Orders",
+        "Live Tracking",
+        "Expense Categories",
+        "Expenses"
+      ]
+    },
+    {
+      "subject": "POS_ORDER",
+      "group": "Operations",
+      "screens": [
+        "Billing & KOT",
+        "Tables"
+      ]
+    },
+    {
+      "subject": "POS_REPORTS",
+      "group": "Analytics & Admin",
+      "screens": [
+        "Reports"
+      ]
+    },
+    {
+      "subject": "TRANSACTIONS",
+      "group": "Finance",
+      "screens": [
+        "Finance",
+        "Returns",
+        "Ledger"
+      ]
+    }
+  ]
+}

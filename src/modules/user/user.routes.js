@@ -14,4 +14,17 @@ const userController = require('./user.controller');
  */
 router.post('/logout', authenticateToken, auditLog(AUDIT_CATEGORIES.GENERAL, 'INFO', AUDIT_ACTIONS.LOGOUT), userController.logout);
 
+/**
+ * GET /api/user/capabilities
+ *
+ * The caller's own access, described. Authenticated only and deliberately not
+ * scoped: it reads scopes off the verified token, exposes nothing about anybody
+ * else, and the users who most need their access explained — somebody waiting
+ * in the Approvals queue, a new cashier — are precisely the ones holding the
+ * fewest scopes to gate it on.
+ */
+router.get('/capabilities', authenticateToken,
+  auditLog(AUDIT_CATEGORIES.GENERAL, 'DEBUG', 'Viewed own capabilities'),
+  ...userController.capabilities);
+
 module.exports = router;

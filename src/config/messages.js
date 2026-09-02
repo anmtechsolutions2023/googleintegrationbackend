@@ -134,6 +134,8 @@ module.exports = {
     CROSS_TENANT_FORBIDDEN: 'Forbidden. You may only act on your own tenancy.',
     SELF_SUSPEND_FORBIDDEN: 'You cannot suspend or deactivate your own account.',
     SELF_REMOVE_FORBIDDEN: 'You cannot remove your own account.',
+    ROLE_NOT_GRANTABLE:
+      'The platform super admin role cannot be assigned. There is one platform owner, established at install. Use Restaurant administrator to give somebody full control of this tenancy.',
     TENANT_DELETE_SELF_FORBIDDEN:
       'You cannot delete the tenancy you are signed in to. Sign in to another tenancy first.',
     TENANT_DELETE_SUPER_ADMIN:

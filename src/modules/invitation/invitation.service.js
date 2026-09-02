@@ -20,6 +20,7 @@ const { QUERIES, INVITATION } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const { logger } = require('../../utils/logger');
+const { assertRolesGrantable } = require('../../utils/roleGuard');
 
 /** Emails are compared case-insensitively; the same account may sign in either way. */
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
@@ -62,6 +63,11 @@ const createInvitation = ({ tenantId, email, roleIds = [], isAdmin = false, prof
     if (existing.length > 0) {
       throw new HttpError(MESSAGES.ERROR.INVITE_ALREADY_MEMBER, 409);
     }
+
+    // An invitation carries its roles from creation, so this is the moment the
+    // grant is actually decided — refusing it at acceptance would strand a
+    // PENDING row nobody can ever claim.
+    await assertRolesGrantable(conn, roleIds, tenantId);
 
     // Roles must belong to the inviting tenancy. Without this check an admin
     // could name a role id belonging to another tenant and grant its

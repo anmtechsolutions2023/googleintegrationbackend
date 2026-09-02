@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { withConnection, withTransaction } = require('../../utils/dbHelper');
 const { QUERIES, ONBOARDING } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
+const { assertRolesGrantable } = require('../../utils/roleGuard');
 const MESSAGES = require('../../config/messages');
 const { logger } = require('../../utils/logger');
 const {
@@ -63,11 +64,18 @@ const provisionApprovedUser = async (
     throw new HttpError(MESSAGES.ERROR.USER_ALREADY_EXISTS, 409);
   }
 
+  // Refused before the membership exists, so a rejected approval leaves nothing
+  // behind. Covers manual approval and auto-approval both — they share this core.
+  await assertRolesGrantable(conn, roleIds, tenantId);
+
   await conn.execute(QUERIES.ADMIN_USERS.INSERT_USER_TENANT_FLAGS, [
     uuidv4(),
     email,
     tenantId,
     isAdmin ? 1 : 0,
+    // is_super_admin is hardcoded 0 here and in invitation acceptance: the
+    // platform owner is established by the seed and no request can create a
+    // second one.
     0,
   ]);
 
@@ -359,6 +367,10 @@ const updateUserRoles = (email, tenantId, roleIds, adminEmail) =>
       [email, tenantId]
     );
     if (check.length === 0) throw new HttpError('User not found in tenant.', 404);
+
+    // Checked BEFORE the existing set is cleared — a refused save must not leave
+    // the user with no roles at all.
+    await assertRolesGrantable(conn, roleIds, tenantId);
 
     await conn.execute(QUERIES.USER_ROLES.DELETE_ALL_FOR_USER, [email, tenantId]);
     for (const roleId of roleIds) {

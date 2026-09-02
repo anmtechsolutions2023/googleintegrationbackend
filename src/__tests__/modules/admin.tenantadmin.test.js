@@ -29,6 +29,8 @@ const mockConn = {
     executed.push({ sql: String(sql), params });
     if (/SELECT is_super_admin/.test(String(sql))) return [state.member];
     if (/SELECT id FROM user_tenants/.test(String(sql))) return [state.member];
+    // roleGuard resolves the NAMES behind the role ids, to refuse SUPER_ADMIN.
+    if (/SELECT name FROM roles WHERE tenant_id/.test(String(sql))) return [state.roleNames];
     if (/COUNT\(DISTINCT tenant_id\)/.test(String(sql))) return [[{ total: state.tenants.length }]];
     if (/FROM user_tenants ut/.test(String(sql))) return [state.tenants];
     return [{ affectedRows: 1 }];
@@ -48,7 +50,7 @@ beforeEach(() => {
   executed.length = 0;
   mockConn.execute.mockClear();
   mockConn.query.mockClear();
-  state = { member: [{ is_super_admin: 0 }], tenants: [] };
+  state = { member: [{ is_super_admin: 0 }], tenants: [], roleNames: [{ name: 'POS_MANAGER' }] };
 });
 
 const flagUpdate = () => executed.find((e) => /SET is_admin/.test(e.sql));
