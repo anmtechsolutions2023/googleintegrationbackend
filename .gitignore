@@ -3,6 +3,7 @@
 
 # Environment Variables (CRITICAL: DO NOT COMMIT CREDENTIALS)
 .env
+frontend/index.html
 
 # Logs and Build Files
 npm-debug.log*
