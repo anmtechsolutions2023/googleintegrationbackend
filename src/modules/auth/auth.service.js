@@ -68,21 +68,21 @@ const validateGoogleToken = async (idToken) => {
  * @returns {Promise<string[]>} Deduplicated array of scope strings.
  */
 const getScopesForTenant = async (connection, tenantId, userEmail) => {
-  // Path B (existing): direct feature grants via tenant_features
-  const [directRows] = await connection.execute(QUERIES.PERMISSIONS.SELECT, [
+  // One statement covers both grant paths — direct feature grants (Path B) and
+  // role-based ones (Path A). They used to be two awaits here, which on a single
+  // connection means two serialised round trips on the request a user is sitting
+  // and waiting through; see PERMISSIONS.SELECT_ALL_GRANTS.
+  const [rows] = await connection.execute(QUERIES.PERMISSIONS.SELECT_ALL_GRANTS, [
+    tenantId,
+    userEmail,
     tenantId,
     userEmail,
   ]);
-  const directScopes = directRows.map((r) => `${r.feature_short_name}:${r.scope}`);
 
-  // Path A (new): role-based grants via user_roles → role_permissions → features
-  const [roleRows] = await connection.execute(
-    QUERIES.ROLE_SCOPES.SELECT_BY_USER_TENANT,
-    [userEmail, tenantId]
-  );
-  const roleScopes = roleRows.map((r) => `${r.feature_short_name}:${r.scope}`);
-
-  return [...new Set([...directScopes, ...roleScopes])];
+  // UNION has already deduplicated by (scope, feature_short_name); the Set
+  // guards the composite string the caller actually consumes, in case two
+  // distinct rows ever format to the same scope.
+  return [...new Set(rows.map((r) => `${r.feature_short_name}:${r.scope}`))];
 };
 
 /**

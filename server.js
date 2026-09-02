@@ -11,6 +11,7 @@ const { errorHandler } = require('./src/middleware/errorHandler');
 const { logger } = require('./src/utils/logger');
 const MESSAGES = require('./src/config/messages');
 const { PORT } = require('./src/config/envConfig');
+const config = require('./src/config/config');
 const { registerRoutes } = require('./src/config/routes');
 const { assertSchemaIsCurrent } = require('./src/config/schemaCheck');
 
@@ -24,7 +25,10 @@ const app = express();
 app.set('trust proxy', 1);
 
 // Middleware setup
-app.use(cors());
+// maxAge lets the browser cache the preflight instead of paying for an extra
+// (potentially cold) OPTIONS invocation ahead of every JSON POST. See
+// config.CORS.PREFLIGHT_MAX_AGE_S for why this is worth a line of config.
+app.use(cors({ maxAge: config.CORS.PREFLIGHT_MAX_AGE_S }));
 app.use(express.json());
 
 // Swagger UI — browse at http://localhost:3001/api-docs

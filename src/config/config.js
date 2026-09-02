@@ -39,6 +39,26 @@ module.exports = {
   },
 
   // ============================================
+  // CORS CONFIGURATION
+  // ============================================
+  CORS: {
+    // How long a browser may reuse one preflight result.
+    //
+    // Every login POST carries a JSON body, so it is not a "simple" request and
+    // the browser insists on an OPTIONS preflight first. Unanswered, that
+    // preflight is a second cold serverless invocation that the real request
+    // then waits behind — measured at ~0.9s for the OPTIONS plus ~1.0s of the
+    // POST sitting blocked, close to two seconds spent before the login request
+    // is allowed to leave the browser.
+    //
+    // Caching the result removes that pair from every subsequent sign-in for
+    // the life of the entry. 7200 is not arbitrary: Chromium clamps this header
+    // to two hours, so a larger number buys nothing there while still being
+    // honoured by browsers with a longer ceiling.
+    PREFLIGHT_MAX_AGE_S: 7200,
+  },
+
+  // ============================================
   // RATE LIMITING CONFIGURATION
   // ============================================
   RATE_LIMIT: {

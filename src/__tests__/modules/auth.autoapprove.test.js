@@ -56,8 +56,10 @@ describe('findAndGetPermissions — guest path auto-approval', () => {
       .mockResolvedValueOnce([[]])  // ONBOARDING_REQUESTS.SELECT_BY_EMAIL → none
       // re-read provisioned user_tenants
       .mockResolvedValueOnce([[{ tenant_id: 'new-tenant', is_admin: 1, is_super_admin: 0 }]])
-      .mockResolvedValueOnce([[]])  // getScopesForTenant → direct grants (none)
-      .mockResolvedValueOnce([[{ feature_short_name: 'MASTER_DATA', scope: 'READ' }]]) // role scopes
+      // getScopesForTenant → ONE statement, the UNION of direct and role grants.
+      // A fresh auto-approved tenant has no direct grants, so everything here
+      // arrives via the TENANT_ADMIN role.
+      .mockResolvedValueOnce([[{ feature_short_name: 'MASTER_DATA', scope: 'READ' }]])
       .mockResolvedValueOnce([[{ role_name: 'TENANT_ADMIN' }]]); // USER_ROLES
 
     const result = await findAndGetPermissions(req, userData);
@@ -84,8 +86,7 @@ describe('findAndGetPermissions — guest path auto-approval', () => {
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ tenant_id: 'new-tenant', is_admin: 1, is_super_admin: 0 }]])
-      .mockResolvedValueOnce([[]])
-      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[]])  // getScopesForTenant → no grants either way
       .mockResolvedValueOnce([[{ role_name: 'TENANT_ADMIN' }]]);
 
     const result = await findAndGetPermissions(req, userData);

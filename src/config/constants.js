@@ -93,6 +93,39 @@ module.exports = {
           AND ut.tenant_id = ?
           AND ut.user_email = ?
       `,
+
+      // Both grant paths in one statement: direct feature grants (Path B) and
+      // role-based grants (Path A), which SELECT above and
+      // ROLE_SCOPES.SELECT_BY_USER_TENANT read separately.
+      //
+      // Sign-in needs the union of the two and nothing else, and it ran them as
+      // two awaits on one connection — which mysql2 serialises, so it cost two
+      // full round trips to the database on the one request a user actually
+      // waits through. UNION (not UNION ALL) folds that into one and dedupes
+      // server-side, which is what the caller did in JS afterwards anyway.
+      //
+      // The two halves stay separately addressable above: they are read on
+      // their own elsewhere, and keeping them lets a grant that appears in the
+      // wrong half still be traced to the path that produced it.
+      SELECT_ALL_GRANTS: `
+        SELECT f.scope, f.feature_short_name
+        FROM user_tenants ut
+        JOIN tenant_features tf ON ut.id = tf.user_tenants_id
+        JOIN features f ON tf.feature_id = f.feature_id
+        WHERE f.is_active = TRUE
+          AND tf.is_active = TRUE
+          AND ut.is_active = TRUE
+          AND ut.tenant_id = ?
+          AND ut.user_email = ?
+        UNION
+        SELECT f.scope, f.feature_short_name
+        FROM user_roles ur
+        JOIN role_permissions rp ON ur.role_id = rp.role_id
+        JOIN features f ON rp.feature_id = f.feature_id
+        WHERE ur.tenant_id = ?
+          AND ur.user_email = ?
+          AND f.is_active = TRUE
+      `,
     },
 
     // Audit Logs Queries
