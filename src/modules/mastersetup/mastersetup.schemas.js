@@ -35,10 +35,38 @@ const contactSchema = Joi.object({
   LastName: Joi.string().max(100).trim().required(),
 }).unknown(true);
 
+// Invoice numbering, decided by the API rather than asked for during signup.
+//
+// The wizard no longer collects any of this: "where should your invoice numbers
+// start" is a question a new tenant cannot answer and does not care about, and
+// the two boxes were the last thing standing between them and a working branch.
+//
+// The ROW is still mandatory and cannot be dropped —
+// branchdetail.TransactionTypeConfigId and transactiontype.TransactionTypeConfigId
+// are both NOT NULL foreign keys onto transactiontypeconfig, so a branch cannot
+// exist without a numbering series behind it. Only who chooses the values moved.
+//
+// INV-{0000} is the format the numbering service already parses: it reads the
+// {0000} placeholder as the zero-padding width, so the first document issued is
+// INV-0001. Starting at 1 matches `Number(StartCounterNo) || 1`, the fallback
+// transactionNumber.service applies when the column is unreadable.
+const NUMBERING_DEFAULTS = {
+  START_COUNTER_NO: 1,
+  FORMAT: 'INV-{0000}',
+  // getOrCreateByTagNameTx finds an existing series BY this tag, which is what
+  // makes a repeated run of the wizard reuse the series instead of colliding
+  // with UNIQUE(TagName, TenantId). Changing it silently creates a second one.
+  TAG_NAME: 'Onboarding',
+};
+
+// Every key defaulted, so a caller may send all of it, some of it, or none.
 const transactionTypeConfigSchema = Joi.object({
-  StartCounterNo: Joi.number().integer().min(0).required(),
-  Format: Joi.string().max(100).trim().required(),
-  TagName: Joi.string().max(100).trim().required(),
+  StartCounterNo: Joi.number()
+    .integer()
+    .min(0)
+    .default(NUMBERING_DEFAULTS.START_COUNTER_NO),
+  Format: Joi.string().max(100).trim().default(NUMBERING_DEFAULTS.FORMAT),
+  TagName: Joi.string().max(100).trim().default(NUMBERING_DEFAULTS.TAG_NAME),
 }).unknown(true);
 
 // A tax group is a CONTAINER — the rates live in TaxTypes mapped into it, and a
@@ -92,7 +120,15 @@ const branchSchema = Joi.object({
   Name: Joi.string().max(200).trim().required(),
   address: addressSchema.required(),
   contact: contactSchema.required(),
-  transactionTypeConfig: transactionTypeConfigSchema.required(),
+  // Absent from the wizard's payload entirely now. Spelled out rather than
+  // `.default({})` because Joi applies a key's own defaults only to an object
+  // that is PRESENT — an empty default would reach the orchestrator with no
+  // TagName and fail getOrCreateByTagNameTx's reuse lookup.
+  transactionTypeConfig: transactionTypeConfigSchema.default({
+    StartCounterNo: NUMBERING_DEFAULTS.START_COUNTER_NO,
+    Format: NUMBERING_DEFAULTS.FORMAT,
+    TagName: NUMBERING_DEFAULTS.TAG_NAME,
+  }),
 }).unknown(true);
 
 const costInfoSchema = Joi.object({
@@ -116,4 +152,4 @@ const bootstrapSchema = Joi.object({
   item: itemSchema.optional(),
 });
 
-module.exports = { bootstrapSchema };
+module.exports = { bootstrapSchema, NUMBERING_DEFAULTS };

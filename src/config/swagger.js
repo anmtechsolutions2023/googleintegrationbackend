@@ -1346,7 +1346,7 @@ const swaggerSpec = {
         properties: {
           organization: { type: 'object', required: ['Name'], properties: { Name: { type: 'string' } } },
           branch: {
-            type: 'object', required: ['Name', 'address', 'contact', 'transactionTypeConfig'],
+            type: 'object', required: ['Name', 'address', 'contact'],
             properties: {
               Name: { type: 'string' },
               address: {
@@ -1367,8 +1367,13 @@ const swaggerSpec = {
               },
               contact: { type: 'object', required: ['FirstName', 'LastName'], properties: { FirstName: { type: 'string' }, LastName: { type: 'string' } } },
               transactionTypeConfig: {
-                type: 'object', required: ['StartCounterNo', 'Format', 'TagName'],
-                properties: { StartCounterNo: { type: 'integer' }, Format: { type: 'string' }, TagName: { type: 'string' } },
+                type: 'object',
+                description: 'Invoice numbering. OPTIONAL IN FULL — omit the whole object and the branch is created numbering from INV-0001 on a series tagged "Onboarding", which is what the setup wizard now does. The row itself is not optional (branchdetail.TransactionTypeConfigId and transactiontype.TransactionTypeConfigId are NOT NULL foreign keys onto it), so the API fills in whatever you leave out; it never stores a blank series. Send a value to override any single field.',
+                properties: {
+                  StartCounterNo: { type: 'integer', minimum: 0, default: 1, description: 'Where the sequence begins.' },
+                  Format: { type: 'string', maxLength: 100, default: 'INV-{0000}', example: 'INV-{0000}', description: 'A {0000} placeholder sets the zero-padding width, so INV-{0000} issues INV-0001. Without a placeholder the whole string is a literal prefix.' },
+                  TagName: { type: 'string', maxLength: 100, default: 'Onboarding', description: 'Names the series. A second run of the wizard REUSES the series with this tag rather than creating another.' },
+                },
               },
             },
           },

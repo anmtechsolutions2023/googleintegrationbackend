@@ -152,6 +152,11 @@ CREATE TABLE audit_logs (
     log_level    ENUM('DEBUG','INFO','WARN','ERROR')         NOT NULL DEFAULT 'INFO',
     category     VARCHAR(50)                                 NULL,
     resource_id  VARCHAR(255)                                NULL,
+    -- Human-readable context for the action, when the id alone cannot carry it.
+    -- Deleting a tenancy is the case that forced this: the id belongs in
+    -- resource_id, but "whose tenancy was it" is only knowable BEFORE the sweep
+    -- runs, and afterwards there is nothing left to join to.
+    details      VARCHAR(500)                                NULL,
     timestamp    DATETIME                                    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (log_id),
     INDEX idx_audit_level     (log_level),

@@ -131,13 +131,13 @@ module.exports = {
     // Audit Logs Queries
     AUDIT_LOGS: {
       SELECT:
-        'SELECT log_id, tenant_id, user_email, action, status, ip_address, log_level, category, resource_id, timestamp FROM audit_logs WHERE 1=1',
+        'SELECT log_id, tenant_id, user_email, action, status, ip_address, log_level, category, resource_id, details, timestamp FROM audit_logs WHERE 1=1',
       COUNT:
         'SELECT COUNT(*) AS total FROM audit_logs WHERE 1=1',
       INSERT:
-        'INSERT INTO audit_logs (tenant_id, user_email, action, status, ip_address, log_level, category, resource_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO audit_logs (tenant_id, user_email, action, status, ip_address, log_level, category, resource_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       INSERT_MIDDLEWARE:
-        'INSERT INTO audit_logs (tenant_id, user_email, action, status, ip_address, log_level, category, resource_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO audit_logs (tenant_id, user_email, action, status, ip_address, log_level, category, resource_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     },
 
     // Tax Type Queries
@@ -2115,6 +2115,166 @@ module.exports = {
     },
 
     // Admin User Management Queries
+    // ── Tenant deletion ──────────────────────────────────────────────────────
+    // Erasing a tenancy is 72 statements in a fixed order, and the order is not
+    // a preference: 97 of the schema's 111 foreign keys are RESTRICT, there is
+    // no `tenants` table, and no foreign key anywhere points at a tenant id. So
+    // the database cascades NOTHING from a tenancy — run a wave early and the
+    // whole transaction aborts on a constraint instead of deleting anything.
+    //
+    // Held as an ordered list rather than 72 named keys because the ORDER is the
+    // contract; a name per statement would invite reading them as independent.
+    // Waves come from the schema's own dependency graph — regenerate rather than
+    // hand-edit if a table is added, and add it to the right wave.
+    TENANT_DELETE: {
+      // Who is in this tenancy. Read BEFORE the sweep — user_tenants is deleted
+      // in wave 2 and is the only record of membership that exists.
+      SELECT_MEMBERS: 'SELECT user_email FROM user_tenants WHERE tenant_id = ?',
+
+      // Of those, the ones for whom this is their ONLY tenancy. They are the
+      // people whose platform-level onboarding record has to be cleared as well;
+      // anybody with another membership keeps theirs untouched.
+      //
+      // Read before the sweep for the same reason as above.
+      SELECT_SOLE_MEMBERS: `
+        SELECT ut.user_email
+        FROM user_tenants ut
+        WHERE ut.tenant_id = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM user_tenants other
+            WHERE other.user_email = ut.user_email
+              AND other.tenant_id <> ut.tenant_id
+          )`,
+
+      // onboarding_requests is UNIQUE(email) — ONE row per person for the whole
+      // platform, not one per tenancy. That is why it is deleted by email and
+      // never by tenant_id: clearing it for somebody who still belongs to
+      // another tenancy would erase a live user's record, and NOT clearing it
+      // for somebody who no longer belongs anywhere leaves a stale APPROVED row
+      // that auth's guest path reads on their next sign-in — returning
+      // onboardingStatus APPROVED with a null tenantId, and (because
+      // auto-approval sits in the `else` of that same check) permanently
+      // preventing them from ever being provisioned again.
+      DELETE_ONBOARDING_BY_EMAIL: 'DELETE FROM onboarding_requests WHERE email = ?',
+
+      // Does this tenancy exist at all? Distinguishes a 404 from a delete that
+      // silently affected nothing. Membership is the right test because it is
+      // also what the All Tenants directory lists — a tenancy the caller cannot
+      // see there is one they cannot address here, and a garbage id is refused
+      // before 72 DELETE statements run against it.
+      COUNT_MEMBERSHIPS: 'SELECT COUNT(*) AS total FROM user_tenants WHERE tenant_id = ?',
+
+      // Super-admin rank lives on the MEMBERSHIP (user_tenants.is_super_admin),
+      // not on the person, so deleting the tenancy a super admin belongs to
+      // deletes their rank with it. If that was their only membership the
+      // platform loses a super admin permanently, and possibly its last one.
+      // Refused outright rather than warned about — the same instinct as
+      // SUPER_ADMIN_IMMUTABLE, applied one level up.
+      COUNT_SUPER_ADMINS: `
+        SELECT COUNT(*) AS total FROM user_tenants
+        WHERE tenant_id = ? AND is_super_admin = TRUE`,
+
+      // Who ran this tenancy. TENANT:ADMIN is derived from is_admin rather than
+      // from a role, so this flag IS the answer. Read before the sweep for the
+      // same reason as the membership queries above: afterwards the rows are
+      // gone and the audit trail could never say whose tenancy it was.
+      SELECT_ADMINS: `
+        SELECT user_email FROM user_tenants
+        WHERE tenant_id = ? AND is_admin = TRUE
+        ORDER BY user_email`,
+
+      // The sweep. Executed in array order, all inside ONE transaction.
+      SWEEP: [
+        // ── Wave 1 ─ Leaf rows: ledger lines, POS movements, join tables, role grants.
+        //   app_settings: GLOBAL table — never deleted
+        //   onboarding_requests: handled by email, not by tenant — see clearOnboardingFor()
+        //   role_permissions: removed by ON DELETE CASCADE
+        //   tenant_features: removed by ON DELETE CASCADE
+        //   tenant_invitation_roles: removed by ON DELETE CASCADE
+        'DELETE FROM asset WHERE TenantId = ?',
+        'DELETE FROM audit_logs WHERE tenant_id = ?',
+        'DELETE FROM batchdetail WHERE TenantId = ?',
+        'DELETE FROM branchusergroupmapper WHERE TenantId = ?',
+        'DELETE FROM notification_outbox WHERE TenantId = ?',
+        'DELETE FROM paymentbreakup WHERE TenantId = ?',
+        'DELETE FROM pos_bill_order WHERE TenantId = ?',
+        'DELETE FROM pos_campaign_branch WHERE TenantId = ?',
+        'DELETE FROM pos_cash_session WHERE TenantId = ?',
+        'DELETE FROM pos_expense WHERE TenantId = ?',
+        'DELETE FROM pos_feedback WHERE TenantId = ?',
+        'DELETE FROM pos_item_meta_channel WHERE TenantId = ?',
+        'DELETE FROM pos_item_meta_variant WHERE TenantId = ?',
+        'DELETE FROM pos_kot WHERE TenantId = ?',
+        'DELETE FROM pos_loyalty_ledger WHERE TenantId = ?',
+        'DELETE FROM pos_offer_redemption WHERE TenantId = ?',
+        'DELETE FROM pos_online_order WHERE TenantId = ?',
+        'DELETE FROM pos_portal_credential WHERE TenantId = ?',
+        'DELETE FROM pos_portal_event WHERE TenantId = ?',
+        'DELETE FROM pos_portal_listing WHERE TenantId = ?',
+        'DELETE FROM pos_setting WHERE TenantId = ?',
+        'DELETE FROM pos_token WHERE TenantId = ?',
+        'DELETE FROM pos_token_counter WHERE TenantId = ?',
+        'DELETE FROM taxgrouptaxtypemapper WHERE TenantId = ?',
+        'DELETE FROM tenant_setup WHERE tenant_id = ?',
+        'DELETE FROM transactionitemdetail WHERE TenantId = ?',
+        'DELETE FROM transactiontypeconversionmapper WHERE TenantId = ?',
+        'DELETE FROM uomfactor WHERE TenantId = ?',
+        'DELETE FROM user_roles WHERE tenant_id = ?',
+        // ── Wave 2 ─ Documents and the IAM spine. user_tenants dies here — members are read BEFORE this runs.
+        //   features: GLOBAL table — never deleted
+        'DELETE FROM TaxTypes WHERE TenantId = ?',
+        'DELETE FROM asset_category WHERE TenantId = ?',
+        'DELETE FROM expense_category WHERE TenantId = ?',
+        'DELETE FROM paymentdetail WHERE TenantId = ?',
+        'DELETE FROM paymentmodetransactiondetail WHERE TenantId = ?',
+        'DELETE FROM paymentreceivedtype WHERE TenantId = ?',
+        'DELETE FROM pos_bill WHERE TenantId = ?',
+        'DELETE FROM pos_item_meta WHERE TenantId = ?',
+        'DELETE FROM pos_offer WHERE TenantId = ?',
+        'DELETE FROM pos_portal_branch WHERE TenantId = ?',
+        'DELETE FROM pos_variant WHERE TenantId = ?',
+        'DELETE FROM roles WHERE tenant_id = ?',
+        'DELETE FROM tenant_invitations WHERE tenant_id = ?',
+        'DELETE FROM transactiontypebaseconversion WHERE TenantId = ?',
+        'DELETE FROM user_tenants WHERE tenant_id = ?',
+        // ── Wave 3 ─ Items, orders, portals, the ledger head.
+        'DELETE FROM itemdetail WHERE TenantId = ?',
+        'DELETE FROM pos_campaign WHERE TenantId = ?',
+        'DELETE FROM pos_food_type WHERE TenantId = ?',
+        'DELETE FROM pos_order WHERE TenantId = ?',
+        'DELETE FROM pos_portal WHERE TenantId = ?',
+        'DELETE FROM transactiondetaillog WHERE TenantId = ?',
+        // ── Wave 4 ─ Catalogue and floor master data.
+        'DELETE FROM UOM WHERE TenantId = ?',
+        'DELETE FROM categorydetail WHERE TenantId = ?',
+        'DELETE FROM costinfo WHERE TenantId = ?',
+        'DELETE FROM paymentmode WHERE TenantId = ?',
+        'DELETE FROM pos_channel WHERE TenantId = ?',
+        'DELETE FROM pos_customer WHERE TenantId = ?',
+        'DELETE FROM pos_return_reason WHERE TenantId = ?',
+        'DELETE FROM pos_table WHERE TenantId = ?',
+        'DELETE FROM transactiontype WHERE TenantId = ?',
+        'DELETE FROM transactiontypestatus WHERE TenantId = ?',
+        // ── Wave 5 ─ Account bases, floors, tax groups.
+        'DELETE FROM accounttypebase WHERE TenantId = ?',
+        'DELETE FROM pos_floor WHERE TenantId = ?',
+        'DELETE FROM taxgroup WHERE TenantId = ?',
+        // ── Wave 6 ─ The branch itself.
+        'DELETE FROM branchdetail WHERE TenantId = ?',
+        // ── Wave 7 ─ Organisation, address, contact, numbering series.
+        'DELETE FROM addressdetail WHERE TenantId = ?',
+        'DELETE FROM contactdetail WHERE TenantId = ?',
+        'DELETE FROM organizationdetail WHERE TenantId = ?',
+        'DELETE FROM transactiontypeconfig WHERE TenantId = ?',
+        // ── Wave 8 ─ Address types and the location mapper.
+        'DELETE FROM contactaddresstype WHERE TenantId = ?',
+        'DELETE FROM mapproviderlocationmapper WHERE TenantId = ?',
+        // ── Wave 9 ─ Geography roots.
+        'DELETE FROM locationdetail WHERE TenantId = ?',
+        'DELETE FROM mapprovider WHERE TenantId = ?',
+      ],
+    },
+
     ADMIN_USERS: {
       // One row per person: who they are (the profile that used to live in
       // pos_staff), what they may do (roles), and whether they can administer.
@@ -3255,6 +3415,7 @@ module.exports = {
     ACTIVATE_USER:            'Activated user account',
     SUSPEND_USER:             'Suspended user account',
     REMOVE_USER:              'Removed user from tenant',
+    DELETE_TENANT:            'Deleted tenancy and all of its data',
     // Role management
     VIEW_ROLES:               'Viewed roles list',
     CREATE_ROLE:              'Created new role',

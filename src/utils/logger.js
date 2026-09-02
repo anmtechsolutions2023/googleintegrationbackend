@@ -44,7 +44,10 @@ const captureAudit = async (
   status,
   category = AUDIT_CATEGORIES.AUTH,
   level = 'INFO',
-  resourceId = null
+  resourceId = null,
+  // Free-text context the id cannot carry — e.g. whose tenancy was deleted,
+  // read before the rows that would answer it were removed.
+  details = null
 ) => {
   const ip =
     req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
@@ -62,7 +65,8 @@ const captureAudit = async (
       ip,
       level,
       category,
-      resourceId || null,
+      resourceId,
+      details || null,
     ]);
     logger.info('Audit captured', { tenantId, email, action, status, category, level });
   } catch (err) {

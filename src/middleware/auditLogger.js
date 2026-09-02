@@ -16,7 +16,7 @@ const getIp = (req) =>
 
 const writeAuditLog = async (tid, email, action, status, ip, level, category) => {
   await db.execute(QUERIES.AUDIT_LOGS.INSERT_MIDDLEWARE, [
-    tid || null, email, action, status, ip, level, category, null,
+    tid || null, email, action, status, ip, level, category, null, null,
   ]);
 };
 

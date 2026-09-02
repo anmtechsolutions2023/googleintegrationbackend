@@ -522,6 +522,92 @@ const removeUser = async (email, tenantId, actorEmail) => {
   });
 };
 
+/**
+ * Erases a tenancy and everything recorded under it.
+ *
+ * Hard delete, by design and by request: 72 tables in the fixed dependency
+ * order of QUERIES.TENANT_DELETE.SWEEP, all inside one transaction, so the
+ * tenancy either goes completely or not at all. There is no soft-delete flag
+ * to fall back on and no export — the ledger, the bills and the audit trail go
+ * with it.
+ *
+ * WHAT HAPPENS TO THE PEOPLE. There is no `users` table in this schema: a
+ * person exists only as user_tenants rows behind a Google account nobody here
+ * owns. So "delete the tenancy but not the multi-tenant user" is not a special
+ * case that needs building — removing the membership IS disassociation, and it
+ * is all the sweep can do. The only thing that genuinely differs between a
+ * member who belongs elsewhere and one who does not is a single row in
+ * onboarding_requests, which is keyed UNIQUE(email) and therefore platform-wide
+ * rather than per tenancy. See DELETE_ONBOARDING_BY_EMAIL for what leaving it
+ * behind does to somebody's next sign-in.
+ *
+ * Both member lists are read BEFORE the sweep, because user_tenants is deleted
+ * partway through it and is the only record of who belonged here.
+ *
+ * @param {string} tenantId - The tenancy to erase.
+ * @param {string} actorTenantId - The caller's own tenancy, refused as a target.
+ * @returns {Promise<Object>} { tenantId, membersRemoved, accountsReset, disassociated }
+ */
+const deleteTenant = async (tenantId, actorTenantId) => {
+  // Refused before the transaction opens: deleting the tenancy the caller is
+  // signed in to revokes the membership their own token is built from, halfway
+  // through the request that is doing it. Same instinct as assertNotSelfRemove,
+  // one level up.
+  if (tenantId === actorTenantId) {
+    throw new HttpError(MESSAGES.ERROR.TENANT_DELETE_SELF_FORBIDDEN, 403);
+  }
+
+  return withTransaction(async (conn) => {
+    const [[{ total: memberships }]] = await conn.execute(
+      QUERIES.TENANT_DELETE.COUNT_MEMBERSHIPS, [tenantId]
+    );
+    if (memberships === 0) {
+      throw new HttpError(MESSAGES.ERROR.TENANT_NOT_FOUND, 404);
+    }
+
+    const [[{ total: superAdmins }]] = await conn.execute(
+      QUERIES.TENANT_DELETE.COUNT_SUPER_ADMINS, [tenantId]
+    );
+    if (superAdmins > 0) {
+      throw new HttpError(MESSAGES.ERROR.TENANT_DELETE_SUPER_ADMIN, 403);
+    }
+
+    // Read the membership picture while user_tenants still exists.
+    const [members] = await conn.execute(
+      QUERIES.TENANT_DELETE.SELECT_MEMBERS, [tenantId]
+    );
+    const [soleMembers] = await conn.execute(
+      QUERIES.TENANT_DELETE.SELECT_SOLE_MEMBERS, [tenantId]
+    );
+    // Who ran it. Captured here because the sweep below removes the only rows
+    // that could answer it, and an audit trail that cannot say whose tenancy
+    // was erased is not much of a trail.
+    const [admins] = await conn.execute(
+      QUERIES.TENANT_DELETE.SELECT_ADMINS, [tenantId]
+    );
+
+    for (const sql of QUERIES.TENANT_DELETE.SWEEP) {
+      await conn.execute(sql, [tenantId]);
+    }
+
+    // Only the people this tenancy was the last of. Anybody still holding a
+    // membership elsewhere keeps their onboarding record exactly as it was.
+    for (const { user_email: email } of soleMembers) {
+      await conn.execute(QUERIES.TENANT_DELETE.DELETE_ONBOARDING_BY_EMAIL, [email]);
+    }
+
+    const result = {
+      tenantId,
+      membersRemoved: members.length,
+      accountsReset: soleMembers.length,
+      disassociated: members.length - soleMembers.length,
+      adminEmails: admins.map((a) => a.user_email),
+    };
+    logger.warn('Tenancy deleted', result);
+    return result;
+  });
+};
+
 // ─── ROLE MANAGEMENT ──────────────────────────────────────────────────────────
 
 const listRoles = (tenantId) =>
@@ -664,6 +750,7 @@ module.exports = {
   updateUserStatus,
   updateUserStatusCrossTenant,
   removeUser,
+  deleteTenant,
   setTenantAdmin,
   updateUserProfile,
   listRoles,

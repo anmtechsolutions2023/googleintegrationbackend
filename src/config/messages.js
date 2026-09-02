@@ -23,6 +23,7 @@ module.exports = {
     USER_ROLES_UPDATED: 'User roles updated successfully.',
     USER_STATUS_UPDATED: 'User status updated successfully.',
     USER_REMOVED: 'User removed from tenant successfully.',
+    TENANT_DELETED: 'Tenancy and all of its data deleted.',
     FEATURE_CREATED: 'Feature created successfully.',
     FEATURE_UPDATED: 'Feature updated successfully.',
     FEATURE_DELETED: 'Feature deleted successfully.',
@@ -133,6 +134,11 @@ module.exports = {
     CROSS_TENANT_FORBIDDEN: 'Forbidden. You may only act on your own tenancy.',
     SELF_SUSPEND_FORBIDDEN: 'You cannot suspend or deactivate your own account.',
     SELF_REMOVE_FORBIDDEN: 'You cannot remove your own account.',
+    TENANT_DELETE_SELF_FORBIDDEN:
+      'You cannot delete the tenancy you are signed in to. Sign in to another tenancy first.',
+    TENANT_DELETE_SUPER_ADMIN:
+      'This tenancy has a super admin in it. Super-admin access is held on the membership, so deleting the tenancy would remove it — move or demote that account first.',
+    TENANT_NOT_FOUND: 'No such tenancy.',
   },
   INFO: {
     SERVER_RUNNING: 'Server is running on port ',

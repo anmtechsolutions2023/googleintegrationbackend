@@ -76,6 +76,14 @@ router.get('/tenants',
 router.get('/tenants/:tenantId/users',
   ...superAdminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USERS), ...c.listUsersInTenant);
 
+// Erase a tenancy and everything under it. SUPER ADMIN ONLY, and it stays that
+// way permanently: a tenant admin destroying their own tenancy is not a feature,
+// and the target is read from the path rather than the token precisely because
+// this acts on somebody else's. The service refuses the caller's own tenancy,
+// a tenancy holding a super admin, and an id that is not in the directory.
+router.delete('/tenants/:tenantId',
+  ...superAdminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'WARN', AUDIT_ACTIONS.DELETE_TENANT), ...c.deleteTenant);
+
 // ── User management ───────────────────────────────────────────────────────────
 router.get('/users',
   ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USERS), ...c.listUsers);

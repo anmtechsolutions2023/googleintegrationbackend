@@ -13,7 +13,7 @@ const schemas = require('./admin.schemas');
 const MESSAGES = require('../../config/messages');
 const { captureAudit } = require('../../utils/logger');
 const { HttpError } = require('../../middleware/errorHandler');
-const { STATUSES, AUDIT_CATEGORIES, SCOPES } = require('../../config/constants');
+const { STATUSES, AUDIT_CATEGORIES, AUDIT_ACTIONS, SCOPES } = require('../../config/constants');
 
 // ─── ONBOARDING ───────────────────────────────────────────────────────────────
 
@@ -301,6 +301,39 @@ const removeUser = [
 
 // ─── ROLE MANAGEMENT ──────────────────────────────────────────────────────────
 
+// Erases a tenancy. Super admin only (see the route), and the tenancy comes
+// from the path rather than the token — this is deliberately a cross-tenant
+// operation, and the service refuses the caller's own tenancy.
+//
+// The audit row is attributed to the ACTOR's tenancy, not the deleted one: the
+// sweep wipes audit_logs for the target, so a row written against it would
+// describe a deletion nobody can ever read. The deleted id rides as the
+// resource id instead, which is what makes the trail useful afterwards.
+const deleteTenant = [
+  validateUuidParam('tenantId'),
+  asyncHandler(async (req, res) => {
+    const { userEmail: adminEmail, tenantId: actorTenantId } = extractUserContext(req);
+    const result = await service.deleteTenant(req.params.tenantId, actorTenantId);
+
+    // Everything the trail needs that the id alone cannot carry. Truncated to
+    // the column width rather than risking a silent MySQL cut: a tenancy with
+    // dozens of admins is unusual, but an audit row that fails to insert
+    // because of one is worse than a shortened list.
+    const owners = result.adminEmails?.length
+      ? result.adminEmails.join(', ')
+      : 'none recorded';
+    const details = `Admin: ${owners} · ${result.membersRemoved} member(s) removed, `
+      + `${result.accountsReset} account(s) reset`;
+
+    await captureAudit(req, actorTenantId, adminEmail,
+      AUDIT_ACTIONS.DELETE_TENANT, STATUSES.DELETED,
+      AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.tenantId,
+      details.slice(0, 500));
+
+    successResponse(res, MESSAGES.SUCCESS.TENANT_DELETED, result);
+  }),
+];
+
 const listRoles = [
   asyncHandler(async (req, res) => {
     const { tenantId } = extractUserContext(req);
@@ -448,6 +481,7 @@ module.exports = {
   setTenantAdmin,
   updateUserProfile,
   removeUser,
+  deleteTenant,
   listRoles,
   createRole,
   updateRole,
