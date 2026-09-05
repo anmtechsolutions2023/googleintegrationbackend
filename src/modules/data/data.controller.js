@@ -11,12 +11,12 @@ const MESSAGES = require('../../config/messages');
  * @param {Object} res - Express response.
  */
 const getAdminSettings = (req, res) => {
-  logger.info('Admin settings access', { user: req.user.email });
+  logger.info('Admin settings access', { user: req.user.phone });
   res.json({
     message: `Tenant ${req.user.tid} - ${MESSAGES.SUCCESS.ADMIN_ACCESS}`,
     resource: 'admin_config',
     user: {
-      email: req.user.email,
+      email: req.user.phone,
       tenantId: req.user.tid,
       scopes: req.user.scopes,
     },
@@ -29,12 +29,12 @@ const getAdminSettings = (req, res) => {
  * @param {Object} res - Express response.
  */
 const getGeneralData = (req, res) => {
-  logger.info('General data access', { user: req.user.email });
+  logger.info('General data access', { user: req.user.phone });
   res.json({
     message: `Tenant ${req.user.tid} - ${MESSAGES.SUCCESS.GENERAL_ACCESS}`,
     resource: 'general_info',
     user: {
-      email: req.user.email,
+      email: req.user.phone,
       tenantId: req.user.tid,
       scopes: req.user.scopes,
     },

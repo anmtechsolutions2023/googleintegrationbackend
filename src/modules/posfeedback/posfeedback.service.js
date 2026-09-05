@@ -9,7 +9,7 @@ class PosFeedbackService extends BaseCRUDService {
     super('POS Feedback', QUERIES.POS_FEEDBACK);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -20,12 +20,12 @@ class PosFeedbackService extends BaseCRUDService {
       data.OrderId ?? null,
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.CustomerId !== undefined ? data.CustomerId : existing.CustomerId,
       data.CustomerName !== undefined ? data.CustomerName : existing.CustomerName,
@@ -34,7 +34,7 @@ class PosFeedbackService extends BaseCRUDService {
       data.OrderId !== undefined ? data.OrderId : existing.OrderId,
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -46,7 +46,7 @@ const service = new PosFeedbackService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
 };

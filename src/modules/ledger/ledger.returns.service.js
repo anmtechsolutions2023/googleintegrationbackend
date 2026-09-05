@@ -291,9 +291,9 @@ const priceReturnLines = (requested, originalById, alreadyReturnedByLine) => {
  * @param {string} [input.destination]   - ORIGINAL | STORE_CREDIT.
  * @param {string} [input.idempotencyKey]- Makes a double-clicked button safe.
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  */
-const createReturnTx = async (conn, input, tenantId, userEmail) => {
+const createReturnTx = async (conn, input, tenantId, userPhone) => {
   const {
     saleLogId, lines: requestedLines = [], reasonId = null, note = null,
     destination = LEDGER.REFUND_DESTINATION.ORIGINAL,
@@ -422,7 +422,7 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
   );
   const configId = returnType.TransactionTypeConfigId;
 
-  const { transactionNo } = await numberService.issueNumber(conn, configId, tenantId, userEmail);
+  const { transactionNo } = await numberService.issueNumber(conn, configId, tenantId, userPhone);
   const noteId = uuidv4();
 
   // A credit note carries POSITIVE amounts in its own columns — a note for ₹500
@@ -446,7 +446,7 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
     null,
     reasonId,
     idempotencyKey ? `idem:${idempotencyKey}` : (note ? String(note).slice(0, 500) : null),
-    userEmail, userEmail,
+    userPhone, userPhone,
   ]);
 
   // ── 7. Lines — these ARE the returned goods ──────────────────────────────
@@ -461,7 +461,7 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
       toJson(l.taxComponents), toJson(l.variants),
       l.name ? String(l.name).slice(0, 100) : null,
       l.sourceLineId, l.restockRequested ? 1 : 0,
-      userEmail, userEmail,
+      userPhone, userPhone,
     ]);
   }
 
@@ -471,7 +471,7 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
     paymentDetailId, tenantId, salesAccount.Id, noteId,
     priced.totals.discount, 0, priced.totals.gross,
     priced.totals.tax, priced.totals.net,
-    null, userEmail, userEmail,
+    null, userPhone, userPhone,
   ]);
 
   if (destination === LEDGER.REFUND_DESTINATION.STORE_CREDIT) {
@@ -483,11 +483,11 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
     );
     const pmtdId = uuidv4();
     await conn.execute(QUERIES.LEDGER.INSERT_PMTD, [
-      pmtdId, tenantId, null, null, 'Store credit issued', userEmail, userEmail,
+      pmtdId, tenantId, null, null, 'Store credit issued', userPhone, userPhone,
     ]);
     await conn.execute(QUERIES.LEDGER.INSERT_BREAKUP, [
       uuidv4(), tenantId, creditAccount.Id, paymentDetailId, pmtdId,
-      refundType.Id, -priced.totals.gross, null, userEmail, userEmail,
+      refundType.Id, -priced.totals.gross, null, userPhone, userPhone,
     ]);
   } else {
     // Back to the modes it arrived on, cash first, never more than each
@@ -512,7 +512,7 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
       const pmtdId = uuidv4();
       await conn.execute(QUERIES.LEDGER.INSERT_PMTD, [
         pmtdId, tenantId, split.paymentModeId, null,
-        `Return ${transactionNo}`, userEmail, userEmail,
+        `Return ${transactionNo}`, userPhone, userPhone,
       ]);
       // Reversed out of the SAME account the money went into, so the asset
       // account nets to zero rather than leaving cash that was never there.
@@ -523,7 +523,7 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
         // Cash, Card" answerable per note. Capacity still spans the sale and
         // all its notes; see tenderCapacity.
         paymentDetailId, pmtdId,
-        refundType.Id, -fromMinor(split.amountMinor), null, userEmail, userEmail,
+        refundType.Id, -fromMinor(split.amountMinor), null, userPhone, userPhone,
       ]);
     }
   }
@@ -532,7 +532,7 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
   await transitionStatus(
     conn,
     { logId: noteId, configId, fromStatusId: draft.Id, toStatusId: settled.Id, settledAt: new Date() },
-    tenantId, userEmail,
+    tenantId, userPhone,
   );
 
   const totalReturnedMinor = wouldTotalMinor;
@@ -567,7 +567,7 @@ const createReturnTx = async (conn, input, tenantId, userEmail) => {
  * for different reasons — but still on the SAME transaction, so a refund that
  * rolls back keeps the points it was about to take.
  */
-const applyDownstreamTx = async (conn, result, tenantId, userEmail) => {
+const applyDownstreamTx = async (conn, result, tenantId, userPhone) => {
   const { sale, state, returnedNow } = result._context;
 
   const [bills] = await conn.execute(
@@ -581,7 +581,7 @@ const applyDownstreamTx = async (conn, result, tenantId, userEmail) => {
     state === LEDGER.REFUND_STATE.FULL
       ? POS_BILL_STATUS.REFUNDED
       : POS_BILL_STATUS.PARTIALLY_REFUNDED,
-    userEmail, sale.Id, tenantId,
+    userPhone, sale.Id, tenantId,
   ]);
 
   let pointsReversed = 0;
@@ -590,7 +590,7 @@ const applyDownstreamTx = async (conn, result, tenantId, userEmail) => {
     // The visit only comes off on a FULL return; spend comes off either way,
     // by the value actually returned.
     await customerStats.reverseSaleTx(
-      conn, bill.CustomerId, returnedNow, tenantId, userEmail,
+      conn, bill.CustomerId, returnedNow, tenantId, userPhone,
       { removeVisit: state === LEDGER.REFUND_STATE.FULL },
     );
 
@@ -606,7 +606,7 @@ const applyDownstreamTx = async (conn, result, tenantId, userEmail) => {
       isFinal: state === LEDGER.REFUND_STATE.FULL,
       reason: `Return ${result.transactionNo}`,
       branchDetailId: bill.BranchDetailId,
-    }, tenantId, userEmail);
+    }, tenantId, userPhone);
   }
 
   // An INTENT to notify, made as durable as the refund itself. Delivery happens
@@ -625,7 +625,7 @@ const applyDownstreamTx = async (conn, result, tenantId, userEmail) => {
       customerMobile: sale.CustomerMobile,
       refundState: state,
     },
-  }, tenantId, userEmail);
+  }, tenantId, userPhone);
 
   return { pointsReversed, billStatus: state };
 };

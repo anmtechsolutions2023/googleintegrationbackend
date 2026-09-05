@@ -9,7 +9,7 @@ class PosVariantService extends BaseCRUDService {
     super('POS Variant', QUERIES.POS_VARIANT);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -19,12 +19,12 @@ class PosVariantService extends BaseCRUDService {
       data.SortOrder !== undefined ? data.SortOrder : 0,
       data.Price !== undefined ? data.Price : null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.Name !== undefined ? data.Name : existing.Name,
       data.Code !== undefined ? data.Code : existing.Code,
@@ -32,7 +32,7 @@ class PosVariantService extends BaseCRUDService {
       data.SortOrder !== undefined ? data.SortOrder : existing.SortOrder,
       data.Price !== undefined ? data.Price : existing.Price,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -44,7 +44,7 @@ const service = new PosVariantService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
 };

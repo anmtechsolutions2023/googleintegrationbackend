@@ -1,8 +1,8 @@
 // src/modules/auth/auth.service.js
-// Service for Google OAuth validation, user permissions, and JWT generation.
+// Resolves who somebody is, what they may do, and signs the token that says so.
+// Identity is the verified mobile number; proving it is otp.service's job.
 // Handles multi-tenant authentication and the guest/onboarding flow.
 
-const { OAuth2Client } = require('google-auth-library');
 const { v4: uuidv4 } = require('uuid');
 const { captureAudit } = require('../../utils/logger');
 const jwt = require('jsonwebtoken');
@@ -12,7 +12,7 @@ const { logger } = require('../../utils/logger');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const { QUERIES, STATUSES, SCOPES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('../../config/constants');
-const { GOOGLE_CLIENT_ID, JWT_SECRET } = require('../../config/envConfig');
+const { JWT_SECRET } = require('../../config/envConfig');
 const appConfig = require('../appconfig/appconfig.service');
 const adminService = require('../admin/admin.service');
 const invitationService = require('../invitation/invitation.service');
@@ -20,63 +20,25 @@ const invitationService = require('../invitation/invitation.service');
 // This file only needs the setup flag.
 const setupRepository = require('../mastersetup/mastersetup.repository');
 
-const GOOGLE_OAUTH2_CLIENT = new OAuth2Client(GOOGLE_CLIENT_ID);
-
-/**
- * Validates a Google ID token and extracts user info.
- * @param {string} idToken - Google ID token.
- * @returns {Promise<Object>} Validated user data.
- */
-const validateGoogleToken = async (idToken) => {
-  try {
-    logger.info('Validating Google ID token...');
-    logger.info(`Expected audience (client ID): ${GOOGLE_CLIENT_ID}`);
-
-    const ticket = await GOOGLE_OAUTH2_CLIENT.verifyIdToken({
-      idToken: idToken,
-      audience: GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-
-    logger.info(`Token audience: ${payload.aud}`);
-    logger.info(`Token issuer: ${payload.iss}`);
-    logger.info(`User email: ${payload.email}`);
-
-    if (!payload || !payload.email) {
-      throw new Error(MESSAGES.ERROR.INVALID_PAYLOAD);
-    }
-
-    return { email: payload.email, name: payload.name, googleId: payload.sub };
-  } catch (error) {
-    logger.error('Google token validation error:', error.message);
-    // 401 belongs here, on the one failure that genuinely means "we do not
-    // accept this caller". Everything further down the sign-in path is an
-    // infrastructure failure and must not borrow this status.
-    throw new HttpError(
-      `${MESSAGES.ERROR.GOOGLE_VALIDATION_FAILED}${error.message}`,
-      MESSAGES.HTTP_STATUS.UNAUTHORIZED
-    );
-  }
-};
 
 /**
  * Resolves scopes for a user in a tenant from both direct grants (Path B)
  * and role-based grants (Path A). Returns a deduplicated union.
  * @param {Object} connection - Database connection.
  * @param {string} tenantId - Tenant ID.
- * @param {string} userEmail - User email.
+ * @param {string} userPhone - The verified mobile number, E.164.
  * @returns {Promise<string[]>} Deduplicated array of scope strings.
  */
-const getScopesForTenant = async (connection, tenantId, userEmail) => {
+const getScopesForTenant = async (connection, tenantId, userPhone) => {
   // One statement covers both grant paths — direct feature grants (Path B) and
   // role-based ones (Path A). They used to be two awaits here, which on a single
   // connection means two serialised round trips on the request a user is sitting
   // and waiting through; see PERMISSIONS.SELECT_ALL_GRANTS.
   const [rows] = await connection.execute(QUERIES.PERMISSIONS.SELECT_ALL_GRANTS, [
     tenantId,
-    userEmail,
+    userPhone,
     tenantId,
-    userEmail,
+    userPhone,
   ]);
 
   // UNION has already deduplicated by (scope, feature_short_name); the Set
@@ -98,11 +60,11 @@ const findAndGetPermissions = async (req, userData) => {
   // before opening its own transaction, then takes a fresh one.
   let connection = await db.getConnection();
   try {
-    const { email, name, googleId } = userData;
+    const { phone, name } = userData;
 
     // ── Claim invitations FIRST ────────────────────────────────────────────
     // Before memberships are read, and unconditionally — not inside the
-    // "unknown email" branch below. An existing user who has been invited to a
+    // "unknown phone" branch below. An existing user who has been invited to a
     // second tenancy already passes the provisioned path, so a claim placed
     // further down would never run for them. Running it here means one path
     // serves both "new person joins your tenancy" and "existing person gains
@@ -112,13 +74,13 @@ const findAndGetPermissions = async (req, userData) => {
     // PENDING and is claimed on the next attempt. This mirrors how the
     // auto-approval path below degrades to manual review.
     try {
-      await invitationService.acceptPendingTx(connection, email);
+      await invitationService.acceptPendingTx(connection, phone);
     } catch (inviteErr) {
       logger.error('Invitation claim failed; continuing sign-in', inviteErr);
     }
 
     const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS.SELECT, [
-      email,
+      phone,
     ]);
 
     // ── Provisioned user path ──────────────────────────────────────────────
@@ -133,21 +95,26 @@ const findAndGetPermissions = async (req, userData) => {
       const tenantId = selectedTenant.tenant_id;
 
       // Remember where they are, so the next sign-in returns here.
-      await connection.execute(QUERIES.USER_TENANTS.TOUCH_ACTIVE, [email, tenantId]);
+      await connection.execute(QUERIES.USER_TENANTS.TOUCH_ACTIVE, [phone, tenantId]);
 
-      const permissions = await getScopesForTenant(connection, tenantId, email);
+      const permissions = await getScopesForTenant(connection, tenantId, phone);
 
       if (selectedTenant.is_admin) permissions.push(SCOPES.TENANT_ADMIN);
       if (selectedTenant.is_super_admin) permissions.push(SCOPES.TENANT_SUPER_ADMIN);
 
       const [roleRows] = await connection.execute(
         QUERIES.USER_ROLES.SELECT_BY_USER_TENANT,
-        [email, tenantId]
+        [phone, tenantId]
       );
 
       return {
-        email,
-        name,
+        phone,
+        // The MEMBERSHIP's name wins over anything the caller supplied. A
+        // number identifies nobody, so the navbar, the audit trail and every
+        // admin list need the name the tenancy knows them by — and the caller
+        // only ever has one during a first-time signup, where there is no
+        // membership to read it from.
+        name: selectedTenant.full_name || name,
         tenantId,
         onboardingStatus: 'APPROVED',
         permissions,
@@ -162,8 +129,8 @@ const findAndGetPermissions = async (req, userData) => {
 
     // ── Guest / onboarding path (new) ──────────────────────────────────────
     const [existingRequests] = await connection.execute(
-      QUERIES.ONBOARDING_REQUESTS.SELECT_BY_EMAIL,
-      [email]
+      QUERIES.ONBOARDING_REQUESTS.SELECT_BY_PHONE,
+      [phone]
     );
 
     let requestId, onboardingStatus, rejectionReason = null;
@@ -174,7 +141,7 @@ const findAndGetPermissions = async (req, userData) => {
       onboardingStatus = existing.status;
       rejectionReason = existing.rejection_reason;
     } else {
-      // Brand-new email. When the super-admin has enabled auto-approval, provision
+      // Brand-new phone. When the super-admin has enabled auto-approval, provision
       // the user immediately into a new tenant as its TENANT_ADMIN and return an
       // APPROVED result. Any failure falls back to the manual PENDING flow below.
       if (await appConfig.isAutoApproveEnabled(connection)) {
@@ -188,7 +155,7 @@ const findAndGetPermissions = async (req, userData) => {
           connection.release();
           connection = null;
           try {
-            await adminService.autoApproveOnboarding({ email, name, googleSub: googleId });
+            await adminService.autoApproveOnboarding({ phone, name });
           } finally {
             connection = await db.getConnection();
           }
@@ -196,28 +163,28 @@ const findAndGetPermissions = async (req, userData) => {
           // Re-read the now-provisioned user exactly like the provisioned path.
           const [newTenantRows] = await connection.execute(
             QUERIES.USER_TENANTS.SELECT,
-            [email]
+            [phone]
           );
           const selectedTenant = newTenantRows[0];
           const newTenantId = selectedTenant.tenant_id;
 
-          const permissions = await getScopesForTenant(connection, newTenantId, email);
+          const permissions = await getScopesForTenant(connection, newTenantId, phone);
           if (selectedTenant.is_admin) permissions.push(SCOPES.TENANT_ADMIN);
           if (selectedTenant.is_super_admin) permissions.push(SCOPES.TENANT_SUPER_ADMIN);
 
           const [roleRows] = await connection.execute(
             QUERIES.USER_ROLES.SELECT_BY_USER_TENANT,
-            [email, newTenantId]
+            [phone, newTenantId]
           );
 
           await captureAudit(
-            req, newTenantId, email,
+            req, newTenantId, phone,
             AUDIT_ACTIONS.ONBOARDING_AUTO_APPROVED, STATUSES.SUCCESS,
             AUDIT_CATEGORIES.ONBOARDING, 'INFO', null
           );
 
           return {
-            email,
+            phone,
             name,
             tenantId: newTenantId,
             onboardingStatus: 'APPROVED',
@@ -243,21 +210,20 @@ const findAndGetPermissions = async (req, userData) => {
       requestId = uuidv4();
       await connection.execute(QUERIES.ONBOARDING_REQUESTS.INSERT, [
         requestId,
-        email,
+        phone,
         name,
-        googleId || null,
       ]);
       onboardingStatus = 'PENDING';
     }
 
     await captureAudit(
-      req, null, email,
+      req, null, phone,
       AUDIT_ACTIONS.ONBOARDING_ATTEMPT, STATUSES.SUCCESS,
       AUDIT_CATEGORIES.AUTH, 'INFO', requestId
     );
 
     return {
-      email,
+      phone,
       name,
       tenantId: null,
       onboardingStatus,
@@ -278,28 +244,28 @@ const findAndGetPermissions = async (req, userData) => {
 /**
  * Switches tenant permissions for an authenticated user.
  * @param {Object} req - Express request object.
- * @param {string} userEmail - User email.
+ * @param {string} userPhone - User phone.
  * @param {string} targetTenantId - Target tenant ID.
  * @param {string} userName - User name.
  * @returns {Promise<Object>} New permissions object.
  */
 const switchTenantPermissions = async (
   req,
-  userEmail,
+  userPhone,
   targetTenantId,
   userName
 ) => {
   const connection = await db.getConnection();
   try {
     const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS.SELECT, [
-      userEmail,
+      userPhone,
     ]);
 
     const targetTenant = tenantRows.find((t) => t.tenant_id === targetTenantId);
 
     if (!targetTenant) {
       await captureAudit(
-        req, null, userEmail,
+        req, null, userPhone,
         AUDIT_ACTIONS.SWITCH_TENANT_DENIED, STATUSES.DENIED,
         AUDIT_CATEGORIES.TENANT_MGMT, 'WARN', targetTenantId
       );
@@ -309,7 +275,7 @@ const switchTenantPermissions = async (
     const permissions = await getScopesForTenant(
       connection,
       targetTenantId,
-      userEmail
+      userPhone
     );
 
     if (targetTenant.is_admin) {
@@ -317,7 +283,7 @@ const switchTenantPermissions = async (
     }
 
     return {
-      email: userEmail,
+      phone: userPhone,
       name: userName,
       tenantId: targetTenantId,
       onboardingStatus: 'APPROVED',
@@ -348,7 +314,10 @@ const generateAppToken = (userPermissions) => {
   const isGuest = userPermissions.onboardingStatus !== 'APPROVED';
 
   const appPayload = {
-    email: userPermissions.email,
+    // The identity claim. Renamed from `phone` with the migration — every
+    // consumer (authMiddleware, checkScope, auditLogger, the setup gate)
+    // reads this one field, so the rename is the whole of their change.
+    phone: userPermissions.phone,
     name: userPermissions.name,
     tid: userPermissions.tenantId,
     scopes: userPermissions.permissions,
@@ -403,9 +372,13 @@ const reissueTokenWithSetupComplete = (tokenPayload) => {
 };
 
 module.exports = {
-  validateGoogleToken,
   findAndGetPermissions,
   switchTenantPermissions,
   generateAppToken,
   reissueTokenWithSetupComplete,
+  // Exported for scripts/admin-token.js (break-glass access). It is read-only
+  // and side-effect free, which findAndGetPermissions is not — that one claims
+  // invitations and can create onboarding requests, neither of which an
+  // emergency tool should do on a mistyped identity.
+  getScopesForTenant,
 };

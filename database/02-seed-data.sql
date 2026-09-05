@@ -22,6 +22,7 @@
 --             with all POS features)
 --   PART 8b — Preserve pre-gating read access
 --   PART 8c — Grant AUDIT:READ to every role
+--   PART 9  — OWNER_OPERATOR role (merged from the old 03-*.sql)
 --   PART 8d — Asset register + expense approval (ASSET:READ/WRITE,
 --             EXPENSE:APPROVE) — required by /api/assets and the expense
 --             approve/reject routes
@@ -43,24 +44,54 @@
 -- All INSERT statements use INSERT IGNORE + fixed UUIDs so this file is
 -- safe to re-run on a database that already has seed data.
 --
--- These two files are the ONLY source of truth for the database. There is no
--- migration directory: schema changes are made here, in place, and a rebuild is
--- a drop-and-recreate.
+-- These two files — 01-schema-definition.sql then this one — are the ONLY
+-- source of truth for the database. There is no migration directory and no
+-- third file: schema changes are made in place and a rebuild is a
+-- drop-and-recreate.
 --
 -- Tenant: ANM Tech Solutions
 -- Tenant ID: e3845e08-dcc2-11f0-8e78-0242ac110002
--- Super Admin email: anmtechsolutions2023@gmail.com
 -- =============================================================================
+
+-- =============================================================================
+--  ►►►  EDIT THIS BEFORE RUNNING  ◄◄◄
+--
+--  Identity is the mobile number now, and sign-in is WhatsApp OTP. The number
+--  below is the ONLY way into a freshly seeded database — there is no Google
+--  fallback any more, and no other account exists to provision one.
+--
+--  It must be a real number, reachable on WhatsApp, that you hold. Seed a
+--  number you cannot receive on and the database is unreachable except through
+--  `npm run admin:token`.
+--
+--  E.164 with the leading plus. No spaces, no dashes.
+-- =============================================================================
+-- Follow the SERVER's default collation for utf8mb4 rather than whatever the
+-- connecting client happens to prefer. Deliberately no explicit COLLATE: the
+-- tables below take the server default too, so naming one here would pin a
+-- collation that differs between MySQL 5.7 (utf8mb4_general_ci) and 8.x
+-- (utf8mb4_0900_ai_ci) and reintroduce the mismatch this line exists to avoid.
+--
+-- Without it, a client such as mysql2 opens with utf8mb4_unicode_ci and every
+-- comparison between a user variable and a column raises
+-- "Illegal mix of collations".
+SET NAMES utf8mb4;
+
+SET @super_admin_phone = '+918861268683';   -- ►► CHANGE ME ◄◄
+SET @super_admin_name  = 'Platform Owner';
+SET @tenant_id         = 'e3845e08-dcc2-11f0-8e78-0242ac110002';
 
 -- =============================================================================
 -- PART 1 — Super Admin in user_tenants
 -- =============================================================================
 
-INSERT IGNORE INTO user_tenants (id, user_email, tenant_id, is_admin, is_super_admin, is_active, status)
+INSERT IGNORE INTO user_tenants
+       (id, user_phone, full_name, tenant_id, is_admin, is_super_admin, is_active, status)
 VALUES (
     UUID(),
-    'anmtechsolutions2023@gmail.com',
-    'e3845e08-dcc2-11f0-8e78-0242ac110002',
+    @super_admin_phone,
+    @super_admin_name,   -- full_name is NOT NULL: a bare number names nobody
+    @tenant_id,
     1,       -- is_admin
     1,       -- is_super_admin
     1,       -- is_active
@@ -74,8 +105,8 @@ SET is_admin       = 1,
     is_super_admin = 1,
     is_active      = 1,
     status         = 'ACTIVE'
-WHERE user_email = 'anmtechsolutions2023@gmail.com'
-  AND tenant_id  = 'e3845e08-dcc2-11f0-8e78-0242ac110002';
+WHERE user_phone = @super_admin_phone
+  AND tenant_id  = @tenant_id;
 
 -- =============================================================================
 -- PART 2 — System Roles
@@ -334,15 +365,15 @@ WHERE r.name      = 'OPERATIONS_STAFF'
 -- Uses subquery so the role UUID doesn't need to be hardcoded.
 -- =============================================================================
 
-INSERT IGNORE INTO user_roles (id, user_email, tenant_id, role_id, assigned_by)
+INSERT IGNORE INTO user_roles (id, user_phone, tenant_id, role_id, assigned_by)
 SELECT
     UUID(),
-    'anmtechsolutions2023@gmail.com',
-    'e3845e08-dcc2-11f0-8e78-0242ac110002',
+    @super_admin_phone,
+    @tenant_id,
     r.id,
     'system-seed'
 FROM roles r
-WHERE r.tenant_id      = 'e3845e08-dcc2-11f0-8e78-0242ac110002'
+WHERE r.tenant_id      = @tenant_id
   AND r.name           = 'SUPER_ADMIN'
   AND r.is_system_role = 1
 LIMIT 1;
@@ -929,11 +960,55 @@ WHERE  EXISTS (SELECT 1 FROM organizationdetail o WHERE o.TenantId = ut.tenant_i
 ON DUPLICATE KEY UPDATE status = 'COMPLETED';
 
 -- =============================================================================
+-- PART 9 — OWNER_OPERATOR, the role that was missing
+-- (was 03-owner-operator-role.sql; merged here so the database is exactly two
+--  files — schema, then seed.)
+-- =============================================================================
+-- The four back-office roles grant no POS scope and the four POS roles grant no
+-- master-data scope: two sets built at different times. Somebody who works the
+-- floor AND keeps the books had no role but tenant admin, which also hands them
+-- user and role management they did not need.
+--
+-- This is everything a working owner does, and nothing about administering
+-- people. Tenant admin remains the only way to grant that, because it is a
+-- membership flag rather than a role.
+--
+-- Idempotent, and applies to EVERY tenancy — the template one new tenants are
+-- cloned from, and each that already exists.
+-- =============================================================================
+
+INSERT INTO roles (id, tenant_id, name, description, is_system_role, is_active)
+SELECT UUID(), t.tenant_id, 'OWNER_OPERATOR',
+       'Owner-operator: runs the floor and keeps the books. No user or role management.',
+       0, 1
+  FROM (SELECT DISTINCT tenant_id FROM roles) t
+ WHERE NOT EXISTS (
+       SELECT 1 FROM roles r
+        WHERE r.tenant_id = t.tenant_id AND r.name = 'OWNER_OPERATOR');
+
+-- Front desk, the books, and the catalogue. Read-only on Organization and Audit
+-- so branch structure and the trail stay a tenant-admin concern.
+INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
+SELECT UUID(), r.id, f.feature_id
+  FROM roles r
+ CROSS JOIN features f
+ WHERE r.name = 'OWNER_OPERATOR'
+   AND f.is_active = 1
+   AND (
+        (f.feature_short_name IN (
+           'POS_ORDER','POS_BILLING','POS_KITCHEN','POS_OPS','POS_CRM','POS_CONFIG',
+           'TRANSACTIONS','PAYMENTS','ASSET','MASTER_DATA','INVENTORY','CONTACTS'
+         ) AND f.scope IN ('READ','WRITE'))
+     OR (f.feature_short_name IN ('POS_REPORTS','ORGANIZATION','AUDIT') AND f.scope = 'READ')
+     OR (f.feature_short_name = 'EXPENSE' AND f.scope = 'APPROVE')
+   );
+
+-- =============================================================================
 -- VERIFICATION QUERIES — run these manually after seeding to confirm correctness
 -- =============================================================================
 
 -- Check super admin user:
--- SELECT id, user_email, tenant_id, is_admin, is_super_admin, status FROM user_tenants;
+-- SELECT id, user_phone, full_name, tenant_id, is_admin, is_super_admin, status FROM user_tenants;
 
 -- Check all 7 roles:
 -- SELECT id, name, is_system_role, is_active FROM roles ORDER BY name;
@@ -960,7 +1035,7 @@ ON DUPLICATE KEY UPDATE status = 'COMPLETED';
 --   WHERE ts.tenant_id IS NULL OR ts.status <> 'COMPLETED';
 
 -- Check super admin role assignment:
--- SELECT ur.user_email, r.name AS role, ur.assigned_by
+-- SELECT ur.user_phone, r.name AS role, ur.assigned_by
 --   FROM user_roles ur
 --   JOIN roles r ON r.id = ur.role_id
 --   WHERE ur.tenant_id = 'e3845e08-dcc2-11f0-8e78-0242ac110002';

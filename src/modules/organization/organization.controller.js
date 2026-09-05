@@ -39,15 +39,15 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  const newData = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const newData = await service.create(req.body, tenantId, phone);
   createdResponse(res, newData, 'Organization created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'Organization updated successfully');
 });
 

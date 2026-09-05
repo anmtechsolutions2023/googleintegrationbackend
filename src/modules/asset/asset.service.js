@@ -35,7 +35,7 @@ class AssetService extends BaseCRUDService {
     });
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -51,12 +51,12 @@ class AssetService extends BaseCRUDService {
       data.Status ?? ASSET_STATUS.IN_USE,
       data.Notes ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.Name !== undefined ? data.Name : existing.Name,
       data.AssetCategoryId !== undefined ? data.AssetCategoryId : existing.AssetCategoryId,
@@ -69,7 +69,7 @@ class AssetService extends BaseCRUDService {
       data.Status !== undefined ? data.Status : existing.Status,
       data.Notes !== undefined ? data.Notes : existing.Notes,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -81,8 +81,8 @@ const service = new AssetService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
   summary: (tenantId) => service.summary(tenantId),
 };

@@ -20,7 +20,7 @@ const getConfig = [
 const updateConfig = [
   validateBody(schemas.updateConfigSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail: email, tenantId } = extractUserContext(req);
+    const { userPhone: email, tenantId } = extractUserContext(req);
     const config = await service.updateConfig(req.validatedBody, email);
 
     await captureAudit(req, tenantId, email,

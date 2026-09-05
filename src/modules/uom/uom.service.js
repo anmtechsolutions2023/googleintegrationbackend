@@ -19,18 +19,18 @@ class UomService extends BaseCRUDService {
    * @param {string} id - Generated ID
    * @param {Object} data - UOM data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Array} Parameters for INSERT query
    */
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
       data.UnitName,
       data.IsPrimary !== undefined ? data.IsPrimary : false,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
@@ -38,12 +38,12 @@ class UomService extends BaseCRUDService {
    * Prepare parameters for UOM update
    * @param {Object} data - New data
    * @param {Object} existing - Existing record
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @param {string} id - Record ID
    * @param {string} tenantId - Tenant ID
    * @returns {Array} Parameters for UPDATE query
    */
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     const updatedUnitName =
       data.UnitName !== undefined ? data.UnitName : existing.UnitName;
     const updatedIsPrimary =
@@ -55,7 +55,7 @@ class UomService extends BaseCRUDService {
       updatedUnitName,
       updatedIsPrimary,
       updatedActive,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -92,12 +92,12 @@ class UomService extends BaseCRUDService {
    * Create new UOM.
    * @param {Object} uomData - UOM data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Promise<Object>} Created UOM
    */
-  async createUom(uomData, tenantId, userEmail) {
-    logger.info('UomService.createUom called', { tenantId, userEmail });
-    return await this.create(uomData, tenantId, userEmail);
+  async createUom(uomData, tenantId, userPhone) {
+    logger.info('UomService.createUom called', { tenantId, userPhone });
+    return await this.create(uomData, tenantId, userPhone);
   }
 
   /**
@@ -105,16 +105,16 @@ class UomService extends BaseCRUDService {
    * @param {string} id - UOM ID
    * @param {Object} updateData - Updated data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Promise<Object>} Updated UOM
    */
-  async updateUom(id, updateData, tenantId, userEmail) {
+  async updateUom(id, updateData, tenantId, userPhone) {
     logger.info('UomService.updateUom called', {
       id,
       tenantId,
-      userEmail,
+      userPhone,
     });
-    return await this.update(id, updateData, tenantId, userEmail);
+    return await this.update(id, updateData, tenantId, userPhone);
   }
 
   /**
@@ -133,13 +133,13 @@ class UomService extends BaseCRUDService {
 const uomService = new UomService();
 
 module.exports = {
-  createTx: (conn, data, tenantId, userEmail) => uomService.createTx(conn, data, tenantId, userEmail),
+  createTx: (conn, data, tenantId, userPhone) => uomService.createTx(conn, data, tenantId, userPhone),
   getAllUom: (tenantId, page, limit) =>
     uomService.getAllUom(tenantId, page, limit),
   getUomById: (id, tenantId) => uomService.getUomById(id, tenantId),
-  createUom: (data, tenantId, userEmail) =>
-    uomService.createUom(data, tenantId, userEmail),
-  updateUom: (id, data, tenantId, userEmail) =>
-    uomService.updateUom(id, data, tenantId, userEmail),
+  createUom: (data, tenantId, userPhone) =>
+    uomService.createUom(data, tenantId, userPhone),
+  updateUom: (id, data, tenantId, userPhone) =>
+    uomService.updateUom(id, data, tenantId, userPhone),
   deleteUom: (id, tenantId) => uomService.deleteUom(id, tenantId),
 };

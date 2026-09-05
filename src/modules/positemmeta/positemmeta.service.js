@@ -72,7 +72,7 @@ class PosItemMetaService extends BaseCRUDService {
     return rows[0].CostInfoId ?? null;
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -84,12 +84,12 @@ class PosItemMetaService extends BaseCRUDService {
       toJson(data.Variants),
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.ItemDetailId !== undefined ? data.ItemDetailId : existing.ItemDetailId,
       data.FoodTypeId !== undefined ? data.FoodTypeId : existing.FoodTypeId,
@@ -99,19 +99,19 @@ class PosItemMetaService extends BaseCRUDService {
       data.Variants !== undefined ? toJson(data.Variants) : toJson(existing.Variants),
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
   }
 
   // Replace all channel/variant link rows for an item within an open connection.
-  async syncLinks(connection, itemMetaId, tenantId, userEmail, channelIds, variantIds) {
+  async syncLinks(connection, itemMetaId, tenantId, userPhone, channelIds, variantIds) {
     if (Array.isArray(channelIds)) {
       await connection.execute(this.queries.DELETE_CHANNEL_LINKS, [itemMetaId, tenantId]);
       for (const channelId of channelIds) {
         await connection.execute(this.queries.INSERT_CHANNEL_LINK, [
-          uuidv4(), itemMetaId, channelId, tenantId, userEmail,
+          uuidv4(), itemMetaId, channelId, tenantId, userPhone,
         ]);
       }
     }
@@ -119,24 +119,24 @@ class PosItemMetaService extends BaseCRUDService {
       await connection.execute(this.queries.DELETE_VARIANT_LINKS, [itemMetaId, tenantId]);
       for (const variantId of variantIds) {
         await connection.execute(this.queries.INSERT_VARIANT_LINK, [
-          uuidv4(), itemMetaId, variantId, tenantId, userEmail,
+          uuidv4(), itemMetaId, variantId, tenantId, userPhone,
         ]);
       }
     }
   }
 
   // Create the item + its channel/variant links atomically.
-  async create(data, tenantId, userEmail) {
+  async create(data, tenantId, userPhone) {
     return withTransaction(async (connection) => {
       const id = uuidv4();
       const resolved = {
         ...data,
         CostInfoId: await this.resolveCostInfoId(connection, data, null, tenantId),
       };
-      const params = this.prepareInsertParams(id, resolved, tenantId, userEmail);
+      const params = this.prepareInsertParams(id, resolved, tenantId, userPhone);
       await connection.execute(this.queries.INSERT, params);
       await this.syncLinks(
-        connection, id, tenantId, userEmail, data.ChannelIds, data.VariantIds,
+        connection, id, tenantId, userPhone, data.ChannelIds, data.VariantIds,
       );
       // `resolved`, not `data`, so the response reports the CostInfoId that was
       // actually stored rather than the (absent) one the client sent.
@@ -145,7 +145,7 @@ class PosItemMetaService extends BaseCRUDService {
   }
 
   // Update the item + re-sync links atomically.
-  async update(id, data, tenantId, userEmail) {
+  async update(id, data, tenantId, userPhone) {
     return withTransaction(async (connection) => {
       const [existingRows] = await connection.execute(this.queries.SELECT_BY_ID, [id, tenantId]);
       if (!existingRows || existingRows.length === 0) {
@@ -157,11 +157,11 @@ class PosItemMetaService extends BaseCRUDService {
         ...data,
         CostInfoId: await this.resolveCostInfoId(connection, data, existing, tenantId),
       };
-      const params = this.prepareUpdateParams(resolved, existing, userEmail, id, tenantId)
+      const params = this.prepareUpdateParams(resolved, existing, userPhone, id, tenantId)
         .map((p) => (p === undefined ? null : p));
       await connection.execute(this.queries.UPDATE, params);
       await this.syncLinks(
-        connection, id, tenantId, userEmail, data.ChannelIds, data.VariantIds,
+        connection, id, tenantId, userPhone, data.ChannelIds, data.VariantIds,
       );
       const [rows] = await connection.execute(this.queries.SELECT_BY_ID, [id, tenantId]);
       return this.normalizeRow(rows[0]);
@@ -193,7 +193,7 @@ const service = new PosItemMetaService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
 };

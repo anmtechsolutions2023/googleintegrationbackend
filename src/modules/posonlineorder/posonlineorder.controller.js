@@ -61,17 +61,17 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosOnlineOrder.create called', { tenantId, email });
-  const created = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosOnlineOrder.create called', { tenantId, phone });
+  const created = await service.create(req.body, tenantId, phone);
   createdResponse(res, created, 'POS Online Order created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosOnlineOrder.update called', { id, tenantId, email });
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosOnlineOrder.update called', { id, tenantId, phone });
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'POS Online Order updated successfully');
 });
 
@@ -88,27 +88,27 @@ const deleteById = asyncHandler(async (req, res) => {
 /** Accept: becomes a pos_order, fires a KOT, tells the portal. */
 const accept = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosOnlineOrder.accept called', { id, tenantId, email });
-  const result = await lifecycle.accept(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosOnlineOrder.accept called', { id, tenantId, phone });
+  const result = await lifecycle.accept(id, req.body, tenantId, phone);
   successResponse(res, result, 'Order accepted and sent to the kitchen');
 });
 
 /** Reject: with a coded reason, because portals require one. */
 const reject = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosOnlineOrder.reject called', { id, tenantId, email, reason: req.body.Reason });
-  const result = await lifecycle.reject(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosOnlineOrder.reject called', { id, tenantId, phone, reason: req.body.Reason });
+  const result = await lifecycle.reject(id, req.body, tenantId, phone);
   successResponse(res, result, 'Order rejected');
 });
 
 /** Every stage change after accept, through one validated writer. */
 const setStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   logger.info('PosOnlineOrder.setStatus called', { id, tenantId, status: req.body.Status });
-  const result = await lifecycle.setStatus(id, req.body, tenantId, email);
+  const result = await lifecycle.setStatus(id, req.body, tenantId, phone);
   successResponse(res, result, `Order moved to ${req.body.Status}`);
 });
 

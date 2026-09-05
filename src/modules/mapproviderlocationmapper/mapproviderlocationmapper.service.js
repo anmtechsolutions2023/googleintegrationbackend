@@ -7,7 +7,7 @@ class MapProviderLocationMapperService extends BaseCRUDService {
     super('Map Provider Location Mapper', QUERIES.MAP_PROVIDER_LOCATION_MAPPER);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -15,12 +15,12 @@ class MapProviderLocationMapperService extends BaseCRUDService {
       data.LocationDetailId,
       data.TagName,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.MapProviderId !== undefined
         ? data.MapProviderId
@@ -30,7 +30,7 @@ class MapProviderLocationMapperService extends BaseCRUDService {
         : existing.LocationDetailId,
       data.TagName !== undefined ? data.TagName : existing.TagName,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -39,12 +39,12 @@ class MapProviderLocationMapperService extends BaseCRUDService {
 
 const service = new MapProviderLocationMapperService();
 module.exports = {
-  createTx: (conn, data, tenantId, userEmail) => service.createTx(conn, data, tenantId, userEmail),
+  createTx: (conn, data, tenantId, userPhone) => service.createTx(conn, data, tenantId, userPhone),
   getAll: (tenantId, page, limit, expand) => service.getAll(tenantId, page, limit, expand),
   getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),
-  create: (data, tenantId, userEmail) =>
-    service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) =>
-    service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) =>
+    service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) =>
+    service.update(id, data, tenantId, userPhone),
   delete: (id, tenantId) => service.delete(id, tenantId),
 };

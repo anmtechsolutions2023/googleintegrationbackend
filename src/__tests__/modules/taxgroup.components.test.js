@@ -48,7 +48,7 @@ const conn = (over = {}) => {
 };
 
 const attach = (c, rates) => components.attachComponentsTx(c, {
-  taxGroupId: 'group-1', components: rates, tenantId: TENANT, userEmail: USER,
+  taxGroupId: 'group-1', components: rates, tenantId: TENANT, userPhone: USER,
 });
 
 beforeEach(() => jest.clearAllMocks());
@@ -132,7 +132,7 @@ describe('attaching rates to a group', () => {
     const cache = new Map();
     const args = {
       taxGroupId: 'group-1', components: [{ name: 'CGST', value: 9 }],
-      tenantId: TENANT, userEmail: USER, cache,
+      tenantId: TENANT, userPhone: USER, cache,
     };
 
     await components.attachComponentsTx(c, args);

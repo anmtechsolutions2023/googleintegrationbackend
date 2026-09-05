@@ -73,9 +73,9 @@ module.exports = {
       // where they left off. Previously unordered, so tenantRows[0] — which
       // login uses as the active tenancy — could differ between logins.
       SELECT:
-        'SELECT tenant_id, is_admin, is_super_admin, last_active_at FROM user_tenants WHERE user_email = ? AND is_active = TRUE ORDER BY last_active_at IS NULL, last_active_at DESC, tenant_id ASC',
+        'SELECT tenant_id, is_admin, is_super_admin, full_name, last_active_at FROM user_tenants WHERE user_phone = ? AND is_active = TRUE ORDER BY last_active_at IS NULL, last_active_at DESC, tenant_id ASC',
       TOUCH_ACTIVE:
-        'UPDATE user_tenants SET last_active_at = NOW() WHERE user_email = ? AND tenant_id = ?',
+        'UPDATE user_tenants SET last_active_at = NOW() WHERE user_phone = ? AND tenant_id = ?',
     },
 
     // Permissions Queries
@@ -91,7 +91,7 @@ module.exports = {
           AND tf.is_active = TRUE
           AND ut.is_active = TRUE
           AND ut.tenant_id = ?
-          AND ut.user_email = ?
+          AND ut.user_phone = ?
       `,
 
       // Both grant paths in one statement: direct feature grants (Path B) and
@@ -116,14 +116,14 @@ module.exports = {
           AND tf.is_active = TRUE
           AND ut.is_active = TRUE
           AND ut.tenant_id = ?
-          AND ut.user_email = ?
+          AND ut.user_phone = ?
         UNION
         SELECT f.scope, f.feature_short_name
         FROM user_roles ur
         JOIN role_permissions rp ON ur.role_id = rp.role_id
         JOIN features f ON rp.feature_id = f.feature_id
         WHERE ur.tenant_id = ?
-          AND ur.user_email = ?
+          AND ur.user_phone = ?
           AND f.is_active = TRUE
       `,
     },
@@ -131,13 +131,13 @@ module.exports = {
     // Audit Logs Queries
     AUDIT_LOGS: {
       SELECT:
-        'SELECT log_id, tenant_id, user_email, action, status, ip_address, log_level, category, resource_id, details, timestamp FROM audit_logs WHERE 1=1',
+        'SELECT log_id, tenant_id, user_phone, action, status, ip_address, log_level, category, resource_id, details, timestamp FROM audit_logs WHERE 1=1',
       COUNT:
         'SELECT COUNT(*) AS total FROM audit_logs WHERE 1=1',
       INSERT:
-        'INSERT INTO audit_logs (tenant_id, user_email, action, status, ip_address, log_level, category, resource_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO audit_logs (tenant_id, user_phone, action, status, ip_address, log_level, category, resource_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       INSERT_MIDDLEWARE:
-        'INSERT INTO audit_logs (tenant_id, user_email, action, status, ip_address, log_level, category, resource_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO audit_logs (tenant_id, user_phone, action, status, ip_address, log_level, category, resource_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     },
 
     // Tax Type Queries
@@ -1842,7 +1842,7 @@ module.exports = {
           LEFT JOIN branchdetail b ON b.Id = cs.BranchDetailId
          WHERE cs.Id = ? AND cs.TenantId = ?`,
       INSERT:
-        'INSERT INTO pos_cash_session (Id, TenantId, BranchDetailId, CashierEmail, ShiftLabel, OpeningFloat, OpenedAt, OpenedBy, Status, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, 1, NOW(), ?, ?)',
+        'INSERT INTO pos_cash_session (Id, TenantId, BranchDetailId, CashierPhone, ShiftLabel, OpeningFloat, OpenedAt, OpenedBy, Status, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, 1, NOW(), ?, ?)',
       // Only an open session can be closed, and only once: the Status predicate
       // is the concurrency guard, so a double close updates zero rows.
       CLOSE: `
@@ -1853,7 +1853,7 @@ module.exports = {
       // One open till per cashier per branch — enforced here because MySQL
       // treats every NULL ClosedAt as distinct, so a UNIQUE key cannot say it.
       SELECT_OPEN_FOR_CASHIER:
-        "SELECT Id FROM pos_cash_session WHERE TenantId = ? AND BranchDetailId = ? AND CashierEmail = ? AND Status = 'open' LIMIT 1",
+        "SELECT Id FROM pos_cash_session WHERE TenantId = ? AND BranchDetailId = ? AND CashierPhone = ? AND Status = 'open' LIMIT 1",
       SELECT_OPEN_BY_ID:
         "SELECT * FROM pos_cash_session WHERE Id = ? AND TenantId = ? AND Status = 'open' LIMIT 1",
       DELETE: 'DELETE FROM pos_cash_session WHERE Id = ? AND TenantId = ?',
@@ -1870,20 +1870,103 @@ module.exports = {
         FROM user_roles ur
         JOIN role_permissions rp ON ur.role_id = rp.role_id
         JOIN features f ON rp.feature_id = f.feature_id
-        WHERE ur.user_email = ? AND ur.tenant_id = ? AND f.is_active = TRUE
+        WHERE ur.user_phone = ? AND ur.tenant_id = ? AND f.is_active = TRUE
       `,
+    },
+
+    // One-time code challenges.
+    //
+    // The rate limits are counted HERE, in the table, rather than in memory:
+    // an in-process counter resets on every deploy and is per-instance, and
+    // both of those turn a spend limit into a suggestion.
+    AUTH_OTP: {
+      INSERT: `
+        INSERT INTO auth_otp_challenge
+               (id, phone, purpose, code_hash, expires_at, request_ip, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+
+      // The one challenge a verify may act on. Expiry and single-use are both
+      // applied in SQL so a consumed or lapsed row simply is not found.
+      SELECT_LIVE_BY_ID: `
+        SELECT id, phone, purpose, code_hash, attempts, expires_at
+          FROM auth_otp_challenge
+         WHERE id = ?
+           AND consumed_at IS NULL
+           AND expires_at > NOW()`,
+
+      // Stamped in the SAME transaction that issues the token. The affectedRows
+      // count is what makes it safe: two concurrent verifies both read a live
+      // row, but only one UPDATE can match consumed_at IS NULL.
+      CONSUME: `
+        UPDATE auth_otp_challenge
+           SET consumed_at = NOW()
+         WHERE id = ? AND consumed_at IS NULL`,
+
+      BUMP_ATTEMPTS:
+        'UPDATE auth_otp_challenge SET attempts = attempts + 1 WHERE id = ?',
+
+      // A new request invalidates any earlier live code for that number, so
+      // only one is ever valid and an old message cannot be replayed.
+      CONSUME_LIVE_FOR_PHONE: `
+        UPDATE auth_otp_challenge
+           SET consumed_at = NOW()
+         WHERE phone = ? AND consumed_at IS NULL AND expires_at > NOW()`,
+
+      // Counts only what was actually SENT. A request for an unregistered
+      // number records a row and sends nothing — it floods no handset and
+      // costs nothing, so charging it against the per-number budget punishes
+      // the wrong thing: the number gets locked out at the exact moment it
+      // becomes valid. Abuse of that path is still bounded by the per-IP limit,
+      // which counts every request.
+      COUNT_RECENT_FOR_PHONE: `
+        SELECT COUNT(*) AS n FROM auth_otp_challenge
+         WHERE phone = ? AND delivery_status <> 'PENDING'
+           AND created_at > (NOW() - INTERVAL ? SECOND)`,
+
+      COUNT_RECENT_FOR_IP: `
+        SELECT COUNT(*) AS n FROM auth_otp_challenge
+         WHERE request_ip = ? AND created_at > (NOW() - INTERVAL ? SECOND)`,
+
+      // The cost circuit breaker. Counts what was actually SENT — a row that
+      // never reached Meta cost nothing and must not consume the day's budget.
+      COUNT_SENT_TODAY: `
+        SELECT COUNT(*) AS n FROM auth_otp_challenge
+         WHERE created_at >= CURDATE() AND delivery_status <> 'PENDING'`,
+
+      // The most recent SENT challenge, for the resend cooldown. Same reason
+      // as above: there is nothing to wait for after a message that never left.
+      SELECT_LAST_FOR_PHONE: `
+        SELECT created_at FROM auth_otp_challenge
+         WHERE phone = ? AND delivery_status <> 'PENDING'
+         ORDER BY created_at DESC LIMIT 1`,
+
+      SET_SENT: `
+        UPDATE auth_otp_challenge
+           SET wa_message_id = ?, delivery_status = 'SENT'
+         WHERE id = ?`,
+
+      SET_FAILED: `
+        UPDATE auth_otp_challenge
+           SET delivery_status = 'FAILED', failure_code = ?
+         WHERE id = ?`,
+
+      // Joined from the webhook on Meta's message id.
+      SET_DELIVERY_BY_WAMID: `
+        UPDATE auth_otp_challenge
+           SET delivery_status = ?, failure_code = ?
+         WHERE wa_message_id = ?`,
     },
 
     // Onboarding Request Queries
     ONBOARDING_REQUESTS: {
-      SELECT_BY_EMAIL:
-        'SELECT * FROM onboarding_requests WHERE email = ? ORDER BY requested_at DESC LIMIT 1',
+      SELECT_BY_PHONE:
+        'SELECT * FROM onboarding_requests WHERE phone = ? ORDER BY requested_at DESC LIMIT 1',
       SELECT_ALL:
         'SELECT * FROM onboarding_requests WHERE 1=1',
       INSERT:
-        "INSERT INTO onboarding_requests (id, email, name, google_sub, status) VALUES (?, ?, ?, ?, 'PENDING')",
+        "INSERT INTO onboarding_requests (id, phone, name, status) VALUES (?, ?, ?, 'PENDING')",
       UPDATE_NOTE:
-        "UPDATE onboarding_requests SET request_note = ?, updated_at = NOW() WHERE email = ? AND status = 'PENDING'",
+        "UPDATE onboarding_requests SET request_note = ?, updated_at = NOW() WHERE phone = ? AND status = 'PENDING'",
       UPDATE_STATUS:
         'UPDATE onboarding_requests SET status = ?, rejection_reason = ?, reviewed_by = ?, reviewed_at = NOW(), tenant_id = ?, updated_at = NOW() WHERE id = ?',
     },
@@ -1895,7 +1978,7 @@ module.exports = {
     // tenancy and carries its tenant and roles from creation.
     INVITATIONS: {
       INSERT:
-        'INSERT INTO tenant_invitations (id, tenant_id, email, is_admin, full_name, phone, branch_detail_id, invited_by, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO tenant_invitations (id, tenant_id, phone, is_admin, full_name, branch_detail_id, invited_by, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       INSERT_ROLE:
         'INSERT INTO tenant_invitation_roles (invitation_id, role_id) VALUES (?, ?)',
       // One tenancy's invitations, newest first, with the role names resolved
@@ -1912,13 +1995,13 @@ module.exports = {
          ORDER BY i.created_at DESC`,
       SELECT_BY_ID:
         'SELECT * FROM tenant_invitations WHERE id = ? AND tenant_id = ?',
-      // Live invitations for one email, across every tenancy. Expiry is applied
-      // in SQL so a lapsed invitation is simply not claimed, with no sweep job
-      // needed to keep the claim path correct.
+      // Live invitations for one number, across every tenancy. Expiry is
+      // applied in SQL so a lapsed invitation is simply not claimed, with no
+      // sweep job needed to keep the claim path correct.
       SELECT_CLAIMABLE: `
-        SELECT id, tenant_id, email, is_admin, full_name, phone, branch_detail_id
+        SELECT id, tenant_id, phone, is_admin, full_name, branch_detail_id
           FROM tenant_invitations
-         WHERE email = ? AND status = 'PENDING'
+         WHERE phone = ? AND status = 'PENDING'
            AND (expires_at IS NULL OR expires_at > NOW())`,
       SELECT_ROLE_IDS:
         'SELECT role_id FROM tenant_invitation_roles WHERE invitation_id = ?',
@@ -1930,7 +2013,7 @@ module.exports = {
       // request, so re-inviting an existing member is an error rather than a
       // silent role edit.
       SELECT_EXISTING_MEMBERSHIP:
-        'SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
+        'SELECT id FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
       // Roles must belong to the inviting tenancy. Without this an admin could
       // name a role id from another tenant and grant its permissions.
       SELECT_ROLES_IN_TENANT:
@@ -1976,11 +2059,11 @@ module.exports = {
         SELECT ur.*, r.name AS role_name, r.description, r.is_system_role
         FROM user_roles ur
         JOIN roles r ON ur.role_id = r.id
-        WHERE ur.user_email = ? AND ur.tenant_id = ?`,
+        WHERE ur.user_phone = ? AND ur.tenant_id = ?`,
       DELETE_ALL_FOR_USER:
-        'DELETE FROM user_roles WHERE user_email = ? AND tenant_id = ?',
+        'DELETE FROM user_roles WHERE user_phone = ? AND tenant_id = ?',
       INSERT:
-        'INSERT INTO user_roles (id, user_email, tenant_id, role_id, assigned_by) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO user_roles (id, user_phone, tenant_id, role_id, assigned_by) VALUES (?, ?, ?, ?, ?)',
     },
 
     // Customer reports. All read SETTLED DOCUMENTS, not pos_order: an order
@@ -2129,7 +2212,7 @@ module.exports = {
     TENANT_DELETE: {
       // Who is in this tenancy. Read BEFORE the sweep — user_tenants is deleted
       // in wave 2 and is the only record of membership that exists.
-      SELECT_MEMBERS: 'SELECT user_email FROM user_tenants WHERE tenant_id = ?',
+      SELECT_MEMBERS: 'SELECT user_phone FROM user_tenants WHERE tenant_id = ?',
 
       // Of those, the ones for whom this is their ONLY tenancy. They are the
       // people whose platform-level onboarding record has to be cleared as well;
@@ -2137,12 +2220,12 @@ module.exports = {
       //
       // Read before the sweep for the same reason as above.
       SELECT_SOLE_MEMBERS: `
-        SELECT ut.user_email
+        SELECT ut.user_phone
         FROM user_tenants ut
         WHERE ut.tenant_id = ?
           AND NOT EXISTS (
             SELECT 1 FROM user_tenants other
-            WHERE other.user_email = ut.user_email
+            WHERE other.user_phone = ut.user_phone
               AND other.tenant_id <> ut.tenant_id
           )`,
 
@@ -2155,7 +2238,7 @@ module.exports = {
       // onboardingStatus APPROVED with a null tenantId, and (because
       // auto-approval sits in the `else` of that same check) permanently
       // preventing them from ever being provisioned again.
-      DELETE_ONBOARDING_BY_EMAIL: 'DELETE FROM onboarding_requests WHERE email = ?',
+      DELETE_ONBOARDING_BY_PHONE: 'DELETE FROM onboarding_requests WHERE phone = ?',
 
       // Does this tenancy exist at all? Distinguishes a 404 from a delete that
       // silently affected nothing. Membership is the right test because it is
@@ -2179,9 +2262,9 @@ module.exports = {
       // same reason as the membership queries above: afterwards the rows are
       // gone and the audit trail could never say whose tenancy it was.
       SELECT_ADMINS: `
-        SELECT user_email FROM user_tenants
+        SELECT user_phone FROM user_tenants
         WHERE tenant_id = ? AND is_admin = TRUE
-        ORDER BY user_email`,
+        ORDER BY user_phone`,
 
       // The sweep. Executed in array order, all inside ONE transaction.
       SWEEP: [
@@ -2279,25 +2362,25 @@ module.exports = {
       // One row per person: who they are (the profile that used to live in
       // pos_staff), what they may do (roles), and whether they can administer.
       SELECT_ALL: `
-        SELECT ut.user_email, ut.tenant_id, ut.is_admin, ut.is_super_admin,
+        SELECT ut.user_phone, ut.tenant_id, ut.is_admin, ut.is_super_admin,
                ut.is_active, ut.status,
-               ut.full_name, ut.phone, ut.branch_detail_id,
+               ut.full_name, ut.branch_detail_id,
                b.BranchName AS branch_name,
                GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
         FROM user_tenants ut
-        LEFT JOIN user_roles ur ON ut.user_email = ur.user_email AND ut.tenant_id = ur.tenant_id
+        LEFT JOIN user_roles ur ON ut.user_phone = ur.user_phone AND ut.tenant_id = ur.tenant_id
         LEFT JOIN roles r ON ur.role_id = r.id
         LEFT JOIN branchdetail b ON b.Id = ut.branch_detail_id AND b.TenantId = ut.tenant_id
         WHERE ut.tenant_id = ?
-        GROUP BY ut.user_email, ut.tenant_id
-        ORDER BY ut.full_name IS NULL, ut.full_name ASC, ut.user_email ASC`,
+        GROUP BY ut.user_phone, ut.tenant_id
+        ORDER BY ut.full_name IS NULL, ut.full_name ASC, ut.user_phone ASC`,
       // Cross-tenant listing for super admins only. No tenant_id filter; each row
       // carries its tenant_id (plus a best-effort organization name for display).
       // setup_status is per TENANT, so every row of the same tenant carries the
       // same value. A tenant with no tenant_setup row has never run the
       // first-time wizard and reports PENDING.
       SELECT_ALL_TENANTS: `
-        SELECT ut.user_email, ut.tenant_id, ut.is_admin, ut.is_super_admin,
+        SELECT ut.user_phone, ut.tenant_id, ut.is_admin, ut.is_super_admin,
                ut.is_active, ut.status,
                (SELECT o.Name FROM organizationdetail o
                   WHERE o.TenantId = ut.tenant_id
@@ -2306,11 +2389,11 @@ module.exports = {
                ts.completed_at AS setup_completed_at,
                GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
         FROM user_tenants ut
-        LEFT JOIN user_roles ur ON ut.user_email = ur.user_email AND ut.tenant_id = ur.tenant_id
+        LEFT JOIN user_roles ur ON ut.user_phone = ur.user_phone AND ut.tenant_id = ur.tenant_id
         LEFT JOIN roles r ON ur.role_id = r.id
         LEFT JOIN tenant_setup ts ON ts.tenant_id = ut.tenant_id
-        GROUP BY ut.user_email, ut.tenant_id, ts.status, ts.completed_at
-        ORDER BY ut.tenant_id ASC, ut.user_email ASC`,
+        GROUP BY ut.user_phone, ut.tenant_id, ts.status, ts.completed_at
+        ORDER BY ut.tenant_id ASC, ut.user_phone ASC`,
       COUNT_ALL_TENANTS: 'SELECT COUNT(*) as total FROM user_tenants',
 
       // ── Cross-tenant directory (super admin) ─────────────────────────────
@@ -2321,24 +2404,24 @@ module.exports = {
       // Every count is COUNT(DISTINCT CASE …) rather than SUM(): joining
       // user_roles multiplies a membership by the number of roles it holds, so
       // a plain SUM(is_admin) would report an admin with three roles as three
-      // admins. The DISTINCT is on user_email, which is what is actually being
+      // admins. The DISTINCT is on user_phone, which is what is actually being
       // counted.
       SELECT_TENANT_DIRECTORY: `
         SELECT ut.tenant_id,
                (SELECT o.Name FROM organizationdetail o
                   WHERE o.TenantId = ut.tenant_id
                   ORDER BY o.CreatedOn ASC LIMIT 1) AS tenant_name,
-               COUNT(DISTINCT ut.user_email) AS user_count,
-               COUNT(DISTINCT CASE WHEN ut.is_admin = 1 THEN ut.user_email END) AS admin_count,
-               COUNT(DISTINCT CASE WHEN ut.is_super_admin = 1 THEN ut.user_email END) AS super_admin_count,
-               COUNT(DISTINCT CASE WHEN ut.status = 'SUSPENDED' THEN ut.user_email END) AS suspended_count,
+               COUNT(DISTINCT ut.user_phone) AS user_count,
+               COUNT(DISTINCT CASE WHEN ut.is_admin = 1 THEN ut.user_phone END) AS admin_count,
+               COUNT(DISTINCT CASE WHEN ut.is_super_admin = 1 THEN ut.user_phone END) AS super_admin_count,
+               COUNT(DISTINCT CASE WHEN ut.status = 'SUSPENDED' THEN ut.user_phone END) AS suspended_count,
                MAX(ut.last_active_at) AS last_active_at,
                (SELECT COUNT(*) FROM branchdetail b WHERE b.TenantId = ut.tenant_id) AS branch_count,
                COALESCE(ts.status, 'PENDING') AS setup_status,
                ts.completed_at AS setup_completed_at,
                GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
           FROM user_tenants ut
-          LEFT JOIN user_roles ur ON ur.user_email = ut.user_email AND ur.tenant_id = ut.tenant_id
+          LEFT JOIN user_roles ur ON ur.user_phone = ut.user_phone AND ur.tenant_id = ut.tenant_id
           LEFT JOIN roles r ON r.id = ur.role_id
           LEFT JOIN tenant_setup ts ON ts.tenant_id = ut.tenant_id
          GROUP BY ut.tenant_id, ts.status, ts.completed_at
@@ -2351,48 +2434,51 @@ module.exports = {
       // it takes the tenant id rather than reading it from the token. Only the
       // super-admin routes reach it.
       SELECT_BY_TENANT: `
-        SELECT ut.user_email, ut.tenant_id, ut.is_admin, ut.is_super_admin,
+        SELECT ut.user_phone, ut.tenant_id, ut.is_admin, ut.is_super_admin,
                ut.is_active, ut.status, ut.last_active_at,
-               ut.full_name, ut.phone, ut.branch_detail_id,
+               ut.full_name, ut.branch_detail_id,
                b.BranchName AS branch_name,
                GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
           FROM user_tenants ut
-          LEFT JOIN user_roles ur ON ut.user_email = ur.user_email AND ut.tenant_id = ur.tenant_id
+          LEFT JOIN user_roles ur ON ut.user_phone = ur.user_phone AND ut.tenant_id = ur.tenant_id
           LEFT JOIN roles r ON ur.role_id = r.id
           LEFT JOIN branchdetail b ON b.Id = ut.branch_detail_id AND b.TenantId = ut.tenant_id
          WHERE ut.tenant_id = ?
-         GROUP BY ut.user_email, ut.tenant_id
-         ORDER BY ut.full_name IS NULL, ut.full_name ASC, ut.user_email ASC`,
+         GROUP BY ut.user_phone, ut.tenant_id
+         ORDER BY ut.full_name IS NULL, ut.full_name ASC, ut.user_phone ASC`,
       // Membership flags for a single (email, tenant) pair — used by the super-admin
       // cross-tenant status change to verify existence and guard super admins.
-      SELECT_FLAGS_BY_EMAIL_TENANT:
-        'SELECT is_super_admin FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
-      SELECT_BY_EMAIL: `
+      SELECT_FLAGS_BY_PHONE_TENANT:
+        'SELECT is_super_admin FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
+      SELECT_BY_PHONE: `
         SELECT ut.*, GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
         FROM user_tenants ut
-        LEFT JOIN user_roles ur ON ut.user_email = ur.user_email AND ut.tenant_id = ur.tenant_id
+        LEFT JOIN user_roles ur ON ut.user_phone = ur.user_phone AND ut.tenant_id = ur.tenant_id
         LEFT JOIN roles r ON ur.role_id = r.id
-        WHERE ut.user_email = ? AND ut.tenant_id = ?
-        GROUP BY ut.user_email, ut.tenant_id`,
+        WHERE ut.user_phone = ? AND ut.tenant_id = ?
+        GROUP BY ut.user_phone, ut.tenant_id`,
       INSERT_USER_TENANT:
-        "INSERT INTO user_tenants (id, user_email, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, 0, 0, 1, 'ACTIVE')",
+        "INSERT INTO user_tenants (id, user_phone, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, 0, 0, 1, 'ACTIVE')",
       // Parametrized variant: caller supplies is_admin / is_super_admin flags.
       // Used by the shared provisioning core (manual approve → 0/0, auto-approve → 1/0).
+      // full_name is NOT NULL, so every membership insert must carry one.
+      // Callers fall back to the number: an admin can correct a name, but a
+      // failed INSERT costs somebody their login.
       INSERT_USER_TENANT_FLAGS:
-        "INSERT INTO user_tenants (id, user_email, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, ?, ?, 1, 'ACTIVE')",
+        "INSERT INTO user_tenants (id, user_phone, full_name, tenant_id, is_admin, is_super_admin, is_active, status) VALUES (?, ?, ?, ?, ?, ?, 1, 'ACTIVE')",
       UPDATE_STATUS:
-        'UPDATE user_tenants SET is_active = ?, status = ?, updated_at = NOW() WHERE user_email = ? AND tenant_id = ?',
+        'UPDATE user_tenants SET is_active = ?, status = ?, updated_at = NOW() WHERE user_phone = ? AND tenant_id = ?',
       DELETE:
-        'DELETE FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
+        'DELETE FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
       // TENANT:ADMIN is derived from this flag at login, never from a role.
       // Assigning a role NAMED 'TENANT_ADMIN' or 'SUPER_ADMIN' grants that
       // role's feature scopes and nothing else — which is why a user could hold
       // the SUPER_ADMIN role and still be refused the Access Control screen.
       SET_ADMIN_FLAG:
-        'UPDATE user_tenants SET is_admin = ?, updated_at = NOW() WHERE user_email = ? AND tenant_id = ?',
+        'UPDATE user_tenants SET is_admin = ?, updated_at = NOW() WHERE user_phone = ? AND tenant_id = ?',
       // The staff details, on the membership they belong to.
       UPDATE_PROFILE:
-        'UPDATE user_tenants SET full_name = ?, phone = ?, branch_detail_id = ?, updated_at = NOW() WHERE user_email = ? AND tenant_id = ?',
+        'UPDATE user_tenants SET full_name = ?, branch_detail_id = ?, updated_at = NOW() WHERE user_phone = ? AND tenant_id = ?',
     },
 
     // Feature / Scope Management Queries

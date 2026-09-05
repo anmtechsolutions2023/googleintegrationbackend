@@ -19,18 +19,18 @@ class TaxTypeService extends BaseCRUDService {
    * @param {string} id - Generated ID
    * @param {Object} data - Tax type data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Array} Parameters for INSERT query
    */
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
       data.Name,
       data.Value,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
@@ -38,18 +38,18 @@ class TaxTypeService extends BaseCRUDService {
    * Prepare parameters for tax type update
    * @param {Object} data - New data
    * @param {Object} existing - Existing record
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @param {string} id - Record ID
    * @param {string} tenantId - Tenant ID
    * @returns {Array} Parameters for UPDATE query
    */
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     const updatedName = data.Name !== undefined ? data.Name : existing.Name;
     const updatedValue = data.Value !== undefined ? data.Value : existing.Value;
     const updatedActive =
       data.Active !== undefined ? data.Active : existing.Active;
 
-    return [updatedName, updatedValue, updatedActive, userEmail, id, tenantId];
+    return [updatedName, updatedValue, updatedActive, userPhone, id, tenantId];
   }
 
   /**
@@ -83,12 +83,12 @@ class TaxTypeService extends BaseCRUDService {
    * Create new tax type.
    * @param {Object} taxTypeData - Tax type data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Promise<Object>} Created tax type
    */
-  async createTaxType(taxTypeData, tenantId, userEmail) {
-    logger.info('TaxTypeService.createTaxType called', { tenantId, userEmail });
-    return await this.create(taxTypeData, tenantId, userEmail);
+  async createTaxType(taxTypeData, tenantId, userPhone) {
+    logger.info('TaxTypeService.createTaxType called', { tenantId, userPhone });
+    return await this.create(taxTypeData, tenantId, userPhone);
   }
 
   /**
@@ -96,16 +96,16 @@ class TaxTypeService extends BaseCRUDService {
    * @param {string} id - Tax type ID
    * @param {Object} updateData - Updated data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Promise<Object>} Updated tax type
    */
-  async updateTaxType(id, updateData, tenantId, userEmail) {
+  async updateTaxType(id, updateData, tenantId, userPhone) {
     logger.info('TaxTypeService.updateTaxType called', {
       id,
       tenantId,
-      userEmail,
+      userPhone,
     });
-    return await this.update(id, updateData, tenantId, userEmail);
+    return await this.update(id, updateData, tenantId, userPhone);
   }
 
   /**
@@ -126,14 +126,14 @@ const taxTypeService = new TaxTypeService();
 module.exports = {
   // Exposed for the bulk import, which creates a tax type and maps it into a
   // group inside one transaction with the item that needs it.
-  createTx: (conn, data, tenantId, userEmail) =>
-    taxTypeService.createTx(conn, data, tenantId, userEmail),
+  createTx: (conn, data, tenantId, userPhone) =>
+    taxTypeService.createTx(conn, data, tenantId, userPhone),
   getAllTaxTypes: (tenantId, page, limit) =>
     taxTypeService.getAllTaxTypes(tenantId, page, limit),
   getTaxTypeById: (id, tenantId) => taxTypeService.getTaxTypeById(id, tenantId),
-  createTaxType: (data, tenantId, userEmail) =>
-    taxTypeService.createTaxType(data, tenantId, userEmail),
-  updateTaxType: (id, data, tenantId, userEmail) =>
-    taxTypeService.updateTaxType(id, data, tenantId, userEmail),
+  createTaxType: (data, tenantId, userPhone) =>
+    taxTypeService.createTaxType(data, tenantId, userPhone),
+  updateTaxType: (id, data, tenantId, userPhone) =>
+    taxTypeService.updateTaxType(id, data, tenantId, userPhone),
   deleteTaxType: (id, tenantId) => taxTypeService.deleteTaxType(id, tenantId),
 };

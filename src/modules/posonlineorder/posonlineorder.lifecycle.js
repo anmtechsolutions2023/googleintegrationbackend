@@ -118,7 +118,7 @@ const pushStatusSafely = async (portal, order, status, credential) => {
  * @param {Object} data - { FireKot?: boolean } — defaults to firing.
  * @returns {Promise<Object>} { OnlineOrderId, OrderId, OrderNo, Kot, PortalPush }
  */
-const accept = async (id, data, tenantId, userEmail) => {
+const accept = async (id, data, tenantId, userPhone) => {
   // Priced BEFORE the transaction opens: pricing takes its own connection, and
   // holding a transaction across it would be a needless lock on the hot path.
   const prepared = await withTransaction(async (conn) => {
@@ -183,11 +183,11 @@ const accept = async (id, data, tenantId, userEmail) => {
         BranchDetailId: order.BranchDetailId,
       },
       tenantId,
-      userEmail,
+      userPhone,
     );
 
     await conn.execute(QUERIES.POS_ONLINE_ORDER.SET_ACCEPTED, [
-      created.id, userEmail, id, tenantId,
+      created.id, userPhone, id, tenantId,
     ]);
 
     // Send-once, by the same guard the till uses: a double-tap, a retry or a
@@ -201,7 +201,7 @@ const accept = async (id, data, tenantId, userEmail) => {
           conn,
           { Id: created.id, TableId: null, Items: priced ? priced.items : priceable, BranchDetailId: order.BranchDetailId },
           tenantId,
-          userEmail,
+          userPhone,
         );
     }
 
@@ -233,14 +233,14 @@ const accept = async (id, data, tenantId, userEmail) => {
  * it is recorded, because "why did we reject 40 orders last week" is a question
  * an owner asks and a rating depends on.
  */
-const reject = async (id, data, tenantId, userEmail) => {
+const reject = async (id, data, tenantId, userPhone) => {
   const result = await withTransaction(async (conn) => {
     const order = await loadRawTx(conn, id, tenantId);
     assertTransition(order.Status, 'cancelled');
     const portal = await loadPortalTx(conn, order.PortalId, tenantId);
 
     await conn.execute(QUERIES.POS_ONLINE_ORDER.SET_CANCELLED, [
-      data.Reason ?? null, userEmail, userEmail, id, tenantId,
+      data.Reason ?? null, userPhone, userPhone, id, tenantId,
     ]);
 
     logger.info('Portal order rejected', {
@@ -261,7 +261,7 @@ const reject = async (id, data, tenantId, userEmail) => {
  * `delivered` are the same operation with different targets, so they are one
  * function with a validated target rather than three near-identical ones.
  */
-const setStatus = async (id, data, tenantId, userEmail) => {
+const setStatus = async (id, data, tenantId, userPhone) => {
   const next = String(data.Status || '').toLowerCase();
 
   const result = await withTransaction(async (conn) => {
@@ -270,15 +270,15 @@ const setStatus = async (id, data, tenantId, userEmail) => {
     const portal = await loadPortalTx(conn, order.PortalId, tenantId);
 
     if (next === 'processing') {
-      await conn.execute(QUERIES.POS_ONLINE_ORDER.SET_READY, [userEmail, id, tenantId]);
+      await conn.execute(QUERIES.POS_ONLINE_ORDER.SET_READY, [userPhone, id, tenantId]);
     } else if (next === 'delivered') {
-      await conn.execute(QUERIES.POS_ONLINE_ORDER.SET_DELIVERED, [userEmail, id, tenantId]);
+      await conn.execute(QUERIES.POS_ONLINE_ORDER.SET_DELIVERED, [userPhone, id, tenantId]);
     } else if (next === 'cancelled') {
       await conn.execute(QUERIES.POS_ONLINE_ORDER.SET_CANCELLED, [
-        data.Reason ?? null, userEmail, userEmail, id, tenantId,
+        data.Reason ?? null, userPhone, userPhone, id, tenantId,
       ]);
     } else {
-      await conn.execute(QUERIES.POS_ONLINE_ORDER.SET_STATUS, [next, userEmail, id, tenantId]);
+      await conn.execute(QUERIES.POS_ONLINE_ORDER.SET_STATUS, [next, userPhone, id, tenantId]);
     }
 
     return {
@@ -313,7 +313,7 @@ const setStatus = async (id, data, tenantId, userEmail) => {
           Name: result._portal?.Name ?? null,
         },
         tenantId,
-        userEmail,
+        userPhone,
       );
     } catch (err) {
       logger.warn('Portal order delivered but not settled', {

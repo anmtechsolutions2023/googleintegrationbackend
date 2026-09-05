@@ -29,18 +29,18 @@ const getSchema = asyncHandler(async (req, res) => {
 });
 
 const update = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   const { branchId, doc } = req.query;
-  logger.info('ReceiptFormat.update called', { tenantId, branchId, doc, email });
-  const saved = await service.save(doc, req.body.values, branchId, tenantId, email);
+  logger.info('ReceiptFormat.update called', { tenantId, branchId, doc, phone });
+  const saved = await service.save(doc, req.body.values, branchId, tenantId, phone);
   successResponse(res, saved, 'Receipt format updated successfully');
 });
 
 const setTaxMode = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   const { branchId } = req.query;
-  logger.info('ReceiptFormat.setTaxMode called', { tenantId, branchId, email });
-  const format = await service.setTaxMode(req.body.taxMode, branchId, tenantId, email);
+  logger.info('ReceiptFormat.setTaxMode called', { tenantId, branchId, phone });
+  const format = await service.setTaxMode(req.body.taxMode, branchId, tenantId, phone);
   successResponse(res, format, 'Tax mode updated successfully');
 });
 

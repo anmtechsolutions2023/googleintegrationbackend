@@ -66,12 +66,12 @@ const getUomById = asyncHandler(async (req, res) => {
  * @param {Object} res - Express response object
  */
 const createUom = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   const uomData = req.body;
 
-  logger.info('createUom called', { tenantId, email });
+  logger.info('createUom called', { tenantId, phone });
 
-  const newUom = await uomService.createUom(uomData, tenantId, email);
+  const newUom = await uomService.createUom(uomData, tenantId, phone);
 
   createdResponse(res, newUom, 'UOM created successfully');
 });
@@ -83,16 +83,16 @@ const createUom = asyncHandler(async (req, res) => {
  */
 const updateUom = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   const updateData = req.body;
 
-  logger.info('updateUom called', { id, tenantId, email });
+  logger.info('updateUom called', { id, tenantId, phone });
 
   const updatedUom = await uomService.updateUom(
     id,
     updateData,
     tenantId,
-    email
+    phone
   );
 
   successResponse(res, updatedUom, 'UOM updated successfully');

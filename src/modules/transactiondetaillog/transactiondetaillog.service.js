@@ -8,7 +8,7 @@ class TransactionDetailLogService extends BaseCRUDService {
     super('Transaction Detail Log', QUERIES.TRANSACTION_DETAIL_LOG);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     const normalizeDate = (val) => {
       if (!val && val !== 0) return null
       if (val instanceof Date && !isNaN(val))
@@ -36,12 +36,12 @@ class TransactionDetailLogService extends BaseCRUDService {
       normalizeDate(data.TransactionDate),
       data.Remarks || null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     const normalizeDate = (val) => {
       if (!val && val !== 0) return null
       if (val instanceof Date && !isNaN(val))
@@ -67,7 +67,7 @@ class TransactionDetailLogService extends BaseCRUDService {
       normalizeDate(data.TransactionDate !== undefined ? data.TransactionDate : existing.TransactionDate),
       data.Remarks !== undefined ? data.Remarks : existing.Remarks,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -77,9 +77,9 @@ class TransactionDetailLogService extends BaseCRUDService {
 const service = new TransactionDetailLogService();
 
 // A settled document is immutable — corrections go through a refund, not an edit.
-const guardedUpdate = async (id, data, tenantId, userEmail) => {
+const guardedUpdate = async (id, data, tenantId, userPhone) => {
   await assertMutable(id, tenantId);
-  return service.update(id, data, tenantId, userEmail);
+  return service.update(id, data, tenantId, userPhone);
 };
 const guardedDelete = async (id, tenantId) => {
   await assertMutable(id, tenantId);
@@ -89,8 +89,8 @@ module.exports = {
   getAll: (tenantId, page, limit, expand) =>
     service.getAll(tenantId, page, limit, expand),
   getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),
-  create: (data, tenantId, userEmail) =>
-    service.create(data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) =>
+    service.create(data, tenantId, userPhone),
   update: guardedUpdate,
   delete: guardedDelete,
 };

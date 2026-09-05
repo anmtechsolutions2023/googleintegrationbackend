@@ -185,14 +185,14 @@ class BaseCRUDService {
    * Create a new record.
    * @param {Object} data - Record data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Promise<Object>} Created record
    */
-  async create(data, tenantId, userEmail) {
-    logger.info(`Creating ${this.entityName}`, { tenantId, userEmail })
+  async create(data, tenantId, userPhone) {
+    logger.info(`Creating ${this.entityName}`, { tenantId, userPhone })
 
     return await withConnection(async (connection) =>
-      this.createTx(connection, data, tenantId, userEmail),
+      this.createTx(connection, data, tenantId, userPhone),
     )
   }
 
@@ -204,14 +204,14 @@ class BaseCRUDService {
    * @param {Object} connection - Active DB connection (typically inside withTransaction)
    * @param {Object} data - Record data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Promise<Object>} Created record ({ id, ...data })
    */
-  async createTx(connection, data, tenantId, userEmail) {
+  async createTx(connection, data, tenantId, userPhone) {
     const id = uuidv4()
 
     // Prepare insert parameters - this should be overridden in child classes
-    const params = this.prepareInsertParams(id, data, tenantId, userEmail)
+    const params = this.prepareInsertParams(id, data, tenantId, userPhone)
 
     // Debug logging to catch undefined parameters
     logger.info(`${this.entityName} INSERT params:`, {
@@ -242,11 +242,11 @@ class BaseCRUDService {
    * @param {string} id - Record ID
    * @param {Object} data - Updated data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Promise<Object>} Updated record
    */
-  async update(id, data, tenantId, userEmail) {
-    logger.info(`Updating ${this.entityName}`, { id, tenantId, userEmail })
+  async update(id, data, tenantId, userPhone) {
+    logger.info(`Updating ${this.entityName}`, { id, tenantId, userPhone })
 
     return await withConnection(async (connection) => {
       // First check if record exists
@@ -256,7 +256,7 @@ class BaseCRUDService {
       const params = this.prepareUpdateParams(
         data,
         existing,
-        userEmail,
+        userPhone,
         id,
         tenantId,
       )
@@ -302,10 +302,10 @@ class BaseCRUDService {
    * @param {string} id - Record ID
    * @param {Object} data - Fields to change
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Promise<Object>} { id, ...data }
    */
-  async updateTx(connection, id, data, tenantId, userEmail) {
+  async updateTx(connection, id, data, tenantId, userPhone) {
     const [existingRows] = await connection.execute(this.queries.SELECT_BY_ID, [id, tenantId])
     if (!existingRows || existingRows.length === 0) {
       throw new HttpError(
@@ -317,7 +317,7 @@ class BaseCRUDService {
     const params = this.prepareUpdateParams(
       data,
       existingRows[0],
-      userEmail,
+      userPhone,
       id,
       tenantId,
     )
@@ -357,12 +357,12 @@ class BaseCRUDService {
    * @param {string} id - Generated ID
    * @param {Object} data - Record data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Array} Parameters array for query
    */
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     // Default implementation - override in child classes
-    return [id, tenantId, userEmail]
+    return [id, tenantId, userPhone]
   }
 
   /**
@@ -370,14 +370,14 @@ class BaseCRUDService {
    * Override this in child classes to customize parameter mapping.
    * @param {Object} data - New data
    * @param {Object} existing - Existing record
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @param {string} id - Record ID
    * @param {string} tenantId - Tenant ID
    * @returns {Array} Parameters array for query
    */
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     // Default implementation - override in child classes
-    return [userEmail, id, tenantId]
+    return [userPhone, id, tenantId]
   }
 }
 

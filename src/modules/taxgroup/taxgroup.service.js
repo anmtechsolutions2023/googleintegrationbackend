@@ -7,22 +7,22 @@ class TaxGroupService extends BaseCRUDService {
     super('Tax Group', QUERIES.TAX_GROUP);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
       data.Name,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.Name !== undefined ? data.Name : existing.Name,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -31,12 +31,12 @@ class TaxGroupService extends BaseCRUDService {
 
 const service = new TaxGroupService();
 module.exports = {
-  createTx: (conn, data, tenantId, userEmail) => service.createTx(conn, data, tenantId, userEmail),
+  createTx: (conn, data, tenantId, userPhone) => service.createTx(conn, data, tenantId, userPhone),
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) =>
-    service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) =>
-    service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) =>
+    service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) =>
+    service.update(id, data, tenantId, userPhone),
   delete: (id, tenantId) => service.delete(id, tenantId),
 };

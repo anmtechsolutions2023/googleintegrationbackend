@@ -86,10 +86,10 @@ const resolveTenderMode = async (conn, tender, tenantId) => {
  * @param {string|null} input.posCustomerId
  * @param {string|null} input.branchId
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<Object>} { transactionDetailLogId, transactionNo, status, roundOff, balanceDue }
  */
-const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
+const postSaleFromBill = async (conn, input, tenantId, userPhone) => {
   const { billId, totals, lines, tenders = [], posCustomerId, branchId } = input;
 
   // ── Idempotency: a posted bill must never issue a second invoice ──────────
@@ -118,11 +118,11 @@ const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
 
   // ── Customer ─────────────────────────────────────────────────────────────
   const customer = await contactResolver.resolveContactForPosCustomer(
-    conn, posCustomerId, tenantId, userEmail,
+    conn, posCustomerId, tenantId, userPhone,
   );
 
   // ── Number + header ──────────────────────────────────────────────────────
-  const { transactionNo } = await numberService.issueNumber(conn, configId, tenantId, userEmail);
+  const { transactionNo } = await numberService.issueNumber(conn, configId, tenantId, userPhone);
   const logId = uuidv4();
 
   await conn.execute(QUERIES.LEDGER.INSERT_LOG, [
@@ -131,7 +131,7 @@ const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
     totals.SubTotal ?? 0, totals.TaxAmount ?? 0, totals.Discount ?? 0,
     roundOff, roundedGross, toJson(totals.TaxByComponent || []),
     customer.contactDetailId, customer.name, customer.mobile,
-    null, userEmail, userEmail,
+    null, userPhone, userPhone,
   ]);
 
   // ── Lines ────────────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
       line.taxAmount ?? null, line.grossAmount ?? null,
       toJson(line.taxComponents || []), toJson(line.variants || []),
       line.name ? String(line.name).slice(0, 100) : null,
-      userEmail, userEmail,
+      userPhone, userPhone,
     ]);
     linesGrossMinor += toMinor(line.grossAmount ?? 0);
   }
@@ -190,7 +190,7 @@ const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
     paymentDetailId, tenantId, salesAccount.Id, logId,
     totals.Discount ?? 0, roundOff, fromMinor(settledMinor),
     totals.TaxAmount ?? 0, totals.SubTotal ?? 0,
-    null, userEmail, userEmail,
+    null, userPhone, userPhone,
   ]);
 
   // One paymentbreakup per tender, each with its own instrument row so a card
@@ -202,7 +202,7 @@ const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
     const pmtdId = uuidv4();
     await conn.execute(QUERIES.LEDGER.INSERT_PMTD, [
       pmtdId, tenantId, tender.paymentModeId, tender.refNo ?? null,
-      tender.comment ?? null, userEmail, userEmail,
+      tender.comment ?? null, userPhone, userPhone,
     ]);
 
     // Trim the final tender so the breakups sum to what was actually settled
@@ -216,7 +216,7 @@ const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
     // it every tender books to one account and cash flow is not computable.
     await conn.execute(QUERIES.LEDGER.INSERT_BREAKUP, [
       uuidv4(), tenantId, mode.DefaultAccountTypeBaseId, paymentDetailId, pmtdId,
-      receivedType.Id, fromMinor(applied), null, userEmail, userEmail,
+      receivedType.Id, fromMinor(applied), null, userPhone, userPhone,
     ]);
   }
 
@@ -231,11 +231,11 @@ const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
       logId, configId, fromStatusId: draft.Id, toStatusId: target.Id,
       settledAt: isFull ? new Date() : null,
     },
-    tenantId, userEmail,
+    tenantId, userPhone,
   );
 
   await conn.execute(QUERIES.LEDGER.UPDATE_BILL_LEDGER_LINK, [
-    logId, userEmail, billId, tenantId,
+    logId, userPhone, billId, tenantId,
   ]);
 
   return {
@@ -271,13 +271,13 @@ const postSaleFromBill = async (conn, input, tenantId, userEmail) => {
  * @param {string} reason - Free text, kept as the note on the credit note.
  * @returns {Promise<Object>} { transactionDetailLogId, status, creditNoteNo }
  */
-const refundSale = async (conn, logId, reason, tenantId, userEmail) => {
+const refundSale = async (conn, logId, reason, tenantId, userPhone) => {
   const result = await returnsService.createReturnTx(
     conn,
     { saleLogId: logId, lines: [], note: reason },
-    tenantId, userEmail,
+    tenantId, userPhone,
   );
-  await returnsService.applyDownstreamTx(conn, result, tenantId, userEmail);
+  await returnsService.applyDownstreamTx(conn, result, tenantId, userPhone);
 
   return {
     // The SALE's id, as before — callers use this to identify what was refunded.
@@ -306,10 +306,10 @@ const refundSale = async (conn, logId, reason, tenantId, userEmail) => {
  * @param {Object} conn - Open transaction connection (caller owns it).
  * @param {Object} input - { expenseId, amount, categoryId, paymentModeId, description, branchId, expenseDate }
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<Object>} { transactionDetailLogId, transactionNo, status }
  */
-const postExpense = async (conn, input, tenantId, userEmail) => {
+const postExpense = async (conn, input, tenantId, userPhone) => {
   const {
     expenseId, amount, categoryId, paymentModeId, description, branchId, expenseDate,
   } = input;
@@ -351,7 +351,7 @@ const postExpense = async (conn, input, tenantId, userEmail) => {
   const mode = await resolveTenderMode(conn, { paymentModeId }, tenantId);
 
   // ── Number + header ──────────────────────────────────────────────────────
-  const { transactionNo } = await numberService.issueNumber(conn, configId, tenantId, userEmail);
+  const { transactionNo } = await numberService.issueNumber(conn, configId, tenantId, userPhone);
   const logId = uuidv4();
   const gross = Number(amount) || 0;
 
@@ -362,7 +362,7 @@ const postExpense = async (conn, input, tenantId, userEmail) => {
     businessDate(expenseDate),
     gross, 0, 0, 0, gross, toJson([]),
     null, null, null,
-    description ? String(description).slice(0, 500) : null, userEmail, userEmail,
+    description ? String(description).slice(0, 500) : null, userPhone, userPhone,
   ]);
 
   // ── Payment ──────────────────────────────────────────────────────────────
@@ -370,31 +370,31 @@ const postExpense = async (conn, input, tenantId, userEmail) => {
   await conn.execute(QUERIES.LEDGER.INSERT_PAYMENT_DETAIL, [
     paymentDetailId, tenantId, expenseAccountId, logId,
     0, 0, gross, 0, gross,
-    null, userEmail, userEmail,
+    null, userPhone, userPhone,
   ]);
 
   const pmtdId = uuidv4();
   await conn.execute(QUERIES.LEDGER.INSERT_PMTD, [
     pmtdId, tenantId, paymentModeId, null,
     description ? String(description).slice(0, 100) : 'Expense',
-    userEmail, userEmail,
+    userPhone, userPhone,
   ]);
 
   // NEGATIVE: money leaving the asset account it was paid from.
   await conn.execute(QUERIES.LEDGER.INSERT_BREAKUP, [
     uuidv4(), tenantId, mode.DefaultAccountTypeBaseId, paymentDetailId, pmtdId,
-    paymentType.Id, -gross, null, userEmail, userEmail,
+    paymentType.Id, -gross, null, userPhone, userPhone,
   ]);
 
   // ── Status ───────────────────────────────────────────────────────────────
   await transitionStatus(
     conn,
     { logId, configId, fromStatusId: draft.Id, toStatusId: settled.Id, settledAt: new Date() },
-    tenantId, userEmail,
+    tenantId, userPhone,
   );
 
   await conn.execute(QUERIES.LEDGER.UPDATE_EXPENSE_LEDGER_LINK, [
-    logId, userEmail, expenseId, tenantId,
+    logId, userPhone, expenseId, tenantId,
   ]);
 
   return {

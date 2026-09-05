@@ -191,12 +191,12 @@ const mergeLineDiscounts = (manual, fromOffers) => {
  * @param {Object} args - { applied, billId, transactionDetailLogId, branchId,
  *                          contactDetailId, billGrossAmount }
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<number>} How many redemption rows were written.
  */
 const recordRedemptionsTx = async (conn, {
   applied = [], billId, transactionDetailLogId, branchId, posCustomerId, billGrossAmount,
-}, tenantId, userEmail) => {
+}, tenantId, userPhone) => {
   let written = 0;
 
   for (const entry of applied) {
@@ -209,7 +209,7 @@ const recordRedemptionsTx = async (conn, {
         billId || null, transactionDetailLogId || null, posCustomerId || null,
         award.ref || null, award.itemId || null, Number(award.quantity || 0),
         Number(award.discountAmount || 0), billGrossAmount ?? null,
-        userEmail, userEmail, userEmail,
+        userPhone, userPhone, userPhone,
       ]);
       written += 1;
     }

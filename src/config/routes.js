@@ -72,6 +72,9 @@ const posportalRoutes = require('../modules/posportal/posportal.routes');
 // The one router that is NOT behind authenticateToken — a portal has no user.
 // Its signature check is its authentication; see poswebhook.auth.js.
 const poswebhookRoutes = require('../modules/poswebhook/poswebhook.routes');
+// Also unauthenticated by necessity — Meta has no user either. Verified by an
+// HMAC over the raw body; see whatsapp.webhook.controller.
+const whatsappRoutes = require('../modules/whatsapp/whatsapp.routes');
 const posfeedbackRoutes = require('../modules/posfeedback/posfeedback.routes');
 const postokenRoutes = require('../modules/postoken/postoken.routes');
 const possettingRoutes = require('../modules/possetting/possetting.routes');
@@ -272,6 +275,9 @@ const registerRoutes = (app) => {
   // it authenticates each request against the portal's own shared secret and
   // resolves the tenant FROM that credential, never from the payload.
   app.use('/api/pos/portal-webhooks', poswebhookRoutes);
+  // WhatsApp delivery receipts. Purely observability: it can mark a code
+  // delivered or failed, and can never issue or consume one.
+  app.use('/api/webhooks/whatsapp', whatsappRoutes);
   app.use('/api/pos/feedback', posfeedbackRoutes);
   app.use('/api/pos/tokens', postokenRoutes);
   app.use('/api/pos/settings', possettingRoutes);

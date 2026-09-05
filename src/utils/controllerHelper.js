@@ -26,13 +26,13 @@ const asyncHandler = (fn) => {
 /**
  * Extracts tenant and user info from authenticated request.
  * @param {Object} req - Express request with authenticated user
- * @returns {Object} {tenantId, userEmail, userName}
+ * @returns {Object} {tenantId, userPhone, userName}
  */
 const extractUserContext = (req) => {
   return {
     tenantId: req.user.tid,
-    userEmail: req.user.email,
-    userName: req.user.name || req.user.email,
+    userPhone: req.user.phone,
+    userName: req.user.name || req.user.phone,
   };
 };
 

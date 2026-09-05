@@ -33,7 +33,7 @@ const isRoleNameLookup = (sql) => /SELECT name FROM roles/.test(sql);
 
 /**
  * updateUserRoles and createInvitation both look a membership up with the SAME
- * SQL — "SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?" —
+ * SQL — "SELECT id FROM user_tenants WHERE user_phone = ? AND tenant_id = ?" —
  * and want OPPOSITE answers from it: the first needs the person to be a member,
  * the second needs them not to be. They cannot be told apart by query text, so
  * the caller states which answer this test wants.
@@ -86,7 +86,7 @@ describe('createInvitation', () => {
   it('refuses an invitation carrying SUPER_ADMIN', async () => {
     wire({ roleNames: ['SUPER_ADMIN'], membership: 'none' });
     await expect(invitationService.createInvitation({
-      tenantId: TENANT, email: 'new@x.com', roleIds: ['r1'], invitedBy: ADMIN,
+      tenantId: TENANT, phone: '+919000000002', roleIds: ['r1'], invitedBy: ADMIN,
     })).rejects.toMatchObject({ statusCode: 403 });
   });
 
@@ -95,7 +95,7 @@ describe('createInvitation', () => {
     // ever claim is worse than a clear error now.
     wire({ roleNames: ['SUPER_ADMIN'], membership: 'none' });
     await invitationService.createInvitation({
-      tenantId: TENANT, email: 'new@x.com', roleIds: ['r1'], invitedBy: ADMIN,
+      tenantId: TENANT, phone: '+919000000002', roleIds: ['r1'], invitedBy: ADMIN,
     }).catch(() => {});
     expect(sqlCalls()).not.toContain(QUERIES.INVITATIONS.INSERT);
   });
@@ -103,7 +103,7 @@ describe('createInvitation', () => {
   it('still invites somebody as a tenant administrator', async () => {
     wire({ roleNames: ['TENANT_ADMIN'], membership: 'none' });
     await expect(invitationService.createInvitation({
-      tenantId: TENANT, email: 'new@x.com', roleIds: ['r1'], isAdmin: true, invitedBy: ADMIN,
+      tenantId: TENANT, phone: '+919000000002', roleIds: ['r1'], isAdmin: true, invitedBy: ADMIN,
     })).resolves.toBeDefined();
   });
 });

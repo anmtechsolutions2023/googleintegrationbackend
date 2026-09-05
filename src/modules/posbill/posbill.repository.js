@@ -21,14 +21,14 @@ const asArray = (v) => {
  * @param {string} billId
  * @param {string[]} orderIds
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  */
-const setBillOrdersTx = async (conn, billId, orderIds, tenantId, userEmail) => {
+const setBillOrdersTx = async (conn, billId, orderIds, tenantId, userPhone) => {
   const { v4: uuidv4 } = require('uuid');
   await conn.execute(QUERIES.POS_BILL_ORDER.DELETE_BY_BILL, [billId, tenantId]);
   for (const orderId of [...new Set((orderIds || []).filter(Boolean))]) {
     await conn.execute(QUERIES.POS_BILL_ORDER.INSERT, [
-      uuidv4(), billId, orderId, tenantId, userEmail,
+      uuidv4(), billId, orderId, tenantId, userPhone,
     ]);
   }
 };

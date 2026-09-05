@@ -39,17 +39,17 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosFeedback.create called', { tenantId, email });
-  const created = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosFeedback.create called', { tenantId, phone });
+  const created = await service.create(req.body, tenantId, phone);
   createdResponse(res, created, 'POS Feedback created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosFeedback.update called', { id, tenantId, email });
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosFeedback.update called', { id, tenantId, phone });
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'POS Feedback updated successfully');
 });
 

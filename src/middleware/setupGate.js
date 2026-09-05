@@ -92,7 +92,7 @@ const requireTenantSetup = async (req, res, next) => {
 
     logger.warn('Request blocked — tenancy setup incomplete', {
       tenantId: user.tid,
-      email: user.email,
+      phone: user.phone,
       path: req.path,
     });
 

@@ -32,6 +32,17 @@
 -- Run before: 02-seed-data.sql
 -- =============================================================================
 
+-- Follow the SERVER's default collation for utf8mb4 rather than whatever the
+-- connecting client happens to prefer. Deliberately no explicit COLLATE: the
+-- tables below take the server default too, so naming one here would pin a
+-- collation that differs between MySQL 5.7 (utf8mb4_general_ci) and 8.x
+-- (utf8mb4_0900_ai_ci) and reintroduce the mismatch this line exists to avoid.
+--
+-- Without it, a client such as mysql2 opens with utf8mb4_unicode_ci and every
+-- comparison between a user variable and a column raises
+-- "Illegal mix of collations".
+SET NAMES utf8mb4;
+
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- =============================================================================
@@ -44,6 +55,7 @@ DROP TABLE IF EXISTS tenant_setup;
 DROP TABLE IF EXISTS user_tenants;
 DROP TABLE IF EXISTS features;
 DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS auth_otp_challenge;
 
 -- 1.1 user_tenants
 -- Manages tenant membership for each authenticated user.
@@ -51,7 +63,11 @@ DROP TABLE IF EXISTS audit_logs;
 CREATE TABLE user_tenants (
     id              CHAR(36)                       NOT NULL COMMENT 'GUID for this specific membership',
     tenant_id       CHAR(36)                       NOT NULL COMMENT 'GUID for the tenant',
-    user_email      VARCHAR(100)                   NOT NULL,
+    -- The identity key. E.164 with the leading plus: '+919876543210'.
+    -- Every entry point normalises through src/utils/phone.js toE164() before
+    -- the value reaches a query — two spellings of one number would otherwise
+    -- become two accounts with two sets of roles.
+    user_phone      VARCHAR(20)                    NOT NULL,
     is_admin        BOOLEAN                        NOT NULL DEFAULT FALSE,
     is_super_admin  BOOLEAN                        NOT NULL DEFAULT FALSE,
     is_active       BOOLEAN                        NOT NULL DEFAULT TRUE,
@@ -63,8 +79,8 @@ CREATE TABLE user_tenants (
     last_active_at  DATETIME                       NULL,
 
     -- ── Staff profile ────────────────────────────────────────────────────
-    -- A member of a tenancy IS a staff member: one entity, one row. These
-    -- three columns are what the separate pos_staff table used to hold.
+    -- A member of a tenancy IS a staff member: one entity, one row. These are
+    -- what the separate pos_staff table used to hold.
     --
     -- Keeping them here rather than in a side table is the point of the
     -- unification: two tables meant a person could exist on the rota with no
@@ -72,16 +88,23 @@ CREATE TABLE user_tenants (
     -- nothing reconciled the two. They are per-MEMBERSHIP, not per-person:
     -- the same human may be 'Priya (Head Chef, Central)' in one tenancy and
     -- 'Priya (Owner)' in another, and each tenancy owns its own view of them.
-    full_name       VARCHAR(100)                   NULL,
-    phone           VARCHAR(20)                    NULL,
+    --
+    -- NOT NULL, unlike the email era. An address usually carried a name inside
+    -- it — 'priya.raman@…' told an admin who they were looking at. A bare
+    -- '+919876543210' identifies nobody, and twelve screens plus the audit
+    -- trail leaned on that. The name is captured at invitation time instead.
+    --
+    -- The old staff-profile `phone` column is gone: it IS the identity now, and
+    -- two copies of one fact drift apart.
+    full_name       VARCHAR(100)                   NOT NULL,
     -- Which outlet they work at. No FK: branchdetail is created later in this
     -- script, and a membership must survive a branch being retired.
     branch_detail_id VARCHAR(50)                   NULL,
     updated_at      TIMESTAMP                      NOT NULL DEFAULT CURRENT_TIMESTAMP
                                                    ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_tenant_user (tenant_id, user_email),
-    INDEX idx_user_lookup (user_email)
+    UNIQUE KEY uk_tenant_user (tenant_id, user_phone),
+    INDEX idx_user_lookup (user_phone)
 );
 
 -- 1.1b tenant_setup
@@ -149,7 +172,7 @@ CREATE TABLE tenant_features (
 CREATE TABLE audit_logs (
     log_id       INT AUTO_INCREMENT                          NOT NULL,
     tenant_id    VARCHAR(50)                                 NULL,
-    user_email   VARCHAR(100)                                NULL,
+    user_phone   VARCHAR(20)                                 NULL,
     action       VARCHAR(100)                                NULL COMMENT 'Human-readable action label',
     status       VARCHAR(20)                                 NULL COMMENT 'SUCCESS, DENIED, ERROR, etc.',
     ip_address   VARCHAR(45)                                 NULL,
@@ -166,7 +189,48 @@ CREATE TABLE audit_logs (
     INDEX idx_audit_level     (log_level),
     INDEX idx_audit_category  (category),
     INDEX idx_audit_tenant_ts (tenant_id, timestamp DESC),
-    INDEX idx_audit_email_ts  (user_email, timestamp DESC)
+    INDEX idx_audit_phone_ts  (user_phone, timestamp DESC)
+);
+
+-- 1.6 auth_otp_challenge
+-- One row per one-time code sent over WhatsApp.
+--
+-- The code itself is NEVER stored — only sha256(code + OTP_PEPPER), with the
+-- pepper held in the environment. A dump of this table must not be enough to
+-- sign in as somebody, and with a six-digit keyspace a per-row salt would not
+-- help: the whole million entries are precomputable in seconds. What defeats
+-- that is a secret the database does not contain.
+--
+-- Rows are short-lived by nature but are NOT deleted on use: consumed_at is
+-- stamped instead, so a replay is distinguishable from an expiry, and the
+-- delivery outcome remains readable after the fact. Prune on a schedule.
+CREATE TABLE auth_otp_challenge (
+    id               CHAR(36)     NOT NULL,
+    phone            VARCHAR(20)  NOT NULL COMMENT 'E.164, normalised before insert',
+    purpose          ENUM('LOGIN','SIGNUP')                              NOT NULL,
+    code_hash        CHAR(64)     NOT NULL COMMENT 'sha256(code + OTP_PEPPER)',
+    expires_at       DATETIME     NOT NULL,
+    attempts         TINYINT      NOT NULL DEFAULT 0,
+    -- Stamped inside the same transaction that issues the token, so two
+    -- concurrent verifies of one challenge cannot both succeed.
+    consumed_at      DATETIME     NULL,
+    -- Meta's message id. The only handle joining a send to the delivery
+    -- receipt that arrives later on the webhook.
+    wa_message_id    VARCHAR(128) NULL,
+    delivery_status  ENUM('PENDING','SENT','DELIVERED','READ','FAILED')  NOT NULL DEFAULT 'PENDING',
+    -- Meta's error code when a send fails. This is what turns "it never
+    -- arrived" into an answer: 131026 means the number has no WhatsApp
+    -- account, and no amount of resending will change that.
+    failure_code     VARCHAR(20)  NULL,
+    request_ip       VARCHAR(45)  NULL,
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    -- Serves both the live-challenge lookup and the per-number rate limit,
+    -- which is counted here rather than in memory so it survives a restart
+    -- and holds across instances.
+    INDEX idx_otp_live  (phone, consumed_at, expires_at),
+    INDEX idx_otp_wamid (wa_message_id),
+    INDEX idx_otp_rate  (phone, created_at)
 );
 
 -- =============================================================================
@@ -183,13 +247,17 @@ DROP TABLE IF EXISTS onboarding_requests;
 DROP TABLE IF EXISTS app_settings;
 
 -- 2.1 onboarding_requests
--- One row per Gmail address that has signed in but is not yet provisioned into
--- a tenant. Admin approves/rejects from the admin panel.
+-- One row per mobile number that has completed an OTP challenge but is not yet
+-- provisioned into a tenant. Admin approves/rejects from the admin panel.
+--
+-- The number is proven before the row is written. Otherwise the approval queue
+-- fills with numbers nobody controls — and unlike the Google era, where an
+-- account somebody else created was the barrier, anyone with a SIM can start
+-- this and every attempt costs a message.
 CREATE TABLE onboarding_requests (
     id                VARCHAR(50)                                         NOT NULL,
-    email             VARCHAR(255)                                        NOT NULL,
+    phone             VARCHAR(20)                                         NOT NULL,
     name              VARCHAR(255)                                        NOT NULL,
-    google_sub        VARCHAR(255)                                        NULL,
     tenant_id         VARCHAR(50)                                         NULL,
     status            ENUM('PENDING','APPROVED','REJECTED','CANCELLED')   NOT NULL DEFAULT 'PENDING',
     request_note      TEXT                                                NULL,
@@ -201,7 +269,7 @@ CREATE TABLE onboarding_requests (
     updated_at        TIMESTAMP                                           NOT NULL DEFAULT CURRENT_TIMESTAMP
                                                                          ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_onboarding_email (email)
+    UNIQUE KEY uq_onboarding_phone (phone)
 );
 
 -- 2.1b app_settings
@@ -223,17 +291,18 @@ CREATE TABLE app_settings (
 -- is raised BY a tenancy for a person who may not have an account yet, and
 -- carries the tenancy and the roles from the moment it is created.
 --
--- Claimed at login: auth resolves pending invitations for the verified Google
--- email before anything else, so an invited person joins the inviting tenancy
--- instead of being auto-provisioned a tenancy of their own.
+-- Claimed at login: auth resolves pending invitations for the verified number
+-- before anything else, so an invited person joins the inviting tenancy instead
+-- of being auto-provisioned a tenancy of their own.
 --
--- Email is a sufficient key because sign-in is Google OAuth — the address is
--- verified by Google before it reaches us, so nobody can present one they do
--- not control. A link nonce would add little until non-federated login exists.
+-- NOTHING IS SENT, deliberately. The invitation waits to be claimed, exactly as
+-- it did in the email era. It needs no delivery channel of its own because the
+-- OTP the person receives on their first sign-in already proves possession of
+-- the number — which is all a link would have proved, more expensively.
 CREATE TABLE tenant_invitations (
     id           VARCHAR(50)   NOT NULL,
     tenant_id    VARCHAR(50)   NOT NULL,
-    email        VARCHAR(255)  NOT NULL,
+    phone        VARCHAR(20)   NOT NULL,
     -- TENANT:ADMIN is derived from user_tenants.is_admin, never from a role, so
     -- without this column you could not invite a co-admin at all.
     is_admin     TINYINT(1)    NOT NULL DEFAULT 0,
@@ -241,8 +310,7 @@ CREATE TABLE tenant_invitations (
     -- membership when it is claimed. Adding a staff member IS inviting them, so
     -- the person arrives with a name and a branch rather than as a bare email
     -- somebody has to identify afterwards.
-    full_name    VARCHAR(100)  NULL,
-    phone        VARCHAR(20)   NULL,
+    full_name    VARCHAR(100)  NOT NULL,
     branch_detail_id VARCHAR(50) NULL,
     status       ENUM('PENDING','ACCEPTED','REVOKED','EXPIRED') NOT NULL DEFAULT 'PENDING',
     invited_by   VARCHAR(255)  NOT NULL,
@@ -259,9 +327,9 @@ CREATE TABLE tenant_invitations (
     is_pending   TINYINT(1) AS (IF(status = 'PENDING', 1, NULL)) STORED,
 
     PRIMARY KEY (id),
-    UNIQUE KEY uq_invite_live (tenant_id, email, is_pending),
-    -- The login claim reads by email; the admin list reads by tenant.
-    INDEX idx_invite_claim (email, status),
+    UNIQUE KEY uq_invite_live (tenant_id, phone, is_pending),
+    -- The login claim reads by number; the admin list reads by tenant.
+    INDEX idx_invite_claim (phone, status),
     INDEX idx_invite_tenant (tenant_id, status)
 );
 
@@ -311,13 +379,13 @@ CREATE TABLE role_permissions (
 -- Roles assigned to a user within a specific tenant.
 CREATE TABLE user_roles (
     id           VARCHAR(50)   NOT NULL,
-    user_email   VARCHAR(255)  NOT NULL,
+    user_phone   VARCHAR(20)   NOT NULL,
     tenant_id    VARCHAR(50)   NOT NULL,
     role_id      VARCHAR(50)   NOT NULL,
     assigned_by  VARCHAR(255)  NULL,
     assigned_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_user_role_tenant (user_email, tenant_id, role_id),
+    UNIQUE KEY uq_user_role_tenant (user_phone, tenant_id, role_id),
     FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
 );
 
@@ -2090,7 +2158,7 @@ CREATE TABLE pos_cash_session (
     BranchDetailId  VARCHAR(50)    NOT NULL,
     -- Who is accountable, by email — the same key user_tenants is addressed by,
     -- now that a staff member IS a membership.
-    CashierEmail    VARCHAR(100)   NOT NULL,
+    CashierPhone    VARCHAR(20)    NOT NULL,
     ShiftLabel      VARCHAR(50)    NULL COMMENT 'Morning / Evening / Night',
     OpeningFloat    DECIMAL(18,4)  NOT NULL DEFAULT 0,
     OpenedAt        DATETIME       NOT NULL,

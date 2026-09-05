@@ -80,7 +80,7 @@ beforeEach(() => {
 // A token carrying exactly one scope. The point is to prove the guard admits
 // THAT scope — a token with several would hide which one did the work.
 const tokenWith = (...scopes) =>
-  'Bearer ' + jwt.sign({ tid: TENANT, email: 'screen@test.com', scopes }, SECRET);
+  'Bearer ' + jwt.sign({ tid: TENANT, phone: '+919222200005', scopes }, SECRET);
 
 const resolve = (path) =>
   path.replace('ORDER_ID', ORDER_ID).replace('BRANCH_ID', BRANCH_ID).replace('TENANT_ID', TENANT);

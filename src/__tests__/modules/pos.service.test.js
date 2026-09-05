@@ -35,7 +35,7 @@ jest.mock('../../utils/dbHelper', () => ({
   executeQuery:    jest.fn(),
 }));
 
-const USER_EMAIL = 'test@example.com';
+const USER_PHONE = '+919876500099';
 const POS_MODULES = MODULE_REGISTRY.filter((m) => m.name.startsWith('pos'));
 
 beforeEach(() => jest.clearAllMocks());
@@ -54,19 +54,19 @@ POS_MODULES.forEach(({ name, servicePath, exports: ex, createData, updateData, e
     describe('create', () => {
       it('returns a generated id', async () => {
         setupInsertMock(mockConnection);
-        const result = await svc[ex.create](createData, TENANT_ID, USER_EMAIL);
+        const result = await svc[ex.create](createData, TENANT_ID, USER_PHONE);
         expect(result).toHaveProperty('id');
       });
 
       it('includes submitted data in the response', async () => {
         setupInsertMock(mockConnection);
-        const result = await svc[ex.create](createData, TENANT_ID, USER_EMAIL);
+        const result = await svc[ex.create](createData, TENANT_ID, USER_PHONE);
         expect(result).toMatchObject(createData);
       });
 
       it('never passes undefined params to the DB layer', async () => {
         setupInsertMock(mockConnection);
-        await svc[ex.create](createData, TENANT_ID, USER_EMAIL);
+        await svc[ex.create](createData, TENANT_ID, USER_PHONE);
         const insertCall = mockConnection.execute.mock.calls.find(([sql]) =>
           /INSERT/i.test(sql)
         );
@@ -78,13 +78,13 @@ POS_MODULES.forEach(({ name, servicePath, exports: ex, createData, updateData, e
     describe('update', () => {
       it('returns a record with the correct Id', async () => {
         setupReadWriteMock(mockConnection, row);
-        const result = await svc[ex.update](RECORD_ID, updateData, TENANT_ID, USER_EMAIL);
+        const result = await svc[ex.update](RECORD_ID, updateData, TENANT_ID, USER_PHONE);
         expect(result).toHaveProperty('Id', RECORD_ID);
       });
 
       it('falls back to existing values when the patch is empty', async () => {
         setupReadWriteMock(mockConnection, row);
-        const result = await svc[ex.update](RECORD_ID, {}, TENANT_ID, USER_EMAIL);
+        const result = await svc[ex.update](RECORD_ID, {}, TENANT_ID, USER_PHONE);
         expect(result).toHaveProperty('Id', RECORD_ID);
       });
 
@@ -93,7 +93,7 @@ POS_MODULES.forEach(({ name, servicePath, exports: ex, createData, updateData, e
         // existingRow carries every entity column → a "full" patch exercises the
         // provided-value branch of each field-fallback ternary.
         const fullPatch = { ...existingRow, Active: false };
-        const result = await svc[ex.update](RECORD_ID, fullPatch, TENANT_ID, USER_EMAIL);
+        const result = await svc[ex.update](RECORD_ID, fullPatch, TENANT_ID, USER_PHONE);
         expect(result).toHaveProperty('Id', RECORD_ID);
       });
     });
@@ -142,7 +142,7 @@ POS_MODULES.forEach(({ name, servicePath, exports: ex, createData, updateData, e
           // posorder.delete is a domain action (deleteRound) that also pulls the
           // KOT and frees the table, so it returns a payload rather than the
           // plain CRUD `undefined`.
-          await expect(svc[ex.delete](RECORD_ID, TENANT_ID, USER_EMAIL))
+          await expect(svc[ex.delete](RECORD_ID, TENANT_ID, USER_PHONE))
             .resolves.toMatchObject({ deletedOrderId: RECORD_ID });
           return;
         }
@@ -151,7 +151,7 @@ POS_MODULES.forEach(({ name, servicePath, exports: ex, createData, updateData, e
         // SELECT with a row, so both read as referenced here; the delete-vs-retire
         // decision itself is covered in retire.test.js.
         if (name === 'postable' || name === 'posfloor') {
-          await expect(svc[ex.delete](RECORD_ID, TENANT_ID, USER_EMAIL))
+          await expect(svc[ex.delete](RECORD_ID, TENANT_ID, USER_PHONE))
             .resolves.toMatchObject({ id: RECORD_ID, retired: true });
           return;
         }
@@ -198,13 +198,13 @@ describe('POS domain actions', () => {
 
     it('returns the KOT after marking it ready', async () => {
       setupReadWriteMock(mockConnection, { ...kotRow, Status: 'ready' });
-      const result = await svc.markReady(RECORD_ID, TENANT_ID, USER_EMAIL);
+      const result = await svc.markReady(RECORD_ID, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('Id', RECORD_ID);
     });
 
     it('issues an UPDATE with status "ready"', async () => {
       setupReadWriteMock(mockConnection, kotRow);
-      await svc.markReady(RECORD_ID, TENANT_ID, USER_EMAIL);
+      await svc.markReady(RECORD_ID, TENANT_ID, USER_PHONE);
       const statusCall = mockConnection.execute.mock.calls.find(
         ([sql]) => /UPDATE pos_kot SET Status/i.test(sql)
       );
@@ -214,7 +214,7 @@ describe('POS domain actions', () => {
 
     it('throws when the KOT does not exist', async () => {
       setupNotFoundMock(mockConnection);
-      await expect(svc.markReady(RECORD_ID, TENANT_ID, USER_EMAIL)).rejects.toThrow();
+      await expect(svc.markReady(RECORD_ID, TENANT_ID, USER_PHONE)).rejects.toThrow();
     });
   });
 
@@ -272,14 +272,14 @@ describe('POS domain actions', () => {
 
     it('settles a bill and returns it with its document number', async () => {
       routeSettle();
-      const result = await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL);
+      const result = await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('Id', RECORD_ID);
       expect(result.transactionNo).toBe('INV-0001');
     });
 
     it('marks the bill paid via the SETTLE query', async () => {
       routeSettle();
-      await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL);
+      await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_PHONE);
       const settleCall = mockConnection.execute.mock.calls.find(
         ([sql]) => /UPDATE pos_bill SET Payments/i.test(sql)
       );
@@ -289,7 +289,7 @@ describe('POS domain actions', () => {
 
     it('posts exactly one document, with the bill linked to it', async () => {
       routeSettle();
-      await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL);
+      await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_PHONE);
       const logs = mockConnection.execute.mock.calls.filter(
         ([sql]) => /INSERT INTO transactiondetaillog/i.test(String(sql))
       );
@@ -302,13 +302,13 @@ describe('POS domain actions', () => {
 
     it('refuses to settle a bill that is already posted', async () => {
       routeSettle({ alreadyPosted: 'log-existing' });
-      await expect(svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL))
+      await expect(svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_PHONE))
         .rejects.toMatchObject({ statusCode: 409 });
     });
 
     it('writes no document when the bill is already posted', async () => {
       routeSettle({ alreadyPosted: 'log-existing' });
-      await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL).catch(() => {});
+      await svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_PHONE).catch(() => {});
       expect(mockConnection.execute.mock.calls.filter(
         ([sql]) => /INSERT INTO transactiondetaillog/i.test(String(sql))
       )).toHaveLength(0);
@@ -323,14 +323,14 @@ describe('POS domain actions', () => {
         if (/^\s*SELECT/i.test(q)) return Promise.resolve([[]]);
         return Promise.resolve([{ affectedRows: 1 }]);
       });
-      await expect(svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_EMAIL))
+      await expect(svc.settle(RECORD_ID, TENDER, TENANT_ID, USER_PHONE))
         .rejects.toMatchObject({ statusCode: 400 });
     });
 
     it('throws when the bill does not exist', async () => {
       setupNotFoundMock(mockConnection);
       await expect(
-        svc.settle(RECORD_ID, { Payments: [] }, TENANT_ID, USER_EMAIL)
+        svc.settle(RECORD_ID, { Payments: [] }, TENANT_ID, USER_PHONE)
       ).rejects.toThrow();
     });
 
@@ -358,7 +358,7 @@ describe('POS domain actions', () => {
 
     it('creates a KOT and returns its summary', async () => {
       setupUnsent();
-      const result = await svc.fireKot(RECORD_ID, {}, TENANT_ID, USER_EMAIL);
+      const result = await svc.fireKot(RECORD_ID, {}, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('OrderId', RECORD_ID);
       expect(result).toHaveProperty('KotId');
       expect(result.Status).toBe('pending');
@@ -366,7 +366,7 @@ describe('POS domain actions', () => {
 
     it('inserts into pos_kot and marks the order fired', async () => {
       setupUnsent();
-      await svc.fireKot(RECORD_ID, { KotNo: 'KOT-99' }, TENANT_ID, USER_EMAIL);
+      await svc.fireKot(RECORD_ID, { KotNo: 'KOT-99' }, TENANT_ID, USER_PHONE);
       const kotInsert = mockConnection.execute.mock.calls.find(
         ([sql]) => /INSERT INTO pos_kot/i.test(sql)
       );
@@ -380,12 +380,12 @@ describe('POS domain actions', () => {
 
     it('throws when the order does not exist', async () => {
       setupNotFoundMock(mockConnection);
-      await expect(svc.fireKot(RECORD_ID, {}, TENANT_ID, USER_EMAIL)).rejects.toThrow();
+      await expect(svc.fireKot(RECORD_ID, {}, TENANT_ID, USER_PHONE)).rejects.toThrow();
     });
 
     it('refuses to send a closed round back to the kitchen', async () => {
       setupReadWriteMock(mockConnection, { ...orderRow, Status: 'closed' });
-      await expect(svc.fireKot(RECORD_ID, {}, TENANT_ID, USER_EMAIL))
+      await expect(svc.fireKot(RECORD_ID, {}, TENANT_ID, USER_PHONE))
         .rejects.toMatchObject({ statusCode: 409 });
     });
   });
@@ -402,13 +402,13 @@ describe('POS domain actions', () => {
 
     it('writes no kitchen ticket', async () => {
       setupInsertMock(mockConnection);
-      await svc.create({ Active: true }, TENANT_ID, USER_EMAIL);
+      await svc.create({ Active: true }, TENANT_ID, USER_PHONE);
       expect(kotInserts()).toHaveLength(0);
     });
 
     it('leaves the round open, waiting to be sent', async () => {
       setupInsertMock(mockConnection);
-      const result = await svc.create({ Active: true }, TENANT_ID, USER_EMAIL);
+      const result = await svc.create({ Active: true }, TENANT_ID, USER_PHONE);
       expect(result.Status).toBeUndefined();
     });
 
@@ -417,7 +417,7 @@ describe('POS domain actions', () => {
       // wraps every ~16m40s and then collides with UNIQUE (OrderNo, TenantId).
       setupInsertMock(mockConnection);
       const result = await svc.create(
-        { OrderNo: 'ORD-999999', Active: true }, TENANT_ID, USER_EMAIL,
+        { OrderNo: 'ORD-999999', Active: true }, TENANT_ID, USER_PHONE,
       );
       expect(result.OrderNo).not.toBe('ORD-999999');
     });
@@ -427,7 +427,7 @@ describe('POS domain actions', () => {
       // must not rewrite where past revenue was earned. See posVenue.js.
       setupInsertMock(mockConnection);
       const result = await svc.create(
-        { TableId: 'tbl-1', Active: true }, TENANT_ID, USER_EMAIL,
+        { TableId: 'tbl-1', Active: true }, TENANT_ID, USER_PHONE,
       );
       expect(result).toHaveProperty('TableName');
       expect(result).toHaveProperty('FloorId');
@@ -437,7 +437,7 @@ describe('POS domain actions', () => {
 
     it('records no venue for a round with no table', async () => {
       setupInsertMock(mockConnection);
-      const result = await svc.create({ Active: true }, TENANT_ID, USER_EMAIL);
+      const result = await svc.create({ Active: true }, TENANT_ID, USER_PHONE);
       expect(result.TableName).toBeNull();
       expect(result.FloorId).toBeNull();
     });
@@ -456,7 +456,7 @@ describe('positemmeta join-table sync', () => {
     await svc.create(
       { ItemDetailId: RECORD_ID, FoodType: 'veg', BranchDetailId: RECORD_ID, ChannelIds: [CHAN_A, CHAN_B], VariantIds: [VAR_A] },
       TENANT_ID,
-      USER_EMAIL,
+      USER_PHONE,
     );
     const chanInserts = mockConnection.execute.mock.calls.filter(
       ([sql]) => /INSERT INTO pos_item_meta_channel/i.test(sql)
@@ -470,7 +470,7 @@ describe('positemmeta join-table sync', () => {
 
   it('clears existing links before re-inserting on update', async () => {
     setupReadWriteMock(mockConnection, buildExistingRow({ ItemDetailId: RECORD_ID, FoodType: 'veg', BranchDetailId: RECORD_ID }));
-    await svc.update(RECORD_ID, { ChannelIds: [CHAN_A] }, TENANT_ID, USER_EMAIL);
+    await svc.update(RECORD_ID, { ChannelIds: [CHAN_A] }, TENANT_ID, USER_PHONE);
     const chanDelete = mockConnection.execute.mock.calls.find(
       ([sql]) => /DELETE FROM pos_item_meta_channel/i.test(sql)
     );
@@ -483,7 +483,7 @@ describe('positemmeta join-table sync', () => {
 
   it('leaves links untouched when ChannelIds/VariantIds are omitted', async () => {
     setupReadWriteMock(mockConnection, buildExistingRow({ ItemDetailId: RECORD_ID, FoodType: 'veg', BranchDetailId: RECORD_ID }));
-    await svc.update(RECORD_ID, { FoodType: 'nonveg' }, TENANT_ID, USER_EMAIL);
+    await svc.update(RECORD_ID, { FoodType: 'nonveg' }, TENANT_ID, USER_PHONE);
     const linkTouch = mockConnection.execute.mock.calls.find(
       ([sql]) => /(DELETE FROM|INSERT INTO) pos_item_meta_(channel|variant)/i.test(sql)
     );
@@ -543,7 +543,7 @@ describe('positemmeta CostInfoId derivation', () => {
     await svc.create(
       { ItemDetailId: ITEM_A, FoodTypeId: RECORD_ID, BranchDetailId: RECORD_ID },
       TENANT_ID,
-      USER_EMAIL,
+      USER_PHONE,
     );
     expect(insertedCostInfoId()).toBe(COST_A);
   });
@@ -553,7 +553,7 @@ describe('positemmeta CostInfoId derivation', () => {
     const result = await svc.create(
       { ItemDetailId: ITEM_A, FoodTypeId: RECORD_ID, BranchDetailId: RECORD_ID },
       TENANT_ID,
-      USER_EMAIL,
+      USER_PHONE,
     );
     expect(result.CostInfoId).toBe(COST_A);
   });
@@ -568,7 +568,7 @@ describe('positemmeta CostInfoId derivation', () => {
         CostInfoId: EXPLICIT_COST,
       },
       TENANT_ID,
-      USER_EMAIL,
+      USER_PHONE,
     );
     // The caller's value wins over the item's own price.
     expect(insertedCostInfoId()).toBe(EXPLICIT_COST);
@@ -584,7 +584,7 @@ describe('positemmeta CostInfoId derivation', () => {
         CostInfoId: null,
       },
       TENANT_ID,
-      USER_EMAIL,
+      USER_PHONE,
     );
     expect(insertedCostInfoId()).toBeNull();
   });
@@ -594,7 +594,7 @@ describe('positemmeta CostInfoId derivation', () => {
     await svc.create(
       { ItemDetailId: ITEM_A, FoodTypeId: RECORD_ID, BranchDetailId: RECORD_ID },
       TENANT_ID,
-      USER_EMAIL,
+      USER_PHONE,
     );
     expect(insertedCostInfoId()).toBeNull();
   });
@@ -604,7 +604,7 @@ describe('positemmeta CostInfoId derivation', () => {
     await svc.create(
       { ItemDetailId: ITEM_A, FoodTypeId: RECORD_ID, BranchDetailId: RECORD_ID },
       TENANT_ID,
-      USER_EMAIL,
+      USER_PHONE,
     );
     expect(insertedCostInfoId()).toBeNull();
   });
@@ -613,7 +613,7 @@ describe('positemmeta CostInfoId derivation', () => {
     const existing = buildExistingRow({ ItemDetailId: ITEM_A, CostInfoId: COST_A });
     withItemPrices({ [ITEM_A]: COST_A, [ITEM_B]: COST_B }, existing);
 
-    await svc.update(RECORD_ID, { ItemDetailId: ITEM_B }, TENANT_ID, USER_EMAIL);
+    await svc.update(RECORD_ID, { ItemDetailId: ITEM_B }, TENANT_ID, USER_PHONE);
 
     // The whole point of deriving on update — the stale COST_A must not stick.
     expect(updatedCostInfoId()).toBe(COST_B);
@@ -623,7 +623,7 @@ describe('positemmeta CostInfoId derivation', () => {
     const existing = buildExistingRow({ ItemDetailId: ITEM_A, CostInfoId: COST_A });
     withItemPrices({ [ITEM_A]: COST_A }, existing);
 
-    await svc.update(RECORD_ID, { Active: false }, TENANT_ID, USER_EMAIL);
+    await svc.update(RECORD_ID, { Active: false }, TENANT_ID, USER_PHONE);
 
     expect(updatedCostInfoId()).toBe(COST_A);
   });
@@ -632,7 +632,7 @@ describe('positemmeta CostInfoId derivation', () => {
     const existing = buildExistingRow({ ItemDetailId: null, CostInfoId: COST_A });
     withItemPrices({}, existing);
 
-    await svc.update(RECORD_ID, { Active: false }, TENANT_ID, USER_EMAIL);
+    await svc.update(RECORD_ID, { Active: false }, TENANT_ID, USER_PHONE);
 
     expect(updatedCostInfoId()).toBe(COST_A);
   });

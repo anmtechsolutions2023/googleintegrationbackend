@@ -39,17 +39,17 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosTable.create called', { tenantId, email });
-  const created = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosTable.create called', { tenantId, phone });
+  const created = await service.create(req.body, tenantId, phone);
   createdResponse(res, created, 'POS Table created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosTable.update called', { id, tenantId, email });
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosTable.update called', { id, tenantId, phone });
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'POS Table updated successfully');
 });
 
@@ -58,9 +58,9 @@ const update = asyncHandler(async (req, res) => {
 // rather than surprising.
 const deleteById = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email: userEmail } = req.user;
+  const { tid: tenantId, phone: userPhone } = req.user;
   logger.info('PosTable.deleteById called', { id, tenantId });
-  const result = await service.remove(id, tenantId, userEmail);
+  const result = await service.remove(id, tenantId, userPhone);
   noContentResponse(
     res,
     result && result.retired

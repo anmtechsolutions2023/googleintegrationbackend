@@ -37,7 +37,7 @@ const adminService = require('../../modules/admin/admin.service');
 const invitations = require('../../modules/invitation/invitation.service');
 
 const req = { headers: {}, ip: '127.0.0.1' };
-const userData = { email: 'invited@user.com', name: 'Invited', googleId: 'g-1' };
+const userData = { phone: '+919876501011', name: 'Invited', googleId: 'g-1' };
 
 /** Answers by query shape rather than call order, so extra reads don't shift it. */
 const route = (memberships) => {
@@ -59,7 +59,7 @@ describe('an invitation outranks auto-provisioning', () => {
   it('claims invitations before memberships are even read', async () => {
     route([]);
     await findAndGetPermissions(req, userData);
-    expect(invitations.acceptPendingTx).toHaveBeenCalledWith(mockConn, 'invited@user.com');
+    expect(invitations.acceptPendingTx).toHaveBeenCalledWith(mockConn, '+919876501011');
   });
 
   // The primary ask: with auto-approve ON, an invited newcomer must NOT be
@@ -130,6 +130,6 @@ describe('multi-tenancy', () => {
     route([{ tenant_id: 'here', is_admin: 0, is_super_admin: 0 }]);
     await findAndGetPermissions(req, userData);
     const touch = mockConn.execute.mock.calls.find(([sql]) => /UPDATE user_tenants/.test(String(sql)));
-    expect(touch[1]).toEqual(['invited@user.com', 'here']);
+    expect(touch[1]).toEqual(['+919876501011', 'here']);
   });
 });

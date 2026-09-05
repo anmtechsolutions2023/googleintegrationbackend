@@ -36,7 +36,7 @@ module.exports = {
     MISSING_TENANT_ID: 'Target Tenant ID is required.',
     TENANT_ACCESS_DENIED: 'Access denied to target tenant.',
     USER_NOT_ASSOCIATED: 'User is not associated with any active tenant.',
-    INVALID_PAYLOAD: 'Invalid token payload or missing email.',
+    INVALID_PAYLOAD: 'Invalid token payload or missing mobile number.',
     GOOGLE_VALIDATION_FAILED: 'Google token validation failed: ',
     DB_UNAVAILABLE: 'Database is unreachable. Please try again shortly.',
     DB_BUSY: 'The server is busy right now. Please try again in a moment.',
@@ -125,8 +125,25 @@ module.exports = {
     SYSTEM_ROLE_PROTECTED: 'System roles cannot be modified or deleted.',
     USER_ALREADY_EXISTS: 'User is already provisioned in this tenant.',
     INVITE_ALREADY_MEMBER: 'That person is already in this tenancy. Change their roles from the users list instead.',
-    INVITE_ALREADY_PENDING: 'There is already a pending invitation for that email. Revoke it first to change the roles.',
+    INVITE_ALREADY_PENDING: 'There is already a pending invitation for that number. Revoke it first to change the roles.',
     INVITE_ROLE_NOT_IN_TENANT: 'One or more roles do not belong to this tenancy.',
+    INVALID_PHONE:
+      'Enter a valid mobile number, for example 98765 43210.',
+    // ── One-time codes ──────────────────────────────────────────────────
+    // Worded so a user knows what to DO. The distinction that matters is
+    // between "your code was wrong" and "we could not send you one" — the
+    // second is never the user's fault and must not read as though it were.
+    OTP_INVALID: 'That code is not right. Check the message and try again.',
+    OTP_EXPIRED: 'That code has expired. Ask for a new one.',
+    OTP_LOCKED: 'Too many attempts. Ask for a new code to continue.',
+    OTP_TOO_MANY: 'Too many requests. Wait a few minutes and try again.',
+    OTP_TOO_SOON: 'A code was just sent. Wait a moment before asking for another.',
+    OTP_NO_WHATSAPP:
+      'That number does not have WhatsApp. Use a number that does, or ask your administrator to sign you in.',
+    OTP_SEND_FAILED:
+      'We could not send your code just now. Please try again in a moment.',
+    OTP_UNAVAILABLE:
+      'Sign-in by WhatsApp is temporarily unavailable. Please contact your administrator.',
     INVITE_NOT_PENDING: 'No pending invitation found.',
     SELF_ROLE_CHANGE_FORBIDDEN: 'You cannot change your own roles. Ask another administrator in this tenancy.',
     SELF_DEMOTE_FORBIDDEN: 'You cannot remove your own administrator access — you would lose the ability to restore it.',

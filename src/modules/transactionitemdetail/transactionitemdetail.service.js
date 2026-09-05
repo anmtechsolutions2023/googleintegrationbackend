@@ -75,7 +75,7 @@ class TransactionItemDetailService extends BaseCRUDService {
     });
   }
 
-  async create(data, tenantId, userEmail) {
+  async create(data, tenantId, userPhone) {
     // Lines cannot be added to a settled document.
     await assertMutable(data.TransactionDetailLogId, tenantId);
     const priced = await this.priceLine(data, null, tenantId);
@@ -85,11 +85,11 @@ class TransactionItemDetailService extends BaseCRUDService {
     return super.create(
       { ...data, ...(priced || {}), LineNo: lineNo },
       tenantId,
-      userEmail,
+      userPhone,
     );
   }
 
-  async update(id, data, tenantId, userEmail) {
+  async update(id, data, tenantId, userPhone) {
     // Lines of a settled document cannot be edited.
     const current = await this.getById(id, tenantId);
     await assertMutable(current.TransactionDetailLogId, tenantId);
@@ -99,14 +99,14 @@ class TransactionItemDetailService extends BaseCRUDService {
       data.ItemId !== undefined ||
       data.Quantity !== undefined ||
       data.CostInfoId !== undefined;
-    if (!affectsPrice) return super.update(id, data, tenantId, userEmail);
+    if (!affectsPrice) return super.update(id, data, tenantId, userPhone);
 
     const existing = await this.getById(id, tenantId);
     const priced = await this.priceLine(data, existing, tenantId);
-    return super.update(id, priced ? { ...data, ...priced } : data, tenantId, userEmail);
+    return super.update(id, priced ? { ...data, ...priced } : data, tenantId, userPhone);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -127,12 +127,12 @@ class TransactionItemDetailService extends BaseCRUDService {
       toJson(data.Variants),
       data.Comment || null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     const pick = (key) => (data[key] !== undefined ? data[key] : existing[key]);
     return [
       pick('TransactionDetailLogId'),
@@ -152,7 +152,7 @@ class TransactionItemDetailService extends BaseCRUDService {
       toJson(pick('Variants')),
       pick('Comment') ?? null,
       pick('Active'),
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -164,9 +164,9 @@ module.exports = {
   getAll: (tenantId, page, limit, expand) =>
     service.getAll(tenantId, page, limit, expand),
   getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),
-  create: (data, tenantId, userEmail) =>
-    service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) =>
-    service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) =>
+    service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) =>
+    service.update(id, data, tenantId, userPhone),
   delete: (id, tenantId) => service.delete(id, tenantId),
 };

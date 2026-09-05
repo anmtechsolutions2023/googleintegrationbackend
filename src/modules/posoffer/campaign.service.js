@@ -119,12 +119,12 @@ const getById = (id, tenantId) => withConnection(async (conn) => {
   };
 });
 
-const writeBranchesTx = async (conn, campaignId, branchIds, tenantId, userEmail) => {
+const writeBranchesTx = async (conn, campaignId, branchIds, tenantId, userPhone) => {
   await conn.execute(QUERIES.POS_CAMPAIGN.DELETE_BRANCHES, [campaignId, tenantId]);
   for (const branchId of branchIds || []) {
     // eslint-disable-next-line no-await-in-loop
     await conn.execute(QUERIES.POS_CAMPAIGN.INSERT_BRANCH, [
-      uuidv4(), tenantId, campaignId, branchId, userEmail, userEmail,
+      uuidv4(), tenantId, campaignId, branchId, userPhone, userPhone,
     ]);
   }
 };
@@ -158,7 +158,7 @@ const assertWindow = (data) => {
   }
 };
 
-const create = (data, tenantId, userEmail) => withTransaction(async (conn) => {
+const create = (data, tenantId, userPhone) => withTransaction(async (conn) => {
   assertWindow(data);
   const id = uuidv4();
   await conn.execute(QUERIES.POS_CAMPAIGN.INSERT, [
@@ -166,14 +166,14 @@ const create = (data, tenantId, userEmail) => withTransaction(async (conn) => {
     data.StartsOn, data.EndsOn || null, data.DaysOfWeek || null,
     data.StartTime || null, data.EndTime || null,
     data.BudgetAmount ?? null, data.Status || STATUS.DRAFT,
-    userEmail, userEmail,
+    userPhone, userPhone,
   ]);
-  await writeBranchesTx(conn, id, data.branchIds, tenantId, userEmail);
-  logger.info('Campaign created', { tenantId, campaignId: id, name: data.Name, userEmail });
+  await writeBranchesTx(conn, id, data.branchIds, tenantId, userPhone);
+  logger.info('Campaign created', { tenantId, campaignId: id, name: data.Name, userPhone });
   return { id };
 });
 
-const update = (id, data, tenantId, userEmail) => withTransaction(async (conn) => {
+const update = (id, data, tenantId, userPhone) => withTransaction(async (conn) => {
   const [rows] = await conn.execute(QUERIES.POS_CAMPAIGN.SELECT_BY_ID, [id, tenantId]);
   if (!rows.length) throw new HttpError('Campaign not found.', MESSAGES.HTTP_STATUS.NOT_FOUND);
   const existing = rows[0];
@@ -194,10 +194,10 @@ const update = (id, data, tenantId, userEmail) => withTransaction(async (conn) =
     data.EndTime !== undefined ? data.EndTime : existing.EndTime,
     data.BudgetAmount !== undefined ? data.BudgetAmount : existing.BudgetAmount,
     data.Status ?? existing.Status,
-    userEmail, id, tenantId,
+    userPhone, id, tenantId,
   ]);
   if (data.branchIds !== undefined) {
-    await writeBranchesTx(conn, id, data.branchIds, tenantId, userEmail);
+    await writeBranchesTx(conn, id, data.branchIds, tenantId, userPhone);
   }
   return { id };
 });
@@ -207,16 +207,16 @@ const update = (id, data, tenantId, userEmail) => withTransaction(async (conn) =
  * switch somebody reaches for when a promotion is going wrong, and knowing who
  * flipped it matters more than knowing who renamed it.
  */
-const setStatus = (id, status, tenantId, userEmail) => withConnection(async (conn) => {
+const setStatus = (id, status, tenantId, userPhone) => withConnection(async (conn) => {
   if (!Object.values(STATUS).includes(status)) {
     throw new HttpError(
       `Status must be one of: ${Object.values(STATUS).join(', ')}.`,
       MESSAGES.HTTP_STATUS.BAD_REQUEST,
     );
   }
-  const [res] = await conn.execute(QUERIES.POS_CAMPAIGN.SET_STATUS, [status, userEmail, id, tenantId]);
+  const [res] = await conn.execute(QUERIES.POS_CAMPAIGN.SET_STATUS, [status, userPhone, id, tenantId]);
   if (!res.affectedRows) throw new HttpError('Campaign not found.', MESSAGES.HTTP_STATUS.NOT_FOUND);
-  logger.warn('Campaign status changed', { tenantId, campaignId: id, status, userEmail });
+  logger.warn('Campaign status changed', { tenantId, campaignId: id, status, userPhone });
   return { id, Status: status };
 });
 
@@ -227,8 +227,8 @@ const setStatus = (id, status, tenantId, userEmail) => withConnection(async (con
  * orphan every redemption written against it and make last month's cost
  * unanswerable.
  */
-const remove = (id, tenantId, userEmail) => withConnection(async (conn) => {
-  const [res] = await conn.execute(QUERIES.POS_CAMPAIGN.SOFT_DELETE, [userEmail, id, tenantId]);
+const remove = (id, tenantId, userPhone) => withConnection(async (conn) => {
+  const [res] = await conn.execute(QUERIES.POS_CAMPAIGN.SOFT_DELETE, [userPhone, id, tenantId]);
   if (!res.affectedRows) throw new HttpError('Campaign not found.', MESSAGES.HTTP_STATUS.NOT_FOUND);
   return { id };
 });

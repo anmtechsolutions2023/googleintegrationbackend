@@ -48,10 +48,10 @@ const formatNumber = (config, counter) => {
  * @param {Object} conn - Open transaction connection.
  * @param {string} transactionTypeConfigId
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<{transactionNo:string, counter:number}>}
  */
-const issueNumber = async (conn, transactionTypeConfigId, tenantId, userEmail) => {
+const issueNumber = async (conn, transactionTypeConfigId, tenantId, userPhone) => {
   const [rows] = await conn.execute(QUERIES.LEDGER.SELECT_CONFIG_FOR_UPDATE, [
     transactionTypeConfigId,
     tenantId,
@@ -72,7 +72,7 @@ const issueNumber = async (conn, transactionTypeConfigId, tenantId, userEmail) =
 
   await conn.execute(QUERIES.LEDGER.UPDATE_COUNTER, [
     next,
-    userEmail,
+    userPhone,
     transactionTypeConfigId,
     tenantId,
   ]);
@@ -95,10 +95,10 @@ const issueNumber = async (conn, transactionTypeConfigId, tenantId, userEmail) =
  * @param {Object} conn - Open transaction connection.
  * @param {string} tagName - e.g. 'POS_ORDER', 'POS_KOT', 'POS_BILL'.
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<string|null>} The rendered number, or null if unconfigured.
  */
-const issueByTag = async (conn, tagName, tenantId, userEmail) => {
+const issueByTag = async (conn, tagName, tenantId, userPhone) => {
   const [rows] = await conn.execute(QUERIES.LEDGER.SELECT_CONFIG_BY_TAG, [
     tagName,
     tenantId,
@@ -107,7 +107,7 @@ const issueByTag = async (conn, tagName, tenantId, userEmail) => {
   // same as a miss. This runs on the sale path, so an unexpected result shape
   // must degrade to the caller's fallback rather than throw.
   if (!Array.isArray(rows) || rows.length === 0 || !rows[0]?.Id) return null;
-  const { transactionNo } = await issueNumber(conn, rows[0].Id, tenantId, userEmail);
+  const { transactionNo } = await issueNumber(conn, rows[0].Id, tenantId, userPhone);
   return transactionNo;
 };
 

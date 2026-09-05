@@ -101,7 +101,7 @@ router.post('/:code', rateLimit, rawJson, asyncHandler(async (req, res) => {
     payload: req.body,
     rawBody: req.rawBody,
     tenantId: auth.tenantId,
-    userEmail: `portal:${portal.Code}`,
+    userPhone: `portal:${portal.Code}`,
   });
 
   logger.info('Portal webhook handled', {

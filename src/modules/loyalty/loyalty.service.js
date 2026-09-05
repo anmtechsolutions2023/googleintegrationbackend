@@ -59,16 +59,16 @@ const resolveRate = async (conn, tenantId) => {
  * @param {Object} conn - Active TRANSACTION connection.
  * @param {Object} entry - { customerId, entryType, points, sourceType, sourceId, reversesId, reason, branchDetailId }
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<{id: string, points: number}|null>} Null when the guard rejected a duplicate.
  */
-const appendTx = async (conn, entry, tenantId, userEmail) => {
+const appendTx = async (conn, entry, tenantId, userPhone) => {
   const id = uuidv4();
   try {
     await conn.execute(QUERIES.LOYALTY_LEDGER.INSERT, [
       id, tenantId, entry.customerId, entry.entryType, entry.points,
       entry.sourceType || null, entry.sourceId || null, entry.reversesId || null,
-      entry.reason || null, entry.branchDetailId || null, userEmail,
+      entry.reason || null, entry.branchDetailId || null, userPhone,
     ]);
   } catch (err) {
     // UNIQUE (tenant, source, type). A retried settle or a double-clicked
@@ -86,7 +86,7 @@ const appendTx = async (conn, entry, tenantId, userEmail) => {
   // The cache on pos_customer. Moved only here, so it cannot drift from the
   // ledger by any path that does not go through this function.
   await conn.execute(QUERIES.POS_CUSTOMER.ADJUST_POINTS, [
-    entry.points, userEmail, entry.customerId, tenantId,
+    entry.points, userPhone, entry.customerId, tenantId,
   ]);
 
   return { id, points: entry.points };
@@ -98,10 +98,10 @@ const appendTx = async (conn, entry, tenantId, userEmail) => {
  * @param {Object} conn - The settle transaction's connection.
  * @param {Object} sale - { customerId, billId, amount, branchDetailId }
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<number>} Points credited. Zero for a walk-in.
  */
-const earnForSaleTx = async (conn, sale, tenantId, userEmail) => {
+const earnForSaleTx = async (conn, sale, tenantId, userPhone) => {
   if (!sale.customerId) return 0;                 // walk-in: nothing to record
 
   const spend = Number(sale.amount) || 0;
@@ -120,7 +120,7 @@ const earnForSaleTx = async (conn, sale, tenantId, userEmail) => {
     sourceId: sale.billId,
     reason: `Earned on a sale of ${spend}`,
     branchDetailId: sale.branchDetailId,
-  }, tenantId, userEmail);
+  }, tenantId, userPhone);
 
   return entry ? points : 0;
 };
@@ -136,10 +136,10 @@ const earnForSaleTx = async (conn, sale, tenantId, userEmail) => {
  * @param {Object} conn - The refund transaction's connection.
  * @param {Object} refund - { billId, reason, branchDetailId }
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<number>} Points taken back, as a positive number. Zero if there were none.
  */
-const reverseForSaleTx = async (conn, refund, tenantId, userEmail) => {
+const reverseForSaleTx = async (conn, refund, tenantId, userPhone) => {
   const [rows] = await conn.execute(QUERIES.LOYALTY_LEDGER.SELECT_ENTRY_BY_SOURCE, [
     tenantId, SOURCE.BILL, refund.billId, ENTRY.EARN,
   ]);
@@ -158,7 +158,7 @@ const reverseForSaleTx = async (conn, refund, tenantId, userEmail) => {
       ? `Refunded — ${String(refund.reason).slice(0, 200)}`
       : 'Refunded',
     branchDetailId: refund.branchDetailId,
-  }, tenantId, userEmail);
+  }, tenantId, userPhone);
 
   return entry ? Number(original.Points) : 0;
 };
@@ -195,7 +195,7 @@ const reverseForSaleTx = async (conn, refund, tenantId, userEmail) => {
  * @param {boolean} ret.isFinal        - Does this return complete the sale?
  * @returns {Promise<number>} Points actually reversed (a positive number).
  */
-const reverseForReturnTx = async (conn, ret, tenantId, userEmail) => {
+const reverseForReturnTx = async (conn, ret, tenantId, userPhone) => {
   const [rows] = await conn.execute(QUERIES.LOYALTY_LEDGER.SELECT_ENTRY_BY_SOURCE, [
     tenantId, SOURCE.BILL, ret.billId, ENTRY.EARN,
   ]);
@@ -239,7 +239,7 @@ const reverseForReturnTx = async (conn, ret, tenantId, userEmail) => {
       ? `Returned — ${String(ret.reason).slice(0, 200)}`
       : 'Returned',
     branchDetailId: ret.branchDetailId,
-  }, tenantId, userEmail);
+  }, tenantId, userPhone);
 
   return entry ? points : 0;
 };
@@ -253,10 +253,10 @@ const reverseForReturnTx = async (conn, ret, tenantId, userEmail) => {
  * @param {Object} conn - The settle transaction's connection.
  * @param {Object} spend - { customerId, billId, points, maxValue, branchDetailId }
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<number>} Points actually spent.
  */
-const redeemForSaleTx = async (conn, spend, tenantId, userEmail) => {
+const redeemForSaleTx = async (conn, spend, tenantId, userPhone) => {
   const wanted = Math.floor(Number(spend.points) || 0);
   if (!spend.customerId || wanted <= 0) return 0;
 
@@ -280,7 +280,7 @@ const redeemForSaleTx = async (conn, spend, tenantId, userEmail) => {
     sourceId: spend.billId,
     reason: `Redeemed against a sale`,
     branchDetailId: spend.branchDetailId,
-  }, tenantId, userEmail);
+  }, tenantId, userPhone);
 
   return entry ? capped : 0;
 };
@@ -290,10 +290,10 @@ const redeemForSaleTx = async (conn, spend, tenantId, userEmail) => {
  *
  * @param {Object} adjustment - { customerId, points, reason }
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<{points: number, balance: number}>}
  */
-const adjust = ({ customerId, points, reason }, tenantId, userEmail) =>
+const adjust = ({ customerId, points, reason }, tenantId, userPhone) =>
   withConnection(async (conn) => {
     await appendTx(conn, {
       customerId,
@@ -304,7 +304,7 @@ const adjust = ({ customerId, points, reason }, tenantId, userEmail) =>
       // second gesture for the same customer would be rejected as a duplicate.
       sourceId: uuidv4(),
       reason,
-    }, tenantId, userEmail);
+    }, tenantId, userPhone);
 
     const [rows] = await conn.execute(
       QUERIES.LOYALTY_LEDGER.SELECT_BALANCE, [customerId, tenantId],

@@ -58,13 +58,13 @@ const isSetupComplete = async (tenantId, existingConn) => {
  * it describes — a rolled-back bootstrap must leave the tenant PENDING.
  * @param {Object} conn - Open transaction connection.
  * @param {string} tenantId - Tenant ID.
- * @param {string} userEmail - Acting user's email.
+ * @param {string} userPhone - Acting user's email.
  * @returns {Promise<void>}
  */
-const markCompletedTx = async (conn, tenantId, userEmail) => {
+const markCompletedTx = async (conn, tenantId, userPhone) => {
   await conn.execute(QUERIES.TENANT_SETUP.UPSERT_COMPLETED, [
     tenantId,
-    userEmail,
+    userPhone,
   ]);
 };
 

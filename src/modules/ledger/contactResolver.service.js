@@ -42,11 +42,11 @@ const splitName = (full) => {
  * @param {Object} conn - Open transaction connection.
  * @param {string|null} posCustomerId
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<{contactDetailId:string|null, name:string|null, mobile:string|null}>}
  *          All-null for a walk-in — an anonymous sale is normal, not an error.
  */
-const resolveContactForPosCustomer = async (conn, posCustomerId, tenantId, userEmail) => {
+const resolveContactForPosCustomer = async (conn, posCustomerId, tenantId, userPhone) => {
   const none = { contactDetailId: null, name: null, mobile: null };
   if (!posCustomerId) return none;
 
@@ -86,14 +86,14 @@ const resolveContactForPosCustomer = async (conn, posCustomerId, tenantId, userE
       `INSERT INTO contactdetail
          (Id, TenantId, FirstName, LastName, MobileNo, Active, CreatedOn, CreatedBy, UpdatedBy)
        VALUES (?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
-      [contactDetailId, tenantId, firstName, lastName, phone, userEmail, userEmail],
+      [contactDetailId, tenantId, firstName, lastName, phone, userPhone, userPhone],
     );
   }
 
   // Complete the merge so the next sale skips all of this.
   await conn.execute(
     'UPDATE pos_customer SET ContactDetailId = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
-    [contactDetailId, userEmail, posCustomerId, tenantId],
+    [contactDetailId, userPhone, posCustomerId, tenantId],
   );
 
   return { contactDetailId, name: customer.Name || null, mobile: phone };

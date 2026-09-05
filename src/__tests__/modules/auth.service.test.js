@@ -24,7 +24,7 @@ describe('Auth Service', () => {
 // ─── First-time setup claim ──────────────────────────────────────────────────
 describe('generateAppToken — setupCompleted claim', () => {
   const approved = (overrides = {}) => ({
-    email: 'user@test.com',
+    phone: '+919876504011',
     name: 'User',
     tenantId: 'tenant-1',
     onboardingStatus: 'APPROVED',
@@ -52,7 +52,7 @@ describe('generateAppToken — setupCompleted claim', () => {
 
   it('omits the claim for guest tokens (no tenant to set up)', () => {
     const guest = decode({
-      email: 'guest@test.com',
+      phone: '+919876504011',
       name: 'Guest',
       tenantId: null,
       onboardingStatus: 'PENDING',
@@ -65,7 +65,7 @@ describe('generateAppToken — setupCompleted claim', () => {
 
 describe('reissueTokenWithSetupComplete', () => {
   const original = {
-    email: 'admin@test.com',
+    phone: '+919876504011',
     name: 'Admin',
     tid: 'tenant-1',
     scopes: ['TENANT:ADMIN'],
@@ -84,7 +84,7 @@ describe('reissueTokenWithSetupComplete', () => {
 
   it('carries identity, scopes and roles over verbatim — nothing is elevated', () => {
     const claims = jwt.verify(reissueTokenWithSetupComplete(original), JWT_SECRET);
-    expect(claims.email).toBe('admin@test.com');
+    expect(claims.phone).toBe('+919876504011');
     expect(claims.tid).toBe('tenant-1');
     expect(claims.scopes).toEqual(['TENANT:ADMIN']);
     expect(claims.roles).toEqual(['TENANT_ADMIN']);

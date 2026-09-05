@@ -10,7 +10,7 @@ class TransactionTypeConversionMapperService extends BaseCRUDService {
     );
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -18,18 +18,18 @@ class TransactionTypeConversionMapperService extends BaseCRUDService {
       data.TransactionDetailLogId,
       data.TransactionTypeStatusId,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.TransactionTypeBaseCoversionId !== undefined ? data.TransactionTypeBaseCoversionId : existing.TransactionTypeBaseCoversionId,
       data.TransactionDetailLogId !== undefined ? data.TransactionDetailLogId : existing.TransactionDetailLogId,
       data.TransactionTypeStatusId !== undefined ? data.TransactionTypeStatusId : existing.TransactionTypeStatusId,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -41,9 +41,9 @@ module.exports = {
   getAll: (tenantId, page, limit, expand) =>
     service.getAll(tenantId, page, limit, expand),
   getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),
-  create: (data, tenantId, userEmail) =>
-    service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) =>
-    service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) =>
+    service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) =>
+    service.update(id, data, tenantId, userPhone),
   delete: (id, tenantId) => service.delete(id, tenantId),
 };

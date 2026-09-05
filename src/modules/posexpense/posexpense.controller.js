@@ -40,17 +40,17 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosExpense.create called', { tenantId, email });
-  const created = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosExpense.create called', { tenantId, phone });
+  const created = await service.create(req.body, tenantId, phone);
   createdResponse(res, created, 'POS Expense created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosExpense.update called', { id, tenantId, email });
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosExpense.update called', { id, tenantId, phone });
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'POS Expense updated successfully');
 });
 
@@ -66,25 +66,25 @@ const deleteById = asyncHandler(async (req, res) => {
 // POSTs to their own paths rather than a Status field on the update body.
 const approve = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosExpense.approve called', { id, tenantId, email });
-  const record = await service.approve(id, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosExpense.approve called', { id, tenantId, phone });
+  const record = await service.approve(id, tenantId, phone);
   successResponse(res, record, 'Expense approved');
 });
 
 const reject = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosExpense.reject called', { id, tenantId, email });
-  const record = await service.reject(id, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosExpense.reject called', { id, tenantId, phone });
+  const record = await service.reject(id, tenantId, phone);
   successResponse(res, record, 'Expense rejected');
 });
 
 const settle = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosExpense.settle called', { id, tenantId, email });
-  const record = await service.settle(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosExpense.settle called', { id, tenantId, phone });
+  const record = await service.settle(id, req.body, tenantId, phone);
   successResponse(res, record, 'Expense settled and posted to the ledger');
 });
 

@@ -19,12 +19,12 @@ const getStatement = asyncHandler(async (req, res) => {
 /** A manual grant or correction, always with a reason on the entry. */
 const adjust = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('Loyalty.adjust called', { customerId: id, points: req.body.Points, tenantId, email });
+  const { tid: tenantId, phone } = req.user;
+  logger.info('Loyalty.adjust called', { customerId: id, points: req.body.Points, tenantId, phone });
   const result = await service.adjust(
     { customerId: id, points: req.body.Points, reason: req.body.Reason },
     tenantId,
-    email,
+    phone,
   );
   successResponse(res, result, 'Loyalty points adjusted successfully');
 });

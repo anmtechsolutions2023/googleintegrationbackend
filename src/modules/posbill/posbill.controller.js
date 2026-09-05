@@ -40,17 +40,17 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosBill.create called', { tenantId, email });
-  const created = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosBill.create called', { tenantId, phone });
+  const created = await service.create(req.body, tenantId, phone);
   createdResponse(res, created, 'POS Bill created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosBill.update called', { id, tenantId, email });
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosBill.update called', { id, tenantId, phone });
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'POS Bill updated successfully');
 });
 
@@ -65,9 +65,9 @@ const deleteById = asyncHandler(async (req, res) => {
 // Domain action: settle a bill (record payments, mark paid).
 const settle = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosBill.settle called', { id, tenantId, email });
-  const settled = await service.settle(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosBill.settle called', { id, tenantId, phone });
+  const settled = await service.settle(id, req.body, tenantId, phone);
   successResponse(res, settled, 'POS Bill settled successfully');
 });
 

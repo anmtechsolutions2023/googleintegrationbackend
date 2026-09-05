@@ -16,7 +16,7 @@ const capability = require('./capability.service');
  */
 const logout = async (req, res, next) => {
   try {
-    logger.info('Logout request', { user: req.user.email });
+    logger.info('Logout request', { user: req.user.phone });
 
     // Client-side should remove JWT
     // Server-side: future implementation (token blacklist, etc.)

@@ -78,7 +78,7 @@ const UUID_1 = 'a1b2c3d4-1111-1111-1111-111111111111';
 const adminToken = () =>
   'Bearer ' +
   jwt.sign(
-    { tid: TENANT_ID, email: 'admin@test.com', scopes: ['TENANT:ADMIN'] },
+    { tid: TENANT_ID, phone: '+919876543210', scopes: ['TENANT:ADMIN'] },
     TEST_SECRET
   );
 
@@ -93,7 +93,7 @@ const VIEWER_READ_SCOPES = [
 const viewerToken = () =>
   'Bearer ' +
   jwt.sign(
-    { tid: TENANT_ID, email: 'viewer@test.com', scopes: ['TENANT:VIEWER', ...VIEWER_READ_SCOPES] },
+    { tid: TENANT_ID, phone: '+919222200006', scopes: ['TENANT:VIEWER', ...VIEWER_READ_SCOPES] },
     TEST_SECRET
   );
 
@@ -101,21 +101,21 @@ const viewerToken = () =>
 const superAdminToken = () =>
   'Bearer ' +
   jwt.sign(
-    { tid: TENANT_ID, email: 'super@test.com', scopes: ['TENANT:SUPER_ADMIN'] },
+    { tid: TENANT_ID, phone: '+919222233334', scopes: ['TENANT:SUPER_ADMIN'] },
     TEST_SECRET
   );
 
 const iamAdminToken = () =>
   'Bearer ' +
   jwt.sign(
-    { tid: TENANT_ID, email: 'iamadmin@test.com', scopes: ['admin:access'] },
+    { tid: TENANT_ID, phone: '+919222200007', scopes: ['admin:access'] },
     TEST_SECRET
   );
 
 const guestToken = () =>
   'Bearer ' +
   jwt.sign(
-    { tid: null, email: 'guest@test.com', scopes: ['guest:explore'] },
+    { tid: null, phone: '+919222200008', scopes: ['guest:explore'] },
     TEST_SECRET
   );
 
@@ -132,7 +132,7 @@ const CASHIER_SCOPES = [
 const cashierToken = () =>
   'Bearer ' +
   jwt.sign(
-    { tid: TENANT_ID, email: 'cashier@test.com', scopes: CASHIER_SCOPES },
+    { tid: TENANT_ID, phone: '+919222200009', scopes: CASHIER_SCOPES },
     TEST_SECRET
   );
 
@@ -140,7 +140,7 @@ const cashierToken = () =>
 const auditReadToken = () =>
   'Bearer ' +
   jwt.sign(
-    { tid: TENANT_ID, email: 'auditor@test.com', scopes: [...VIEWER_READ_SCOPES, 'AUDIT:READ'] },
+    { tid: TENANT_ID, phone: '+919222200010', scopes: [...VIEWER_READ_SCOPES, 'AUDIT:READ'] },
     TEST_SECRET
   );
 
@@ -788,7 +788,7 @@ describe('Auth middleware edge cases', () => {
     const badToken =
       'Bearer ' +
       jwt.sign(
-        { tid: TENANT_ID, email: 'hacker@test.com', scopes: ['TENANT:ADMIN'] },
+        { tid: TENANT_ID, phone: '+919222200011', scopes: ['TENANT:ADMIN'] },
         'wrong-secret'
       );
     const res = await request(server)
@@ -807,7 +807,7 @@ describe('Auth middleware edge cases', () => {
     const noTidToken =
       'Bearer ' +
       jwt.sign(
-        { email: 'user@test.com', scopes: ['TENANT:ADMIN'] },
+        { phone: '+919222200012', scopes: ['TENANT:ADMIN'] },
         TEST_SECRET
       );
     const res = await request(server)
@@ -819,7 +819,7 @@ describe('Auth middleware edge cases', () => {
   it('should return 403 when token is missing scopes field', async () => {
     const noScopesToken =
       'Bearer ' +
-      jwt.sign({ tid: TENANT_ID, email: 'user@test.com' }, TEST_SECRET);
+      jwt.sign({ tid: TENANT_ID, phone: '+919222200013' }, TEST_SECRET);
     const res = await request(server)
       .get('/api/categories')
       .set('Authorization', noScopesToken);
@@ -832,7 +832,7 @@ describe('Auth middleware edge cases', () => {
       jwt.sign(
         {
           tid: TENANT_ID,
-          email: 'superadmin@test.com',
+          phone: '+919222233335',
           scopes: ['TENANT:SUPER_ADMIN'],
         },
         TEST_SECRET
@@ -849,7 +849,7 @@ describe('Auth middleware edge cases', () => {
     const emptyScope =
       'Bearer ' +
       jwt.sign(
-        { tid: TENANT_ID, email: 'empty@test.com', scopes: [] },
+        { tid: TENANT_ID, phone: '+919222200014', scopes: [] },
         TEST_SECRET
       );
     const res = await request(server)
@@ -1404,7 +1404,7 @@ describe('Master-data bootstrap — POST /api/master-data/bootstrap', () => {
     expect(claims.setupCompleted).toBe(true);
     // Identity and scopes carried over verbatim — nothing is elevated here.
     expect(claims.tid).toBe(TENANT_ID);
-    expect(claims.email).toBe('admin@test.com');
+    expect(claims.phone).toBe('+919876543210');
     expect(claims.scopes).toEqual(['TENANT:ADMIN']);
   });
 
@@ -1508,7 +1508,7 @@ describe('Pricing — POST /api/pricing/quote', () => {
   it('is reachable with a POS billing scope (cart quoting)', async () => {
     mockConnection.execute.mockImplementation(chainImpl());
     const posToken = 'Bearer ' + jwt.sign(
-      { tid: TENANT_ID, email: 'cashier@test.com', scopes: ['POS_BILLING:READ'] },
+      { tid: TENANT_ID, phone: '+919222200015', scopes: ['POS_BILLING:READ'] },
       TEST_SECRET,
     );
     const res = await request(server)
@@ -1679,7 +1679,7 @@ describe('First-time setup gate', () => {
     jwt.sign(
       {
         tid: TENANT_ID,
-        email: 'admin@test.com',
+        phone: '+919222200016',
         scopes: ['TENANT:ADMIN'],
         setupCompleted: false,
       },
@@ -1691,7 +1691,7 @@ describe('First-time setup gate', () => {
     jwt.sign(
       {
         tid: TENANT_ID,
-        email: 'super@test.com',
+        phone: '+919222233334',
         scopes: ['TENANT:SUPER_ADMIN'],
         setupCompleted: false,
       },
@@ -2188,21 +2188,21 @@ describe('Bulk import — who may run one', () => {
 
     it('MASTER_DATA:WRITE alone is not enough → 403', async () => {
       const token = 'Bearer ' + jwt.sign(
-        { tid: TENANT_ID, email: 'editor@test.com',
+        { tid: TENANT_ID, phone: '+919222200017',
           scopes: ['MASTER_DATA:READ', 'MASTER_DATA:WRITE'] }, TEST_SECRET);
       expect((await post('/api/import/items', token, ITEMS)).status).toBe(403);
     });
 
     it('INVENTORY:WRITE alone is not enough → 403', async () => {
       const token = 'Bearer ' + jwt.sign(
-        { tid: TENANT_ID, email: 'stock@test.com',
+        { tid: TENANT_ID, phone: '+919222200018',
           scopes: ['INVENTORY:READ', 'INVENTORY:WRITE'] }, TEST_SECRET);
       expect((await post('/api/import/items', token, ITEMS)).status).toBe(403);
     });
 
     it('POS_CONFIG:WRITE alone is not enough → 403', async () => {
       const token = 'Bearer ' + jwt.sign(
-        { tid: TENANT_ID, email: 'posmgr@test.com',
+        { tid: TENANT_ID, phone: '+919222200019',
           scopes: ['POS_CONFIG:READ', 'POS_CONFIG:WRITE'] }, TEST_SECRET);
       expect((await post('/api/import/items', token, ITEMS)).status).toBe(403);
     });
@@ -2222,7 +2222,7 @@ describe('Bulk import — who may run one', () => {
 
     it('a POS manager may not → 403', async () => {
       const token = 'Bearer ' + jwt.sign(
-        { tid: TENANT_ID, email: 'posmgr@test.com',
+        { tid: TENANT_ID, phone: '+919222200020',
           scopes: ['POS_CONFIG:WRITE', 'POS_ORDER:WRITE'] }, TEST_SECRET);
       expect((await post('/api/import/menu-entries', token, MENU)).status).toBe(403);
     });
@@ -2557,7 +2557,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
 
   it('user already exists in tenant → 409', async () => {
     mockConnection.execute
-      .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', name: 'Guest' }]]) // request found
+      .mockResolvedValueOnce([[{ id: RECORD_ID, phone: '+919222200021', name: 'Guest' }]]) // request found
       .mockResolvedValueOnce([[{ id: UUID_1 }]]); // user already provisioned
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
@@ -2568,7 +2568,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
 
   it('valid approval without roleIds → 200', async () => {
     mockConnection.execute
-      .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', name: 'Guest' }]]) // request found
+      .mockResolvedValueOnce([[{ id: RECORD_ID, phone: '+919222200022', name: 'Guest' }]]) // request found
       .mockResolvedValueOnce([[]])  // user not yet in tenant
       .mockResolvedValue([[{ affectedRows: 1 }]]); // INSERT user_tenants, UPDATE onboarding_requests
     const res = await request(server)
@@ -2577,12 +2577,12 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
       .send({ tenantId: TENANT_ID }); // roleIds omitted — Joi defaults to []
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data).toMatchObject({ email: 'guest@test.com', tenantId: TENANT_ID });
+    expect(res.body.data).toMatchObject({ phone: '+919222200022', tenantId: TENANT_ID });
   });
 
   it('valid approval with roleIds → 200, data includes roleIds', async () => {
     mockConnection.execute
-      .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', name: 'Guest' }]])
+      .mockResolvedValueOnce([[{ id: RECORD_ID, phone: '+919222200024', name: 'Guest' }]])
       .mockResolvedValueOnce([[]])
       .mockResolvedValue([[{ affectedRows: 1 }]]);
     const res = await request(server)
@@ -2640,7 +2640,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reject', () => {
 
   it('valid rejection → 200', async () => {
     mockConnection.execute
-      .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com' }]]) // request found
+      .mockResolvedValueOnce([[{ id: RECORD_ID, phone: '+919222200025' }]]) // request found
       .mockResolvedValueOnce([[{ affectedRows: 1 }]]); // UPDATE status
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reject`)
@@ -2682,7 +2682,7 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/reopen', () => {
 
   it('valid reopen of a rejected request → 200', async () => {
     mockConnection.execute
-      .mockResolvedValueOnce([[{ id: RECORD_ID, email: 'guest@test.com', status: 'REJECTED' }]]) // rejected row found
+      .mockResolvedValueOnce([[{ id: RECORD_ID, phone: '+919222200026', status: 'REJECTED' }]]) // rejected row found
       .mockResolvedValueOnce([[{ affectedRows: 1 }]]); // UPDATE back to PENDING
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/reopen`)

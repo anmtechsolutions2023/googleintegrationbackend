@@ -16,14 +16,14 @@ const { AUDIT_CATEGORIES, STATUSES } = require('../../config/constants');
 const importItems = [
   validateBody(schemas.importItemsSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail, tenantId } = extractUserContext(req);
+    const { userPhone, tenantId } = extractUserContext(req);
     const { rows, onDuplicate } = req.validatedBody;
 
-    const result = await service.importItems(rows, { onDuplicate }, tenantId, userEmail);
+    const result = await service.importItems(rows, { onDuplicate }, tenantId, userPhone);
 
     // One audit line for the operation, carrying the counts. Auditing 56
     // individual creates would bury the fact that an import happened at all.
-    await captureAudit(req, tenantId, userEmail,
+    await captureAudit(req, tenantId, userPhone,
       'ITEMS_BULK_IMPORTED',
       result.summary.failed > 0 ? STATUSES.PARTIAL : STATUSES.SUCCESS,
       AUDIT_CATEGORIES.MASTER_DATA, 'INFO',
@@ -38,10 +38,10 @@ const importItems = [
 const importMenuEntries = [
   validateBody(schemas.importMenuSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail, tenantId } = extractUserContext(req);
-    const result = await service.importMenuEntries(req.validatedBody, tenantId, userEmail);
+    const { userPhone, tenantId } = extractUserContext(req);
+    const result = await service.importMenuEntries(req.validatedBody, tenantId, userPhone);
 
-    await captureAudit(req, tenantId, userEmail,
+    await captureAudit(req, tenantId, userPhone,
       'MENU_BULK_PUBLISHED',
       result.summary.failed > 0 ? STATUSES.PARTIAL : STATUSES.SUCCESS,
       AUDIT_CATEGORIES.POS, 'INFO',

@@ -32,12 +32,12 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const created = await service.create(req.body, req.user.tid, req.user.email);
+  const created = await service.create(req.body, req.user.tid, req.user.phone);
   createdResponse(res, created, 'Expense category created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
-  const updated = await service.update(req.params.id, req.body, req.user.tid, req.user.email);
+  const updated = await service.update(req.params.id, req.body, req.user.tid, req.user.phone);
   successResponse(res, updated, 'Expense category updated successfully');
 });
 

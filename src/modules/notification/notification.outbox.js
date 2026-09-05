@@ -47,7 +47,7 @@ const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.strin
  *   message describing a state the event never had.
  * @returns {Promise<string|null>} The outbox row id, or null if it could not be written.
  */
-const enqueueTx = async (conn, event, tenantId, userEmail) => {
+const enqueueTx = async (conn, event, tenantId, userPhone) => {
   const id = uuidv4();
   try {
     await conn.execute(QUERIES.NOTIFICATION_OUTBOX.INSERT, [
@@ -57,7 +57,7 @@ const enqueueTx = async (conn, event, tenantId, userEmail) => {
       event.sourceType ?? null,
       event.sourceId ?? null,
       toJson(event.payload ?? {}),
-      userEmail, userEmail,
+      userPhone, userPhone,
     ]);
     return id;
   } catch (err) {

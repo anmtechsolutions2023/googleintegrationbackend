@@ -44,17 +44,17 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('create TransactionTypeConfig called', { tenantId, email });
-  const newData = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('create TransactionTypeConfig called', { tenantId, phone });
+  const newData = await service.create(req.body, tenantId, phone);
   createdResponse(res, newData, 'Transaction type config created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('update TransactionTypeConfig called', { id, tenantId, email });
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('update TransactionTypeConfig called', { id, tenantId, phone });
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'Transaction type config updated successfully');
 });
 

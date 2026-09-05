@@ -22,7 +22,7 @@ const ARGS = {
   deleteQuery: 'DELETE FROM pos_table WHERE Id = ? AND TenantId = ?',
   id: 't1',
   tenantId: 'tn',
-  userEmail: 'u@x',
+  userPhone: 'u@x',
 };
 
 // exists: is there such a row? used: does anything reference it?

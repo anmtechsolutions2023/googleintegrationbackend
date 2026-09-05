@@ -33,10 +33,10 @@ const { logger } = require('../../utils/logger');
  * @param {string|null} customerId - Null for a walk-in; nothing to record.
  * @param {number} amount - What the sale settled for.
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<boolean>} Whether anything was recorded.
  */
-const recordSaleTx = async (conn, customerId, amount, tenantId, userEmail) => {
+const recordSaleTx = async (conn, customerId, amount, tenantId, userPhone) => {
   if (!customerId) return false;
 
   const spend = Number(amount) || 0;
@@ -44,7 +44,7 @@ const recordSaleTx = async (conn, customerId, amount, tenantId, userEmail) => {
   // records WHY a balance changed — the thing a bare counter could never say,
   // and the reason a refund used to have nothing to give back.
   const [result] = await conn.execute(QUERIES.POS_CUSTOMER.RECORD_SALE, [
-    spend, userEmail, customerId, tenantId,
+    spend, userPhone, customerId, tenantId,
   ]);
 
   if (!result.affectedRows) {
@@ -77,10 +77,10 @@ const recordSaleTx = async (conn, customerId, amount, tenantId, userEmail) => {
  * @param {string|null} customerId
  * @param {number} amount - What the sale had settled for.
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<boolean>} Whether anything was reversed.
  */
-const reverseSaleTx = async (conn, customerId, amount, tenantId, userEmail, options = {}) => {
+const reverseSaleTx = async (conn, customerId, amount, tenantId, userPhone, options = {}) => {
   if (!customerId) return false;
 
   // ── Visit vs value ───────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ const reverseSaleTx = async (conn, customerId, amount, tenantId, userEmail, opti
     : QUERIES.POS_CUSTOMER.REVERSE_SALE_VALUE_ONLY;
 
   const [result] = await conn.execute(query, [
-    Number(amount) || 0, userEmail, customerId, tenantId,
+    Number(amount) || 0, userPhone, customerId, tenantId,
   ]);
 
   if (!result.affectedRows) {

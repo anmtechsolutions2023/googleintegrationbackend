@@ -17,7 +17,7 @@ class PosTableService extends BaseCRUDService {
    * trading history is what the venue reports are built on, and pos_order.TableId
    * is a FOREIGN KEY that would reject the delete with an opaque error anyway.
    */
-  async retire(id, tenantId, userEmail) {
+  async retire(id, tenantId, userPhone) {
     return deleteOrRetire({
       table: 'pos_table',
       entityName: 'POS Table',
@@ -25,11 +25,11 @@ class PosTableService extends BaseCRUDService {
       deleteQuery: this.queries.DELETE,
       id,
       tenantId,
-      userEmail,
+      userPhone,
     });
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -40,12 +40,12 @@ class PosTableService extends BaseCRUDService {
       data.CurrentOrderId ?? null,
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.Name !== undefined ? data.Name : existing.Name,
       data.FloorId !== undefined ? data.FloorId : existing.FloorId,
@@ -54,7 +54,7 @@ class PosTableService extends BaseCRUDService {
       data.CurrentOrderId !== undefined ? data.CurrentOrderId : existing.CurrentOrderId,
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -66,7 +66,7 @@ const service = new PosTableService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
-  remove: (id, tenantId, userEmail) => service.retire(id, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
+  remove: (id, tenantId, userPhone) => service.retire(id, tenantId, userPhone),
 };

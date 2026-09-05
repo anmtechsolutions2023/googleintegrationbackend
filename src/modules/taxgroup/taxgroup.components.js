@@ -88,12 +88,12 @@ const readComponentsTx = async (conn, taxGroupId, tenantId) => {
  * @param {Object} conn - Open connection/transaction.
  * @param {{name: string, value: number|string}} component
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @param {Map} [cache] - Optional per-run cache, so a 56-row file resolves CGST
  *   once rather than 56 times. Keyed on (name, rate) like the lookup itself.
  * @returns {Promise<{id: string, created: boolean}>}
  */
-const resolveTaxTypeTx = async (conn, component, tenantId, userEmail, cache) => {
+const resolveTaxTypeTx = async (conn, component, tenantId, userPhone, cache) => {
   const name = normaliseName(component.name);
   const value = normaliseRate(component.value);
   const key = `taxType:${componentKey(component)}`;
@@ -109,7 +109,7 @@ const resolveTaxTypeTx = async (conn, component, tenantId, userEmail, cache) => 
   }
 
   const record = await taxType.createTx(
-    conn, { Name: name, Value: value, Active: true }, tenantId, userEmail,
+    conn, { Name: name, Value: value, Active: true }, tenantId, userPhone,
   );
   if (cache) cache.set(key, record.id);
   return { id: record.id, created: true };
@@ -129,19 +129,19 @@ const resolveTaxTypeTx = async (conn, component, tenantId, userEmail, cache) => 
  * @param {string} args.taxGroupId
  * @param {Array<{name: string, value: number|string}>} args.components
  * @param {string} args.tenantId
- * @param {string} args.userEmail
+ * @param {string} args.userPhone
  * @param {Map} [args.cache]
  * @returns {Promise<{taxTypes: number, mappings: number}>} How many were newly created.
  */
 const attachComponentsTx = async (conn, {
-  taxGroupId, components, tenantId, userEmail, cache,
+  taxGroupId, components, tenantId, userPhone, cache,
 }) => {
   const counts = { taxTypes: 0, mappings: 0 };
 
   for (const component of components || []) {
     // eslint-disable-next-line no-await-in-loop
     const { id: taxTypeId, created } = await resolveTaxTypeTx(
-      conn, component, tenantId, userEmail, cache,
+      conn, component, tenantId, userPhone, cache,
     );
     if (created) counts.taxTypes += 1;
 
@@ -155,7 +155,7 @@ const attachComponentsTx = async (conn, {
     // eslint-disable-next-line no-await-in-loop
     await taxMapper.createTx(
       conn, { TaxGroupId: taxGroupId, TaxTypeId: taxTypeId, Active: true },
-      tenantId, userEmail,
+      tenantId, userPhone,
     );
     counts.mappings += 1;
   }

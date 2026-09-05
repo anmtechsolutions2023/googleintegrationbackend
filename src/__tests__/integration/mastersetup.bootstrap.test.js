@@ -45,7 +45,7 @@ const { NUMBERING_DEFAULTS } = require('../../modules/mastersetup/mastersetup.sc
 const TEST_SECRET = 'integration-test-secret';
 const TENANT_ID = 'e3845e08-dcc2-11f0-8e78-0242ac110002';
 const adminToken = () => 'Bearer ' + jwt.sign(
-  { tid: TENANT_ID, email: 'admin@test.com', scopes: ['TENANT:ADMIN'] }, TEST_SECRET
+  { tid: TENANT_ID, phone: '+919876543210', scopes: ['TENANT:ADMIN'] }, TEST_SECRET
 );
 
 /**

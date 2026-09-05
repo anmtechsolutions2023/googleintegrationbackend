@@ -49,21 +49,21 @@ const todayIso = () => businessDate();
  *
  * @returns {Promise<number>}
  */
-const nextDailyNumberTx = async (conn, branchId, tokenDate, tenantId, userEmail) => {
+const nextDailyNumberTx = async (conn, branchId, tokenDate, tenantId, userPhone) => {
   const [rows] = await conn.execute(QUERIES.POS_TOKEN_COUNTER.SELECT_FOR_UPDATE, [
     tenantId, branchId, tokenDate,
   ]);
 
   if (rows.length === 0) {
     await conn.execute(QUERIES.POS_TOKEN_COUNTER.INSERT, [
-      tenantId, branchId, tokenDate, 1, userEmail,
+      tenantId, branchId, tokenDate, 1, userPhone,
     ]);
     return 1;
   }
 
   const next = (Number(rows[0].LastNumber) || 0) + 1;
   await conn.execute(QUERIES.POS_TOKEN_COUNTER.UPDATE, [
-    next, userEmail, tenantId, branchId, tokenDate,
+    next, userPhone, tenantId, branchId, tokenDate,
   ]);
   return next;
 };
@@ -78,14 +78,14 @@ const nextDailyNumberTx = async (conn, branchId, tokenDate, tenantId, userEmail)
  *
  * @returns {Promise<{number:number, label:string}|null>}
  */
-const nextSeriesNumberTx = async (conn, tenantId, userEmail) => {
+const nextSeriesNumberTx = async (conn, tenantId, userPhone) => {
   const [configs] = await conn.execute(QUERIES.LEDGER.SELECT_CONFIG_BY_TAG, [
     POS_TOKEN_SERIES.TAG, tenantId,
   ]);
   if (!Array.isArray(configs) || configs.length === 0 || !configs[0]?.Id) return null;
 
   const { transactionNo, counter } = await numberService.issueNumber(
-    conn, configs[0].Id, tenantId, userEmail,
+    conn, configs[0].Id, tenantId, userPhone,
   );
   return { number: counter, label: transactionNo };
 };
@@ -106,10 +106,10 @@ class PosTokenService extends BaseCRUDService {
    * @param {string} p.branchId - Required: the queue the token belongs to.
    * @param {string} [p.orderId] - The order behind the token, when there is one.
    * @param {string} tenantId
-   * @param {string} userEmail
+   * @param {string} userPhone
    * @returns {Promise<{id:string, TokenNumber:number, TokenLabel:string, TokenDate:string}>}
    */
-  async issueTokenTx(conn, { branchId, orderId = null }, tenantId, userEmail) {
+  async issueTokenTx(conn, { branchId, orderId = null }, tenantId, userPhone) {
     if (!branchId) {
       throw new HttpError(
         'A counter token needs a branch — it belongs to one queue.',
@@ -122,7 +122,7 @@ class PosTokenService extends BaseCRUDService {
 
     let issued = null;
     if (mode === TOKEN_NUMBERING.SERIES) {
-      issued = await nextSeriesNumberTx(conn, tenantId, userEmail);
+      issued = await nextSeriesNumberTx(conn, tenantId, userPhone);
       // Configured for a series the tenant does not have. Counting from the
       // day's counter instead keeps the queue working; refusing to number a
       // paid order would be a worse outcome than the misconfiguration.
@@ -133,7 +133,7 @@ class PosTokenService extends BaseCRUDService {
       }
     }
     if (!issued) {
-      const number = await nextDailyNumberTx(conn, branchId, tokenDate, tenantId, userEmail);
+      const number = await nextDailyNumberTx(conn, branchId, tokenDate, tenantId, userPhone);
       issued = { number, label: String(number) };
     }
 
@@ -150,18 +150,18 @@ class PosTokenService extends BaseCRUDService {
         BranchDetailId: branchId,
       },
       tenantId,
-      userEmail,
+      userPhone,
     );
   }
 
   /** Manual issue (a walk-in with no order yet) — same minting path. */
-  async create(data, tenantId, userEmail) {
+  async create(data, tenantId, userPhone) {
     return withTransaction(async (conn) => {
       const created = await this.issueTokenTx(
         conn,
         { branchId: data.BranchDetailId, orderId: data.OrderId ?? null },
         tenantId,
-        userEmail,
+        userPhone,
       );
       return { ...data, ...created };
     });
@@ -214,20 +214,20 @@ class PosTokenService extends BaseCRUDService {
    * CalledAt and ServedAt are stamped by the query, once each — a recall must
    * not overwrite when the customer was first called.
    */
-  async setStatus(id, tenantId, userEmail, status) {
+  async setStatus(id, tenantId, userPhone, status) {
     if (!POS_TOKEN_STATUSES.includes(status)) {
       throw new HttpError(`Unknown token status '${status}'.`, 400);
     }
     return withConnection(async (conn) => {
       await this.getById(id, tenantId); // 404 if missing (reuses base + HttpError)
       await conn.execute(this.queries.SET_STATUS, [
-        status, status, status, userEmail, id, tenantId,
+        status, status, status, userPhone, id, tenantId,
       ]);
       return this.getById(id, tenantId);
     });
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -240,12 +240,12 @@ class PosTokenService extends BaseCRUDService {
       data.ServedAt ?? null,
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.TokenNumber !== undefined ? data.TokenNumber : existing.TokenNumber,
       data.TokenLabel !== undefined ? data.TokenLabel : existing.TokenLabel,
@@ -256,7 +256,7 @@ class PosTokenService extends BaseCRUDService {
       data.ServedAt !== undefined ? data.ServedAt : existing.ServedAt,
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -268,13 +268,13 @@ const service = new PosTokenService();
 module.exports = {
   getAll: (tenantId, page, limit, filters) => service.getAll(tenantId, page, limit, filters),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
   // Domain actions — the queue advancing, not a field being edited.
-  call: (id, tenantId, userEmail) => service.setStatus(id, tenantId, userEmail, 'called'),
-  serve: (id, tenantId, userEmail) => service.setStatus(id, tenantId, userEmail, 'served'),
+  call: (id, tenantId, userPhone) => service.setStatus(id, tenantId, userPhone, 'called'),
+  serve: (id, tenantId, userPhone) => service.setStatus(id, tenantId, userPhone, 'served'),
   // Used by the settle path, on its own transaction.
-  issueTokenTx: (conn, params, tenantId, userEmail) =>
-    service.issueTokenTx(conn, params, tenantId, userEmail),
+  issueTokenTx: (conn, params, tenantId, userPhone) =>
+    service.issueTokenTx(conn, params, tenantId, userPhone),
 };

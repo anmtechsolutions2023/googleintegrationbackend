@@ -19,17 +19,17 @@ class CategoryService extends BaseCRUDService {
    * @param {string} id - Generated ID
    * @param {Object} data - Category data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Array} Parameters for INSERT query
    */
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
       data.Name,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
@@ -37,17 +37,17 @@ class CategoryService extends BaseCRUDService {
    * Prepare parameters for category update
    * @param {Object} data - New data
    * @param {Object} existing - Existing record
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @param {string} id - Record ID
    * @param {string} tenantId - Tenant ID
    * @returns {Array} Parameters for UPDATE query
    */
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     const updatedName = data.Name !== undefined ? data.Name : existing.Name;
     const updatedActive =
       data.Active !== undefined ? data.Active : existing.Active;
 
-    return [updatedName, updatedActive, userEmail, id, tenantId];
+    return [updatedName, updatedActive, userPhone, id, tenantId];
   }
 
   /**
@@ -81,15 +81,15 @@ class CategoryService extends BaseCRUDService {
    * Create new category.
    * @param {Object} categoryData - Category data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Promise<Object>} Created category
    */
-  async createCategory(categoryData, tenantId, userEmail) {
+  async createCategory(categoryData, tenantId, userPhone) {
     logger.info('CategoryService.createCategory called', {
       tenantId,
-      userEmail,
+      userPhone,
     });
-    return await this.create(categoryData, tenantId, userEmail);
+    return await this.create(categoryData, tenantId, userPhone);
   }
 
   /**
@@ -97,16 +97,16 @@ class CategoryService extends BaseCRUDService {
    * @param {string} id - Category ID
    * @param {Object} updateData - Updated data
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - User email
+   * @param {string} userPhone - User email
    * @returns {Promise<Object>} Updated category
    */
-  async updateCategory(id, updateData, tenantId, userEmail) {
+  async updateCategory(id, updateData, tenantId, userPhone) {
     logger.info('CategoryService.updateCategory called', {
       id,
       tenantId,
-      userEmail,
+      userPhone,
     });
-    return await this.update(id, updateData, tenantId, userEmail);
+    return await this.update(id, updateData, tenantId, userPhone);
   }
 
   /**
@@ -125,15 +125,15 @@ class CategoryService extends BaseCRUDService {
 const categoryService = new CategoryService();
 
 module.exports = {
-  createTx: (conn, data, tenantId, userEmail) => categoryService.createTx(conn, data, tenantId, userEmail),
+  createTx: (conn, data, tenantId, userPhone) => categoryService.createTx(conn, data, tenantId, userPhone),
   getAllCategories: (tenantId, page, limit) =>
     categoryService.getAllCategories(tenantId, page, limit),
   getCategoryById: (id, tenantId) =>
     categoryService.getCategoryById(id, tenantId),
-  createCategory: (data, tenantId, userEmail) =>
-    categoryService.createCategory(data, tenantId, userEmail),
-  updateCategory: (id, data, tenantId, userEmail) =>
-    categoryService.updateCategory(id, data, tenantId, userEmail),
+  createCategory: (data, tenantId, userPhone) =>
+    categoryService.createCategory(data, tenantId, userPhone),
+  updateCategory: (id, data, tenantId, userPhone) =>
+    categoryService.updateCategory(id, data, tenantId, userPhone),
   deleteCategory: (id, tenantId) =>
     categoryService.deleteCategory(id, tenantId),
 };

@@ -72,28 +72,28 @@ describe('controllerHelper', () => {
   });
 
   describe('extractUserContext', () => {
-    it('extracts tenantId, userEmail, and userName from req.user', () => {
+    it('extracts tenantId, userPhone, and userName from req.user', () => {
       const req = {
-        user: { tid: 'tenant-1', email: 'user@example.com', name: 'Test User' },
+        user: { tid: 'tenant-1', phone: '+919876543210', name: 'Test User' },
       };
       const ctx = extractUserContext(req);
       expect(ctx).toEqual({
         tenantId: 'tenant-1',
-        userEmail: 'user@example.com',
+        userPhone: '+919876543210',
         userName: 'Test User',
       });
     });
 
-    it('falls back to email for userName when name is absent', () => {
+    it('falls back to the number for userName when name is absent', () => {
       const req = {
-        user: { tid: 'tenant-2', email: 'fallback@example.com' },
+        user: { tid: 'tenant-2', phone: '+919111122223' },
       };
       const ctx = extractUserContext(req);
-      expect(ctx.userName).toBe('fallback@example.com');
+      expect(ctx.userName).toBe('+919111122223');
     });
 
     it('maps tid to tenantId', () => {
-      const req = { user: { tid: 'my-tenant', email: 'a@b.com', name: 'A' } };
+      const req = { user: { tid: 'my-tenant', phone: '+919000000001', name: 'A' } };
       const ctx = extractUserContext(req);
       expect(ctx.tenantId).toBe('my-tenant');
     });

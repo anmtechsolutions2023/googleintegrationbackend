@@ -22,7 +22,7 @@ const tenantAdmin = [
 router.get('/', ...tenantAdmin,
   auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', 'Invitations viewed'), ...controller.list);
 
-/** POST / — invite an email into this tenancy. */
+/** POST / — invite a mobile number into this tenancy. */
 router.post('/', ...tenantAdmin,
   auditLog(AUDIT_CATEGORIES.USER_MGMT, 'INFO', 'User invited'), ...controller.create);
 

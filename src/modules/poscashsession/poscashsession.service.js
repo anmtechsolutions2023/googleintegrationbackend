@@ -28,13 +28,13 @@ class PosCashSessionService extends BaseCRUDService {
   /**
    * Opens a till for a cashier at a branch.
    *
-   * @param {Object} data - { BranchDetailId, CashierEmail?, ShiftLabel?, OpeningFloat? }
+   * @param {Object} data - { BranchDetailId, CashierPhone?, ShiftLabel?, OpeningFloat? }
    * @param {string} tenantId
-   * @param {string} userEmail - Whoever opened it; the default cashier.
+   * @param {string} userPhone - Whoever opened it; the default cashier.
    */
-  async open(data, tenantId, userEmail) {
+  async open(data, tenantId, userPhone) {
     return withTransaction(async (conn) => {
-      const cashier = data.CashierEmail || userEmail;
+      const cashier = data.CashierPhone || userPhone;
 
       // One open till per cashier per branch. Checked here rather than by a
       // UNIQUE key because MySQL treats every NULL ClosedAt as distinct, so the
@@ -53,7 +53,7 @@ class PosCashSessionService extends BaseCRUDService {
       await conn.execute(this.queries.INSERT, [
         id, tenantId, data.BranchDetailId, cashier,
         data.ShiftLabel ?? null, data.OpeningFloat ?? 0,
-        userEmail, CASH_SESSION_STATUS.OPEN, userEmail, userEmail,
+        userPhone, CASH_SESSION_STATUS.OPEN, userPhone, userPhone,
       ]);
       // Read back on the SAME connection: a pooled read would sit outside this
       // transaction and 404 on the row we just inserted.
@@ -91,9 +91,9 @@ class PosCashSessionService extends BaseCRUDService {
    * @param {string} id
    * @param {Object} data - { CountedCash, Notes? }
    * @param {string} tenantId
-   * @param {string} userEmail
+   * @param {string} userPhone
    */
-  async close(id, data, tenantId, userEmail) {
+  async close(id, data, tenantId, userPhone) {
     return withTransaction(async (conn) => {
       const [rows] = await conn.execute(this.queries.SELECT_OPEN_BY_ID, [id, tenantId]);
       if (rows.length === 0) {
@@ -111,8 +111,8 @@ class PosCashSessionService extends BaseCRUDService {
       // The Status = 'open' predicate in CLOSE is the concurrency guard: two
       // simultaneous closes cannot both write a variance.
       const [result] = await conn.execute(this.queries.CLOSE, [
-        userEmail, counted, expected, variance, data.Notes ?? null,
-        userEmail, id, tenantId,
+        userPhone, counted, expected, variance, data.Notes ?? null,
+        userPhone, id, tenantId,
       ]);
       if (result.affectedRows === 0) {
         throw new HttpError(
@@ -149,8 +149,8 @@ const service = new PosCashSessionService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  open: (data, tenantId, userEmail) => service.open(data, tenantId, userEmail),
-  close: (id, data, tenantId, userEmail) => service.close(id, data, tenantId, userEmail),
+  open: (data, tenantId, userPhone) => service.open(data, tenantId, userPhone),
+  close: (id, data, tenantId, userPhone) => service.close(id, data, tenantId, userPhone),
   summary: (id, tenantId) => service.summary(id, tenantId),
   // Exported on its own: the derivation is the interesting part, and the
   // day-close report needs it without closing anything.

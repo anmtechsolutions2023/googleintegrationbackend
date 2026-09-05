@@ -165,11 +165,11 @@ const resolveCommission = (inbound, portal, gross) => {
  * @param {Object} input.payload      - the portal's raw body (parsed)
  * @param {string} [input.rawBody]    - the exact bytes, for the payload hash
  * @param {string} input.tenantId
- * @param {string} [input.userEmail]
+ * @param {string} [input.userPhone]
  * @returns {Promise<{ status:string, onlineOrderId:string|null, eventId:string, duplicate:boolean }>}
  */
-const ingest = async ({ portal, payload, rawBody, tenantId, userEmail }) => {
-  const by = userEmail || 'portal-webhook';
+const ingest = async ({ portal, payload, rawBody, tenantId, userPhone }) => {
+  const by = userPhone || 'portal-webhook';
   const adapter = resolveAdapter(portal.Adapter);
   const payloadHash = hashPayload(rawBody ?? payload);
 

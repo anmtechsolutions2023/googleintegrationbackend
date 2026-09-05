@@ -66,15 +66,15 @@ class TestService extends BaseCRUDService {
     super('Test Item', QUERIES);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
-    return [id, tenantId, data.Name, data.Active !== undefined ? data.Active : true, userEmail, userEmail];
+  prepareInsertParams(id, data, tenantId, userPhone) {
+    return [id, tenantId, data.Name, data.Active !== undefined ? data.Active : true, userPhone, userPhone];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.Name !== undefined ? data.Name : existing.Name,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -389,7 +389,7 @@ describe('BaseCRUDService', () => {
   });
 
   describe('default prepareInsertParams', () => {
-    it('returns [id, tenantId, userEmail] by default', () => {
+    it('returns [id, tenantId, userPhone] by default', () => {
       class MinimalService extends BaseCRUDService {
         constructor() { super('Minimal', QUERIES); }
       }
@@ -400,7 +400,7 @@ describe('BaseCRUDService', () => {
   });
 
   describe('default prepareUpdateParams', () => {
-    it('returns [userEmail, id, tenantId] by default', () => {
+    it('returns [userPhone, id, tenantId] by default', () => {
       class MinimalService extends BaseCRUDService {
         constructor() { super('Minimal', QUERIES); }
       }

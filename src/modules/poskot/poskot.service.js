@@ -22,11 +22,11 @@ class PosKotService extends BaseCRUDService {
    * milliseconds, which is what the kitchen display then showed as the ticket
    * number.
    */
-  async create(data, tenantId, userEmail) {
-    if (data.KotNo) return super.create(data, tenantId, userEmail);
+  async create(data, tenantId, userPhone) {
+    if (data.KotNo) return super.create(data, tenantId, userPhone);
     return withTransaction(async (connection) => {
-      const KotNo = await issuePosNumber(connection, 'POS_KOT', 'KOT', tenantId, userEmail);
-      return this.createTx(connection, { ...data, KotNo }, tenantId, userEmail);
+      const KotNo = await issuePosNumber(connection, 'POS_KOT', 'KOT', tenantId, userPhone);
+      return this.createTx(connection, { ...data, KotNo }, tenantId, userPhone);
     });
   }
 
@@ -34,16 +34,16 @@ class PosKotService extends BaseCRUDService {
    * Domain action: mark a KOT ready (KDS "Mark All Ready").
    * @param {string} id - KOT ID
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - Acting user
+   * @param {string} userPhone - Acting user
    * @param {string} [status='ready'] - Target status
    * @returns {Promise<Object>} Updated KOT
    */
-  async setStatus(id, tenantId, userEmail, status = 'ready') {
+  async setStatus(id, tenantId, userPhone, status = 'ready') {
     return withConnection(async (connection) => {
       await this.getById(id, tenantId); // 404 if missing (reuses base + HttpError)
       await connection.execute(this.queries.SET_STATUS, [
         status,
-        userEmail,
+        userPhone,
         id,
         tenantId,
       ]);
@@ -51,7 +51,7 @@ class PosKotService extends BaseCRUDService {
     });
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -63,12 +63,12 @@ class PosKotService extends BaseCRUDService {
       data.FiredAt ?? null,
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.KotNo !== undefined ? data.KotNo : existing.KotNo,
       data.OrderId !== undefined ? data.OrderId : existing.OrderId,
@@ -78,7 +78,7 @@ class PosKotService extends BaseCRUDService {
       data.FiredAt !== undefined ? data.FiredAt : existing.FiredAt,
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -90,8 +90,8 @@ const service = new PosKotService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
-  markReady: (id, tenantId, userEmail) => service.setStatus(id, tenantId, userEmail, 'ready'),
+  markReady: (id, tenantId, userPhone) => service.setStatus(id, tenantId, userPhone, 'ready'),
 };

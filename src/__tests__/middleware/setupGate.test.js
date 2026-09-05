@@ -26,7 +26,7 @@ const TENANT = 'tenant-1';
 // A token payload for a provisioned user whose tenant has NOT been set up.
 const gatedUser = (overrides = {}) => ({
   tid: TENANT,
-  email: 'user@test.com',
+  phone: '+919222200002',
   scopes: ['MASTER_DATA:READ'],
   setupCompleted: false,
   ...overrides,

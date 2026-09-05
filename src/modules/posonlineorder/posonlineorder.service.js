@@ -21,7 +21,7 @@ class PosOnlineOrderService extends BaseCRUDService {
     super('POS Online Order', QUERIES.POS_ONLINE_ORDER);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -61,12 +61,12 @@ class PosOnlineOrderService extends BaseCRUDService {
       data.CancelledBy ?? null,
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     const keep = (key) => (data[key] !== undefined ? data[key] : existing[key]);
     return [
       keep('PortalId'),
@@ -102,7 +102,7 @@ class PosOnlineOrderService extends BaseCRUDService {
       keep('CancelledBy'),
       keep('BranchDetailId'),
       keep('Active'),
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -150,8 +150,8 @@ const service = new PosOnlineOrderService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
   getQueue: (tenantId, filters) => service.getQueue(tenantId, filters),
 };

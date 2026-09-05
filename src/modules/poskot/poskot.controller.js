@@ -39,17 +39,17 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosKot.create called', { tenantId, email });
-  const created = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosKot.create called', { tenantId, phone });
+  const created = await service.create(req.body, tenantId, phone);
   createdResponse(res, created, 'POS KOT created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosKot.update called', { id, tenantId, email });
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosKot.update called', { id, tenantId, phone });
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'POS KOT updated successfully');
 });
 
@@ -64,9 +64,9 @@ const deleteById = asyncHandler(async (req, res) => {
 // Domain action: mark a KOT ready (KDS).
 const markReady = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosKot.markReady called', { id, tenantId, email });
-  const updated = await service.markReady(id, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosKot.markReady called', { id, tenantId, phone });
+  const updated = await service.markReady(id, tenantId, phone);
   successResponse(res, updated, 'POS KOT marked ready');
 });
 

@@ -14,9 +14,9 @@ const getIp = (req) =>
   req.socket?.remoteAddress ||
   config.AUDIT.DEFAULT_IP;
 
-const writeAuditLog = async (tid, email, action, status, ip, level, category) => {
+const writeAuditLog = async (tid, phone, action, status, ip, level, category) => {
   await db.execute(QUERIES.AUDIT_LOGS.INSERT_MIDDLEWARE, [
-    tid || null, email, action, status, ip, level, category, null, null,
+    tid || null, phone, action, status, ip, level, category, null, null,
   ]);
 };
 
@@ -35,7 +35,7 @@ const auditLog = (category = AUDIT_CATEGORIES.GENERAL, defaultLevel = 'INFO', ac
     res.on('finish', async () => {
       if (!req.user) return;
 
-      const { email, tid } = req.user;
+      const { phone, tid } = req.user;
       const action = actionLabel || `${req.method} ${req.path}`;
       const httpStatus = res.statusCode;
 
@@ -47,7 +47,7 @@ const auditLog = (category = AUDIT_CATEGORIES.GENERAL, defaultLevel = 'INFO', ac
       const status = httpStatus >= 400 ? STATUSES.FAILED : STATUSES.SUCCESS;
 
       try {
-        await writeAuditLog(tid, email, action, status, ip, level, category);
+        await writeAuditLog(tid, phone, action, status, ip, level, category);
       } catch (err) {
         logger.error('Audit logging failed', { err: err.message });
       }
@@ -74,7 +74,7 @@ const auditLogCrud = (moduleName, category = AUDIT_CATEGORIES.MASTER_DATA, defau
     res.on('finish', async () => {
       if (!req.user) return;
 
-      const { email, tid } = req.user;
+      const { phone, tid } = req.user;
       const isById = req.path !== '/';
       const methodLabelMap = {
         GET:    isById ? `Viewed ${moduleName} details` : `Viewed ${moduleName} list`,
@@ -94,7 +94,7 @@ const auditLogCrud = (moduleName, category = AUDIT_CATEGORIES.MASTER_DATA, defau
       const status = httpStatus >= 400 ? STATUSES.FAILED : STATUSES.SUCCESS;
 
       try {
-        await writeAuditLog(tid, email, action, status, ip, level, category);
+        await writeAuditLog(tid, phone, action, status, ip, level, category);
       } catch (err) {
         logger.error('Audit logging failed', { err: err.message });
       }

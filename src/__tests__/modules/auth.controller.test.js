@@ -40,9 +40,9 @@ describe('Auth Controller', () => {
 
   test('googleAuth should validate and authenticate user', async () => {
     req.body = { id_token: 'valid_token' };
-    const mockUser = { email: 'test@example.com', name: 'Test User' };
+    const mockUser = { phone: '+919876500011', name: 'Test User' };
     const mockPermissions = {
-      email: 'test@example.com',
+      phone: '+919876500011',
       tenantId: '123',
       onboardingStatus: 'APPROVED',
       permissions: [],
@@ -60,7 +60,7 @@ describe('Auth Controller', () => {
       success: true,
       message: expect.any(String),
       token: mockToken,
-      user: expect.objectContaining({ email: 'test@example.com' }),
+      user: expect.objectContaining({ phone: '+919876500011' }),
     });
   });
 
@@ -74,9 +74,9 @@ describe('Auth Controller', () => {
 
   test('googleAuth returns guest token when user is unprovisioned (onboarding pending)', async () => {
     req.body = { id_token: 'valid_token' };
-    const mockUser = { email: 'new@example.com', name: 'New User', sub: 'google-sub-1' };
+    const mockUser = { phone: '+919876500012', name: 'New User', sub: 'google-sub-1' };
     const mockPermissions = {
-      email: 'new@example.com',
+      phone: '+919876500012',
       tenantId: null,
       onboardingStatus: 'PENDING',
       permissions: ['guest:explore'],
@@ -93,7 +93,7 @@ describe('Auth Controller', () => {
       success: true,
       message: expect.any(String),
       token: mockToken,
-      user: expect.objectContaining({ email: 'new@example.com', tenant_id: null }),
+      user: expect.objectContaining({ phone: '+919876500012', tenant_id: null }),
     });
   });
 });

@@ -65,7 +65,7 @@ describe('authenticateToken', () => {
 
   it('allows null tid (guest token) to pass authenticateToken', () => {
     req.headers.authorization = 'Bearer guesttoken';
-    const mockGuest = { tid: null, email: 'guest@test.com', scopes: ['guest:explore'] };
+    const mockGuest = { tid: null, phone: '+919222200003', scopes: ['guest:explore'] };
     jwt.verify.mockReturnValue(mockGuest);
     authenticateToken(req, res, next);
     expect(req.user).toEqual(mockGuest);
@@ -82,7 +82,7 @@ describe('authenticateToken', () => {
 
   it('sets req.user and calls next() on valid token', () => {
     req.headers.authorization = 'Bearer validtoken';
-    const mockUser = { tid: 'tenant-id', email: 'user@test.com', scopes: ['TENANT:ADMIN'] };
+    const mockUser = { tid: 'tenant-id', phone: '+919222200004', scopes: ['TENANT:ADMIN'] };
     jwt.verify.mockReturnValue(mockUser);
     authenticateToken(req, res, next);
     expect(req.user).toEqual(mockUser);

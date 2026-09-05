@@ -5,6 +5,7 @@
 //   SELF (default) → only their own logs within their tenant
 
 const Joi = require('joi');
+const { phoneField } = require('../../utils/phoneSchema');
 const { logger } = require('../../utils/logger');
 const MESSAGES = require('../../config/messages');
 const { HttpError } = require('../../middleware/errorHandler');
@@ -22,7 +23,7 @@ const auditQuerySchema = Joi.object({
   page:      Joi.number().integer().min(1).default(1),
   limit:     Joi.number().integer().min(1).max(DEFAULTS.AUDIT_MAX_LIMIT).default(DEFAULTS.AUDIT_LIMIT),
   // Tenant Admin+ only
-  userEmail: Joi.string().email().optional(),
+  userPhone: phoneField().optional(),
   // Super Admin only
   tenantId:  Joi.string().optional(),
 });
@@ -33,7 +34,7 @@ const auditQuerySchema = Joi.object({
  */
 const getAuditLogs = async (req, res, next) => {
   try {
-    logger.info('Get audit logs request', { user: req.user.email });
+    logger.info('Get audit logs request', { user: req.user.phone });
 
     const { error, value } = auditQuerySchema.validate(req.query, { abortEarly: true });
     if (error) {
@@ -53,19 +54,19 @@ const getAuditLogs = async (req, res, next) => {
       visibilityLevel = 'SUPER_ADMIN';
       filters = {
         tenantId:  value.tenantId  || undefined,
-        userEmail: value.userEmail || undefined,
+        userPhone: value.userPhone || undefined,
       };
     } else if (isTenantAdmin) {
       visibilityLevel = 'TENANT_ADMIN';
       filters = {
         tenantId:  req.user.tid,
-        userEmail: value.userEmail || undefined,
+        userPhone: value.userPhone || undefined,
       };
     } else {
       visibilityLevel = 'SELF';
       filters = {
         tenantId:  req.user.tid,
-        userEmail: req.user.email,
+        userPhone: req.user.phone,
       };
     }
 
@@ -92,7 +93,7 @@ const getAuditLogs = async (req, res, next) => {
       visibilityLevel,
       appliedFilters: {
         tenantId:  filters.tenantId  || null,
-        userEmail: filters.userEmail || null,
+        userPhone: filters.userPhone || null,
         category:  filters.category  || null,
         logLevel:  filters.logLevel  || null,
         startDate: filters.startDate || null,

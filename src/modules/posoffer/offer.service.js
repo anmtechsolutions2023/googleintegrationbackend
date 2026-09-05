@@ -115,7 +115,7 @@ const getById = (id, tenantId) => withConnection(async (conn) => {
   return decorate(rows[0]);
 });
 
-const create = (campaignId, d, tenantId, userEmail) => withConnection(async (conn) => {
+const create = (campaignId, d, tenantId, userPhone) => withConnection(async (conn) => {
   assertCoherent(d);
   const id = uuidv4();
   await conn.execute(QUERIES.POS_OFFER.INSERT, [
@@ -125,13 +125,13 @@ const create = (campaignId, d, tenantId, userEmail) => withConnection(async (con
     d.RewardKind, d.RewardItemId || null, d.RewardQuantity ?? 1, d.RewardPercent ?? 100,
     d.ApplyTo || APPLY_TO.CHEAPEST, d.MaxPerBill ?? 1,
     d.MaxPerCustomerPerDay ?? null, d.MaxTotalRedemptions ?? null,
-    userEmail, userEmail,
+    userPhone, userPhone,
   ]);
-  logger.info('Offer created', { tenantId, offerId: id, campaignId, name: d.Name, userEmail });
+  logger.info('Offer created', { tenantId, offerId: id, campaignId, name: d.Name, userPhone });
   return { id };
 });
 
-const update = (id, d, tenantId, userEmail) => withConnection(async (conn) => {
+const update = (id, d, tenantId, userPhone) => withConnection(async (conn) => {
   const [rows] = await conn.execute(QUERIES.POS_OFFER.SELECT_BY_ID, [id, tenantId]);
   if (!rows.length) throw new HttpError('Offer not found.', MESSAGES.HTTP_STATUS.NOT_FOUND);
   const merged = { ...rows[0], ...d };
@@ -145,14 +145,14 @@ const update = (id, d, tenantId, userEmail) => withConnection(async (conn) => {
     merged.RewardQuantity ?? 1, merged.RewardPercent ?? 100,
     merged.ApplyTo || APPLY_TO.CHEAPEST, merged.MaxPerBill ?? 1,
     merged.MaxPerCustomerPerDay ?? null, merged.MaxTotalRedemptions ?? null,
-    userEmail, id, tenantId,
+    userPhone, id, tenantId,
   ]);
   return { id };
 });
 
 /** Soft delete — its redemptions are history, and history keeps its reasons. */
-const remove = (id, tenantId, userEmail) => withConnection(async (conn) => {
-  const [res] = await conn.execute(QUERIES.POS_OFFER.SOFT_DELETE, [userEmail, id, tenantId]);
+const remove = (id, tenantId, userPhone) => withConnection(async (conn) => {
+  const [res] = await conn.execute(QUERIES.POS_OFFER.SOFT_DELETE, [userPhone, id, tenantId]);
   if (!res.affectedRows) throw new HttpError('Offer not found.', MESSAGES.HTTP_STATUS.NOT_FOUND);
   return { id };
 });

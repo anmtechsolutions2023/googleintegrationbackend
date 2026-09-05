@@ -28,7 +28,7 @@ const getOne = asyncHandler(async (req, res) => {
 const refund = asyncHandler(async (req, res) => {
   const result = await withTransaction((conn) =>
     ledgerService.refundSale(
-      conn, req.params.id, req.validatedBody.Reason, req.user.tid, req.user.email,
+      conn, req.params.id, req.validatedBody.Reason, req.user.tid, req.user.phone,
     ));
   successResponse(res, 'Document refunded', result);
 });
@@ -44,12 +44,12 @@ const createReturn = asyncHandler(async (req, res) => {
     const note = await returnsService.createReturnTx(
       conn,
       { saleLogId: req.params.id, ...req.validatedBody },
-      req.user.tid, req.user.email,
+      req.user.tid, req.user.phone,
     );
     // A replay returns the note that already exists and must NOT re-run the
     // downstream work — that would claw points back a second time.
     if (!note.duplicate) {
-      await returnsService.applyDownstreamTx(conn, note, req.user.tid, req.user.email);
+      await returnsService.applyDownstreamTx(conn, note, req.user.tid, req.user.phone);
     }
     const { _context, ...clean } = note;
     return clean;
@@ -97,7 +97,7 @@ const settlementQueue = asyncHandler(async (req, res) => {
 /** Mark a refund as actually paid out — a human today, a gateway later. */
 const setSettlement = asyncHandler(async (req, res) => {
   const data = await readService.setSettlementStatus(
-    req.params.id, req.validatedBody, req.user.tid, req.user.email,
+    req.params.id, req.validatedBody, req.user.tid, req.user.phone,
   );
   successResponse(res, 'Refund settlement updated', data);
 });

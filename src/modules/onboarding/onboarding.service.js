@@ -9,14 +9,14 @@ const MESSAGES = require('../../config/messages');
 
 /**
  * Returns the current onboarding request status for the calling user.
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<Object>}
  */
-const getStatus = (userEmail) =>
+const getStatus = (userPhone) =>
   withConnection(async (conn) => {
     const [rows] = await conn.execute(
-      QUERIES.ONBOARDING_REQUESTS.SELECT_BY_EMAIL,
-      [userEmail]
+      QUERIES.ONBOARDING_REQUESTS.SELECT_BY_PHONE,
+      [userPhone]
     );
     if (rows.length === 0) {
       throw new HttpError(
@@ -36,15 +36,15 @@ const getStatus = (userEmail) =>
 
 /**
  * Updates the request note on the user's pending onboarding request.
- * @param {string} userEmail
+ * @param {string} userPhone
  * @param {string} requestNote
  * @returns {Promise<void>}
  */
-const updateNote = (userEmail, requestNote) =>
+const updateNote = (userPhone, requestNote) =>
   withConnection(async (conn) => {
     await conn.execute(QUERIES.ONBOARDING_REQUESTS.UPDATE_NOTE, [
       requestNote,
-      userEmail,
+      userPhone,
     ]);
   });
 

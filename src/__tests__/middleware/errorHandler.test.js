@@ -160,6 +160,42 @@ describe('errorHandler middleware', () => {
     });
   });
 
+  describe('database at capacity', () => {
+    // The distinction that matters: the pool refusing a waiter and the SERVER
+    // refusing a session are the same experience for the caller — come back in a
+    // moment — and must not be told apart by the status code. ER_CON_COUNT_ERROR
+    // used to miss every branch and arrive as an unhandled 500.
+    it('returns 503 DB_BUSY when the pool queue is full', () => {
+      const err = new Error('Queue limit reached.');
+      const res = mockRes();
+      errorHandler(err, mockReq(), res, mockNext());
+      expect(res.status).toHaveBeenCalledWith(503);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: 'DB_BUSY', success: false })
+      );
+    });
+
+    it('returns 503 DB_BUSY on ER_CON_COUNT_ERROR from the server', () => {
+      const err = { code: 'ER_CON_COUNT_ERROR', message: 'Too many connections' };
+      const res = mockRes();
+      errorHandler(err, mockReq(), res, mockNext());
+      expect(res.status).toHaveBeenCalledWith(503);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: 'DB_BUSY', success: false })
+      );
+    });
+
+    it('also handles errno 1040 when the driver gives no code', () => {
+      const err = { errno: 1040, message: 'Too many connections' };
+      const res = mockRes();
+      errorHandler(err, mockReq(), res, mockNext());
+      expect(res.status).toHaveBeenCalledWith(503);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ error: 'DB_BUSY' })
+      );
+    });
+  });
+
   describe('HttpError (application errors)', () => {
     it('returns the HttpError statusCode and message', () => {
       const err = new HttpError('Resource not found', 404);

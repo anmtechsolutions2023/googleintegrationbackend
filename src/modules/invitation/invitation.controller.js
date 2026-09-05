@@ -12,14 +12,17 @@ const { logger } = require('../../utils/logger');
 // id from the request — that is what keeps a tenant admin inside their own
 // tenancy without a further check.
 const create = asyncHandler(async (req, res) => {
-  const { userEmail, tenantId } = extractUserContext(req);
-  const { email, roleIds, isAdmin, fullName, phone, branchDetailId } = req.validatedBody;
-  logger.info('Invitation.create called', { tenantId, email, isAdmin });
+  const { userPhone, tenantId } = extractUserContext(req);
+  const { phone, roleIds, isAdmin, fullName, branchDetailId } = req.validatedBody;
+  // The number is the identity, so it is masked here like any other. isAdmin is
+  // worth logging plainly: inviting a co-admin is the highest-privilege thing
+  // this endpoint does.
+  logger.info('Invitation.create called', { tenantId, phone, isAdmin });
 
   const invitation = await service.createInvitation({
-    tenantId, email, roleIds, isAdmin,
-    profile: { fullName, phone, branchDetailId },
-    invitedBy: userEmail,
+    tenantId, phone, roleIds, isAdmin,
+    profile: { fullName, branchDetailId },
+    invitedBy: userPhone,
   });
   createdResponse(res, invitation, 'Invitation sent');
 });

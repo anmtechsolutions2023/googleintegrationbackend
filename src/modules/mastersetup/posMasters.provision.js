@@ -188,10 +188,10 @@ const ensureTransition = async (conn, { configId, fromId, toId, tag }, tenantId,
  *        call-site compatibility but NOT used for documents: sales and expenses
  *        get their own series (see SERIES) so their numbers stay gap-free
  *        independently of onboarding paperwork.
- * @param {string} [userEmail]
+ * @param {string} [userPhone]
  */
-const provisionPosMasters = async (conn, { tenantId }, userEmail) => {
-  const by = userEmail || 'system-provision';
+const provisionPosMasters = async (conn, { tenantId }, userPhone) => {
+  const by = userPhone || 'system-provision';
 
   // Ledger accounts first — payment modes and expense categories point at them.
   const accountId = {};

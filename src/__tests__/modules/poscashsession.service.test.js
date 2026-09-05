@@ -26,7 +26,7 @@ const SESSION_ID = 'sess-1';
 const SESSION = (over = {}) => ({
   Id: SESSION_ID,
   BranchDetailId: 'branch-1',
-  CashierEmail: USER,
+  CashierPhone: USER,
   ShiftLabel: 'Morning',
   OpeningFloat: '1000.00',
   OpenedAt: '2026-08-01 09:00:00',
@@ -38,7 +38,7 @@ const SESSION = (over = {}) => ({
 const route = (over = {}) => {
   mockConn.execute.mockImplementation((sql) => {
     const q = String(sql);
-    if (/Status = 'open' LIMIT 1/i.test(q) && /CashierEmail/i.test(q)) {
+    if (/Status = 'open' LIMIT 1/i.test(q) && /CashierPhone/i.test(q)) {
       return Promise.resolve([over.openForCashier || []]);
     }
     // SELECT-anchored: the CLOSE statement also ends in Status = 'open', and

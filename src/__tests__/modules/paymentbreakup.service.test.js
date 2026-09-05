@@ -37,7 +37,7 @@ jest.mock('../../utils/dbHelper', () => ({
 const { name, servicePath, exports: ex, createData, updateData, existingRow } =
   MODULE_REGISTRY.find((m) => m.name === 'paymentbreakup');
 
-const USER_EMAIL = 'test@example.com';
+const USER_PHONE = '+919876500099';
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -48,13 +48,13 @@ describe(`${name} — service`, () => {
   describe('create', () => {
     it('returns a generated id', async () => {
       setupInsertMock(mockConnection);
-      const result = await svc[ex.create](createData, TENANT_ID, USER_EMAIL);
+      const result = await svc[ex.create](createData, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('id');
     });
 
     it('includes submitted data in the response', async () => {
       setupInsertMock(mockConnection);
-      const result = await svc[ex.create](createData, TENANT_ID, USER_EMAIL);
+      const result = await svc[ex.create](createData, TENANT_ID, USER_PHONE);
       expect(result).toMatchObject(createData);
     });
   });
@@ -62,19 +62,19 @@ describe(`${name} — service`, () => {
   describe('update', () => {
     it('returns a record with the correct Id', async () => {
       setupReadWriteMock(mockConnection, row);
-      const result = await svc[ex.update](RECORD_ID, updateData, TENANT_ID, USER_EMAIL);
+      const result = await svc[ex.update](RECORD_ID, updateData, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('Id', RECORD_ID);
     });
 
     it('falls back to existing values when a field is omitted from the patch', async () => {
       setupReadWriteMock(mockConnection, row);
-      const result = await svc[ex.update](RECORD_ID, {}, TENANT_ID, USER_EMAIL);
+      const result = await svc[ex.update](RECORD_ID, {}, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('Id', RECORD_ID);
     });
 
     it('applies provided Active flag correctly', async () => {
       setupReadWriteMock(mockConnection, row);
-      const result = await svc[ex.update](RECORD_ID, { Active: false }, TENANT_ID, USER_EMAIL);
+      const result = await svc[ex.update](RECORD_ID, { Active: false }, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('Id', RECORD_ID);
     });
   });
@@ -132,17 +132,17 @@ describe('normalizeDate — Timestamp branch coverage', () => {
   beforeEach(() => setupInsertMock(mockConnection));
 
   it('accepts ISO datetime string for Timestamp', async () => {
-    const result = await svc.create({ ...BASE, Timestamp: '2026-05-31T10:00:00.000Z' }, TENANT_ID, USER_EMAIL);
+    const result = await svc.create({ ...BASE, Timestamp: '2026-05-31T10:00:00.000Z' }, TENANT_ID, USER_PHONE);
     expect(result).toHaveProperty('id');
   });
 
   it('accepts DD-MM-YYYY string for Timestamp', async () => {
-    const result = await svc.create({ ...BASE, Timestamp: '31-05-2026' }, TENANT_ID, USER_EMAIL);
+    const result = await svc.create({ ...BASE, Timestamp: '31-05-2026' }, TENANT_ID, USER_PHONE);
     expect(result).toHaveProperty('id');
   });
 
   it('accepts a Date object for Timestamp', async () => {
-    const result = await svc.create({ ...BASE, Timestamp: new Date('2026-05-31T10:00:00Z') }, TENANT_ID, USER_EMAIL);
+    const result = await svc.create({ ...BASE, Timestamp: new Date('2026-05-31T10:00:00Z') }, TENANT_ID, USER_PHONE);
     expect(result).toHaveProperty('id');
   });
 });

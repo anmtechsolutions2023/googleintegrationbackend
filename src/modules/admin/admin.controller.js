@@ -52,12 +52,12 @@ const approveRequest = [
   validateUuidParam('requestId'),
   validateBody(schemas.approveRequestSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail: email, tenantId } = extractUserContext(req);
+    const { userPhone: phone, tenantId } = extractUserContext(req);
     const { tenantId: requestedTenantId, roleIds } = req.validatedBody;
     const targetTenantId = resolveTargetTenant(req, requestedTenantId);
-    const result = await service.approveRequest(req.params.requestId, targetTenantId, roleIds, email);
+    const result = await service.approveRequest(req.params.requestId, targetTenantId, roleIds, phone);
 
-    await captureAudit(req, tenantId, email,
+    await captureAudit(req, tenantId, phone,
       'ONBOARDING_APPROVED', STATUSES.SUCCESS,
       AUDIT_CATEGORIES.ONBOARDING, 'INFO', req.params.requestId);
 
@@ -69,11 +69,11 @@ const rejectRequest = [
   validateUuidParam('requestId'),
   validateBody(schemas.rejectRequestSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail: email, tenantId } = extractUserContext(req);
+    const { userPhone: phone, tenantId } = extractUserContext(req);
     const { reason } = req.validatedBody;
-    await service.rejectRequest(req.params.requestId, reason, email);
+    await service.rejectRequest(req.params.requestId, reason, phone);
 
-    await captureAudit(req, tenantId, email,
+    await captureAudit(req, tenantId, phone,
       'ONBOARDING_REJECTED', STATUSES.SUCCESS,
       AUDIT_CATEGORIES.ONBOARDING, 'WARN', req.params.requestId);
 
@@ -95,12 +95,12 @@ const approveOnboarding = [
   validateUuidParam('id'),
   validateBody(schemas.approveOnboardingSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail: email, tenantId } = extractUserContext(req);
+    const { userPhone: phone, tenantId } = extractUserContext(req);
     const { tenantId: requestedTenantId, roleIds } = req.validatedBody;
     const targetTenantId = resolveTargetTenant(req, requestedTenantId);
-    const result = await service.approveRequest(req.params.id, targetTenantId, roleIds, email);
+    const result = await service.approveRequest(req.params.id, targetTenantId, roleIds, phone);
 
-    await captureAudit(req, tenantId, email,
+    await captureAudit(req, tenantId, phone,
       'ONBOARDING_APPROVED', STATUSES.SUCCESS,
       AUDIT_CATEGORIES.ONBOARDING, 'INFO', req.params.id);
 
@@ -112,11 +112,11 @@ const rejectOnboarding = [
   validateUuidParam('id'),
   validateBody(schemas.rejectOnboardingSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail: email, tenantId } = extractUserContext(req);
+    const { userPhone: phone, tenantId } = extractUserContext(req);
     const { rejectionReason } = req.validatedBody;
-    await service.rejectRequest(req.params.id, rejectionReason, email);
+    await service.rejectRequest(req.params.id, rejectionReason, phone);
 
-    await captureAudit(req, tenantId, email,
+    await captureAudit(req, tenantId, phone,
       'ONBOARDING_REJECTED', STATUSES.SUCCESS,
       AUDIT_CATEGORIES.ONBOARDING, 'WARN', req.params.id);
 
@@ -127,10 +127,10 @@ const rejectOnboarding = [
 const reopenOnboarding = [
   validateUuidParam('id'),
   asyncHandler(async (req, res) => {
-    const { userEmail: email, tenantId } = extractUserContext(req);
-    await service.reopenRequest(req.params.id, email);
+    const { userPhone: phone, tenantId } = extractUserContext(req);
+    await service.reopenRequest(req.params.id, phone);
 
-    await captureAudit(req, tenantId, email,
+    await captureAudit(req, tenantId, phone,
       'ONBOARDING_REOPENED', STATUSES.UPDATED,
       AUDIT_CATEGORIES.ONBOARDING, 'INFO', req.params.id);
 
@@ -183,7 +183,7 @@ const listUsersInTenant = [
 const getUserDetail = [
   asyncHandler(async (req, res) => {
     const { tenantId } = extractUserContext(req);
-    const user = await service.getUserDetail(req.params.email, tenantId);
+    const user = await service.getUserDetail(req.params.phone, tenantId);
     successResponse(res, 'User detail retrieved', user);
   }),
 ];
@@ -191,7 +191,7 @@ const getUserDetail = [
 const getUserRoles = [
   asyncHandler(async (req, res) => {
     const { tenantId } = extractUserContext(req);
-    const roles = await service.getUserRoles(req.params.email, tenantId);
+    const roles = await service.getUserRoles(req.params.phone, tenantId);
     successResponse(res, 'User roles retrieved', roles);
   }),
 ];
@@ -199,12 +199,12 @@ const getUserRoles = [
 const updateUserRoles = [
   validateBody(schemas.updateUserRolesSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail: adminEmail, tenantId } = extractUserContext(req);
-    await service.updateUserRoles(req.params.email, tenantId, req.body.roleIds, adminEmail);
+    const { userPhone: adminPhone, tenantId } = extractUserContext(req);
+    await service.updateUserRoles(req.params.phone, tenantId, req.body.roleIds, adminPhone);
 
-    await captureAudit(req, tenantId, adminEmail,
+    await captureAudit(req, tenantId, adminPhone,
       'UPDATE_USER_ROLES', STATUSES.UPDATED,
-      AUDIT_CATEGORIES.USER_MGMT, 'INFO', req.params.email);
+      AUDIT_CATEGORIES.USER_MGMT, 'INFO', req.params.phone);
 
     successResponse(res, MESSAGES.SUCCESS.USER_ROLES_UPDATED);
   }),
@@ -213,16 +213,16 @@ const updateUserRoles = [
 const updateUserStatus = [
   validateBody(schemas.updateUserStatusSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail: adminEmail, tenantId } = extractUserContext(req);
-    await service.updateUserStatus(req.params.email, tenantId, req.body.status, adminEmail);
+    const { userPhone: adminPhone, tenantId } = extractUserContext(req);
+    await service.updateUserStatus(req.params.phone, tenantId, req.body.status, adminPhone);
 
     const isSuspend = req.body.status === 'SUSPENDED';
-    await captureAudit(req, tenantId, adminEmail,
+    await captureAudit(req, tenantId, adminPhone,
       isSuspend ? 'SUSPEND_USER' : 'ACTIVATE_USER',
       isSuspend ? STATUSES.SUSPENDED : STATUSES.ACTIVATED,
       AUDIT_CATEGORIES.USER_MGMT,
       isSuspend ? 'WARN' : 'INFO',
-      req.params.email);
+      req.params.phone);
 
     successResponse(res, MESSAGES.SUCCESS.USER_STATUS_UPDATED);
   }),
@@ -232,17 +232,17 @@ const updateUserStatus = [
 const updateUserStatusCrossTenant = [
   validateBody(schemas.updateUserStatusCrossTenantSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail: adminEmail } = extractUserContext(req);
-    const { email, tenantId, status } = req.body;
-    await service.updateUserStatusCrossTenant(email, tenantId, status, adminEmail);
+    const { userPhone: adminPhone } = extractUserContext(req);
+    const { phone, tenantId, status } = req.body;
+    await service.updateUserStatusCrossTenant(phone, tenantId, status, adminPhone);
 
     const isSuspend = status === 'SUSPENDED';
-    await captureAudit(req, tenantId, adminEmail,
+    await captureAudit(req, tenantId, adminPhone,
       isSuspend ? 'SUSPEND_USER' : 'ACTIVATE_USER',
       isSuspend ? STATUSES.SUSPENDED : STATUSES.ACTIVATED,
       AUDIT_CATEGORIES.USER_MGMT,
       isSuspend ? 'WARN' : 'INFO',
-      email);
+      phone);
 
     successResponse(res, MESSAGES.SUCCESS.USER_STATUS_UPDATED);
   }),
@@ -254,12 +254,12 @@ const updateUserStatusCrossTenant = [
 const updateUserProfile = [
   validateBody(schemas.updateUserProfileSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail: adminEmail, tenantId } = extractUserContext(req);
-    await service.updateUserProfile(req.params.email, tenantId, req.validatedBody, adminEmail);
+    const { userPhone: adminPhone, tenantId } = extractUserContext(req);
+    await service.updateUserProfile(req.params.phone, tenantId, req.validatedBody, adminPhone);
 
-    await captureAudit(req, tenantId, adminEmail,
+    await captureAudit(req, tenantId, adminPhone,
       'USER_PROFILE_UPDATED', STATUSES.SUCCESS,
-      AUDIT_CATEGORIES.USER_MGMT, 'INFO', req.params.email);
+      AUDIT_CATEGORIES.USER_MGMT, 'INFO', req.params.phone);
 
     successResponse(res, 'Staff details updated');
   }),
@@ -272,13 +272,13 @@ const updateUserProfile = [
 const setTenantAdmin = [
   validateBody(schemas.setTenantAdminSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail: adminEmail, tenantId } = extractUserContext(req);
+    const { userPhone: adminPhone, tenantId } = extractUserContext(req);
     const { isAdmin } = req.validatedBody;
-    await service.setTenantAdmin(req.params.email, tenantId, isAdmin, adminEmail);
+    await service.setTenantAdmin(req.params.phone, tenantId, isAdmin, adminPhone);
 
-    await captureAudit(req, tenantId, adminEmail,
+    await captureAudit(req, tenantId, adminPhone,
       isAdmin ? 'USER_GRANTED_ADMIN' : 'USER_REVOKED_ADMIN', STATUSES.SUCCESS,
-      AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.email);
+      AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.phone);
 
     successResponse(res, isAdmin
       ? 'Tenant administrator access granted'
@@ -288,12 +288,12 @@ const setTenantAdmin = [
 
 const removeUser = [
   asyncHandler(async (req, res) => {
-    const { userEmail: adminEmail, tenantId } = extractUserContext(req);
-    await service.removeUser(req.params.email, tenantId, adminEmail);
+    const { userPhone: adminPhone, tenantId } = extractUserContext(req);
+    await service.removeUser(req.params.phone, tenantId, adminPhone);
 
-    await captureAudit(req, tenantId, adminEmail,
+    await captureAudit(req, tenantId, adminPhone,
       'REMOVE_USER', STATUSES.DELETED,
-      AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.email);
+      AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.phone);
 
     successResponse(res, MESSAGES.SUCCESS.USER_REMOVED);
   }),
@@ -312,20 +312,20 @@ const removeUser = [
 const deleteTenant = [
   validateUuidParam('tenantId'),
   asyncHandler(async (req, res) => {
-    const { userEmail: adminEmail, tenantId: actorTenantId } = extractUserContext(req);
+    const { userPhone: adminPhone, tenantId: actorTenantId } = extractUserContext(req);
     const result = await service.deleteTenant(req.params.tenantId, actorTenantId);
 
     // Everything the trail needs that the id alone cannot carry. Truncated to
     // the column width rather than risking a silent MySQL cut: a tenancy with
     // dozens of admins is unusual, but an audit row that fails to insert
     // because of one is worse than a shortened list.
-    const owners = result.adminEmails?.length
-      ? result.adminEmails.join(', ')
+    const owners = result.adminPhones?.length
+      ? result.adminPhones.join(', ')
       : 'none recorded';
     const details = `Admin: ${owners} · ${result.membersRemoved} member(s) removed, `
       + `${result.accountsReset} account(s) reset`;
 
-    await captureAudit(req, actorTenantId, adminEmail,
+    await captureAudit(req, actorTenantId, adminPhone,
       AUDIT_ACTIONS.DELETE_TENANT, STATUSES.DELETED,
       AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.tenantId,
       details.slice(0, 500));
@@ -345,11 +345,11 @@ const listRoles = [
 const createRole = [
   validateBody(schemas.createRoleSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail, tenantId } = extractUserContext(req);
+    const { userPhone, tenantId } = extractUserContext(req);
     const { name, description } = req.body;
     const role = await service.createRole(tenantId, name, description);
 
-    await captureAudit(req, tenantId, userEmail,
+    await captureAudit(req, tenantId, userPhone,
       'CREATE_ROLE', STATUSES.CREATED,
       AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', role.id);
 
@@ -361,10 +361,10 @@ const updateRole = [
   validateIdParam('roleId'),
   validateBody(schemas.updateRoleSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail, tenantId } = extractUserContext(req);
+    const { userPhone, tenantId } = extractUserContext(req);
     const role = await service.updateRole(req.params.roleId, tenantId, req.body);
 
-    await captureAudit(req, tenantId, userEmail,
+    await captureAudit(req, tenantId, userPhone,
       'UPDATE_ROLE', STATUSES.UPDATED,
       AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', req.params.roleId);
 
@@ -375,10 +375,10 @@ const updateRole = [
 const deleteRole = [
   validateIdParam('roleId'),
   asyncHandler(async (req, res) => {
-    const { userEmail, tenantId } = extractUserContext(req);
+    const { userPhone, tenantId } = extractUserContext(req);
     await service.deleteRole(req.params.roleId, tenantId);
 
-    await captureAudit(req, tenantId, userEmail,
+    await captureAudit(req, tenantId, userPhone,
       'DELETE_ROLE', STATUSES.DELETED,
       AUDIT_CATEGORIES.ROLE_MGMT, 'WARN', req.params.roleId);
 
@@ -398,10 +398,10 @@ const setRolePermissions = [
   validateIdParam('roleId'),
   validateBody(schemas.updateRolePermissionsSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail, tenantId } = extractUserContext(req);
+    const { userPhone, tenantId } = extractUserContext(req);
     await service.setRolePermissions(req.params.roleId, tenantId, req.body.featureIds);
 
-    await captureAudit(req, tenantId, userEmail,
+    await captureAudit(req, tenantId, userPhone,
       'SET_ROLE_PERMISSIONS', STATUSES.UPDATED,
       AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', req.params.roleId);
 
@@ -421,10 +421,10 @@ const listFeatures = [
 const createFeature = [
   validateBody(schemas.createFeatureSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail, tenantId } = extractUserContext(req);
+    const { userPhone, tenantId } = extractUserContext(req);
     const feature = await service.createFeature(req.body);
 
-    await captureAudit(req, tenantId, userEmail,
+    await captureAudit(req, tenantId, userPhone,
       'CREATE_FEATURE', STATUSES.CREATED,
       AUDIT_CATEGORIES.FEATURE_MGMT, 'INFO', feature.feature_id ?? feature.id);
 
@@ -436,10 +436,10 @@ const updateFeature = [
   validateIdParam('featureId'),
   validateBody(schemas.updateFeatureSchema),
   asyncHandler(async (req, res) => {
-    const { userEmail, tenantId } = extractUserContext(req);
+    const { userPhone, tenantId } = extractUserContext(req);
     const feature = await service.updateFeature(req.params.featureId, req.body);
 
-    await captureAudit(req, tenantId, userEmail,
+    await captureAudit(req, tenantId, userPhone,
       'UPDATE_FEATURE', STATUSES.UPDATED,
       AUDIT_CATEGORIES.FEATURE_MGMT, 'INFO', req.params.featureId);
 
@@ -450,10 +450,10 @@ const updateFeature = [
 const deleteFeature = [
   validateIdParam('featureId'),
   asyncHandler(async (req, res) => {
-    const { userEmail, tenantId } = extractUserContext(req);
+    const { userPhone, tenantId } = extractUserContext(req);
     await service.deleteFeature(req.params.featureId);
 
-    await captureAudit(req, tenantId, userEmail,
+    await captureAudit(req, tenantId, userPhone,
       'DELETE_FEATURE', STATUSES.DELETED,
       AUDIT_CATEGORIES.FEATURE_MGMT, 'WARN', req.params.featureId);
 

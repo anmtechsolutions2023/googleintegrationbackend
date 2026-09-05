@@ -56,42 +56,42 @@ const getDetail = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosOrder.create called', { tenantId, email });
-  const created = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosOrder.create called', { tenantId, phone });
+  const created = await service.create(req.body, tenantId, phone);
   createdResponse(res, created, 'POS Order created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosOrder.update called', { id, tenantId, email });
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosOrder.update called', { id, tenantId, phone });
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'POS Order updated successfully');
 });
 
 const deleteById = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   logger.info('PosOrder.deleteById called', { id, tenantId });
-  await service.remove(id, tenantId, email);
+  await service.remove(id, tenantId, phone);
   noContentResponse(res, 'POS Order deleted successfully');
 });
 
 // Domain action: transfer items / rounds between tables (keep-as-served).
 const transfer = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosOrder.transfer called', { tenantId, email, scope: req.body.scope });
-  const result = await service.transfer(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosOrder.transfer called', { tenantId, phone, scope: req.body.scope });
+  const result = await service.transfer(req.body, tenantId, phone);
   successResponse(res, result, 'Order transferred successfully');
 });
 
 // Domain action: fire a KOT from this order.
 const fireKot = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosOrder.fireKot called', { id, tenantId, email });
-  const kot = await service.fireKot(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosOrder.fireKot called', { id, tenantId, phone });
+  const kot = await service.fireKot(id, req.body, tenantId, phone);
   createdResponse(res, kot, 'KOT fired successfully');
 });
 

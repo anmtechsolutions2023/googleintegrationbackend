@@ -22,7 +22,7 @@ const switchTenantSchema = Joi.object({
  */
 const switchTenant = async (req, res, next) => {
   try {
-    logger.info('Switch tenant request', { user: req.user.email });
+    logger.info('Switch tenant request', { user: req.user.phone });
 
     // Validate input
     const { error, value } = switchTenantSchema.validate(req.body);
@@ -37,19 +37,19 @@ const switchTenant = async (req, res, next) => {
     }
 
     const { tenantId } = value;
-    const userEmail = req.user.email;
+    const userPhone = req.user.phone;
     const userName = req.user.name;
 
     // Call service
     const newPermissions = await tenantService.switchTenantPermissions(
       req,
-      userEmail,
+      userPhone,
       tenantId,
       userName
     );
     const newToken = generateAppToken(newPermissions);
 
-    logger.info('Tenant switched successfully', { userEmail, tenantId });
+    logger.info('Tenant switched successfully', { userPhone, tenantId });
     res.json({
       success: true,
       message: `${MESSAGES.SUCCESS.TENANT_SWITCH}${tenantId}`,

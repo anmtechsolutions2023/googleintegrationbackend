@@ -27,12 +27,12 @@ const { HttpError } = require('../middleware/errorHandler');
  * @param {string} p.deleteQuery - Parameterised DELETE (id, tenantId).
  * @param {string} p.id
  * @param {string} p.tenantId
- * @param {string} p.userEmail
+ * @param {string} p.userPhone
  * @returns {Promise<{id:string, retired:boolean}>} retired=true means it was
  *          kept, deactivated, because history points at it.
  */
 const deleteOrRetire = async ({
-  table, entityName, references, deleteQuery, id, tenantId, userEmail,
+  table, entityName, references, deleteQuery, id, tenantId, userPhone,
 }) =>
   withTransaction(async (conn) => {
     const [rows] = await conn.execute(
@@ -51,7 +51,7 @@ const deleteOrRetire = async ({
       if (used.length > 0) {
         await conn.execute(
           `UPDATE ${table} SET Active = 0, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?`,
-          [userEmail, id, tenantId],
+          [userPhone, id, tenantId],
         );
         logger.info(`${entityName} retired rather than deleted — it has history`, {
           id, tenantId, referencedBy: ref.table,

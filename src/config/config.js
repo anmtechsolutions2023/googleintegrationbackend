@@ -28,6 +28,37 @@ module.exports = {
     // acquire timeout to break the tie. withConnection takes an existing
     // connection for exactly this reason — pass yours down rather than nesting.
     CONNECTION_LIMIT: 4, // Maximum number of connections in the pool
+    // How many of those may sit IDLE, and for how long.
+    //
+    // MAX_IDLE is not a nicety, it is what makes IDLE_TIMEOUT_MS run at all.
+    // mysql2 starts its idle sweeper only when maxIdle < connectionLimit, and
+    // maxIdle DEFAULTS TO connectionLimit (mysql2/lib/base/pool.js, and
+    // lib/pool_config.js) — so leaving it unset does not mean "keep four idle",
+    // it means the sweeper is never scheduled and idleTimeout is never
+    // consulted. Every connection the pool opened stayed open for the life of
+    // the process.
+    //
+    // On a long-lived server that is only wasteful. On Vercel it is the outage:
+    // instances are kept warm and new ones are added on each concurrency spike,
+    // so every instance that had served a burst sat on up to CONNECTION_LIMIT
+    // connections it would never use again. The total at the server only ever
+    // went up, until MySQL itself began refusing new ones with
+    // ER_CON_COUNT_ERROR — a 1040 from the server, not pool exhaustion here,
+    // which is why it surfaced as an unhandled 500 rather than DB_BUSY.
+    //
+    // At 1, a burst still opens up to CONNECTION_LIMIT and is trimmed back to a
+    // single warm connection within a second of the burst ending. The steady
+    // state per instance is therefore MAX_IDLE, not CONNECTION_LIMIT — that is
+    // the number to multiply by warm instances when checking it against
+    // max_connections.
+    MAX_IDLE: 1,
+    // Long enough that someone clicking between screens keeps reusing the same
+    // connection — a new one costs a TCP and TLS handshake to a managed host —
+    // and short enough that an instance the platform has finished with hands
+    // its last connection back instead of parking it until the process dies.
+    // The sweeper ticks once a second, so this value is the resolution that
+    // matters rather than the poll interval.
+    IDLE_TIMEOUT_MS: 30000,
     // Bounded so an overloaded instance fails fast instead of queueing without
     // limit. Unlimited queueing turns a busy minute into requests that hang until
     // the caller times out, which reads as an outage; a refusal reads as load.
@@ -61,16 +92,17 @@ module.exports = {
   // ============================================
   // RATE LIMITING CONFIGURATION
   // ============================================
-  RATE_LIMIT: {
-    // Authentication endpoint rate limiting
-    AUTH_WINDOW_MS: 15 * 60 * 1000,                               // 15 minutes
-    AUTH_MAX_REQUESTS: parseInt(process.env.AUTH_RATE_LIMIT, 10) || 30, // override via AUTH_RATE_LIMIT env var
-    // AUTH_MESSAGE is in messages.js - see messages.ERROR.RATE_LIMIT_EXCEEDED
-
-    // Standard headers: Include rate limit info in response headers
-    STANDARD_HEADERS: true,
-    // Legacy headers: Disable X-RateLimit-* headers (use RateLimit-* instead)
-    LEGACY_HEADERS: false,
+  // Kept as a delegating alias. Every value now lives in config/rateLimits.js
+  // so there is one place to tune throttles; this exists only so a consumer
+  // written against the old shape does not silently read undefined.
+  get RATE_LIMIT() {
+    const rl = require('./rateLimits');
+    return {
+      AUTH_WINDOW_MS: rl.HTTP.WINDOW_MS,
+      AUTH_MAX_REQUESTS: rl.HTTP.MAX_REQUESTS,
+      STANDARD_HEADERS: rl.HTTP.STANDARD_HEADERS,
+      LEGACY_HEADERS: rl.HTTP.LEGACY_HEADERS,
+    };
   },
 
   // ============================================
@@ -81,6 +113,50 @@ module.exports = {
     EXPIRATION: '1h', // JWT token validity: 1 hour
     GUEST_EXPIRATION: '15m', // Guest (pending/rejected) tokens expire faster
     // NOTE: JWT_SECRET should come from environment variable (process.env.JWT_SECRET)
+  },
+
+  // ============================================
+  // WHATSAPP CLOUD API CONFIGURATION
+  // ============================================
+  // Every value is environment-supplied. SECRETS DELIBERATELY HAVE NO DEFAULT:
+  // a missing one must stop the server at boot with a clear message, not start
+  // successfully and fail on the first person signing in during a dinner rush.
+  // With Google sign-in retired there is no second way in, so a misconfigured
+  // deploy is a total outage rather than a degraded one.
+  //
+  // Only src/modules/whatsapp/whatsapp.client.js reads ACCESS_TOKEN, and only
+  // the webhook reads APP_SECRET — one place each can leak from.
+  // See WHATSAPP_IDENTITY_MIGRATION.md §8.5.
+  WHATSAPP: {
+    // Pinned, not floating: Meta deprecates Graph versions on a published
+    // clock, and a silent bump changes payload shapes under us.
+    GRAPH_VERSION: process.env.WA_GRAPH_VERSION || 'v21.0',
+    GRAPH_BASE_URL: 'https://graph.facebook.com',
+
+    PHONE_NUMBER_ID: process.env.WA_PHONE_NUMBER_ID,
+    BUSINESS_ACCOUNT_ID: process.env.WA_BUSINESS_ACCOUNT_ID,
+
+    ACCESS_TOKEN: process.env.WA_ACCESS_TOKEN,           // secret
+    APP_SECRET: process.env.WA_APP_SECRET,               // secret
+    WEBHOOK_VERIFY_TOKEN: process.env.WA_WEBHOOK_VERIFY_TOKEN,
+
+    // Must match the approved template EXACTLY. 'en' is not 'en_US', and the
+    // mismatch surfaces as Meta error 132001 rather than anything readable.
+    TEMPLATE_OTP_NAME: process.env.WA_TEMPLATE_OTP_NAME || 'login_otp',
+    TEMPLATE_OTP_LANG: process.env.WA_TEMPLATE_OTP_LANG || 'en_US',
+
+    SEND_TIMEOUT_MS: parseInt(process.env.WA_SEND_TIMEOUT_MS, 10) || 10000,
+  },
+
+  // ============================================
+  // OTP CONFIGURATION
+  // ============================================
+  // Only the secret. Every OTP THROTTLE — window, per-number, per-IP, cooldown,
+  // attempts, TTL and the daily cost cap — lives in config/rateLimits.js.
+  OTP: {
+    // No default on purpose: a shared default would mean every deployment that
+    // forgot to set it uses one secret.
+    PEPPER: process.env.OTP_PEPPER,
   },
 
   // ============================================

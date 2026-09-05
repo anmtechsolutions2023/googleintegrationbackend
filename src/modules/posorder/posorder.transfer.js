@@ -90,16 +90,16 @@ const loadTable = async (conn, id, tenantId) => {
   return rows[0];
 };
 
-const writeOrder = (conn, o, userEmail, tenantId) =>
+const writeOrder = (conn, o, userPhone, tenantId) =>
   conn.execute(QUERIES.POS_ORDER.UPDATE, [
     o.OrderNo, o.TableId, o.CustomerId ?? null, o.OrderType ?? null, o.ChannelId ?? null,
     o.Status ?? null,
     toJson(o.Items), o.SubTotal, o.TaxAmount, o.Total, o.BranchDetailId ?? null,
     o.TableName ?? null, o.FloorId ?? null, o.FloorName ?? null, o.TableCapacity ?? null,
-    o.Active != null ? o.Active : 1, userEmail, o.Id, tenantId,
+    o.Active != null ? o.Active : 1, userPhone, o.Id, tenantId,
   ]);
 
-const insertOrder = (conn, o, userEmail, tenantId) =>
+const insertOrder = (conn, o, userPhone, tenantId) =>
   conn.execute(QUERIES.POS_ORDER.INSERT, [
     o.Id, tenantId, o.OrderNo, o.TableId, o.CustomerId ?? null, o.OrderType ?? 'dinein',
     // A split round was sold the same way the round it came from was.
@@ -107,7 +107,7 @@ const insertOrder = (conn, o, userEmail, tenantId) =>
     o.Status ?? 'open', toJson(o.Items), o.SubTotal, o.TaxAmount, o.Total,
     o.BranchDetailId ?? null,
     o.TableName ?? null, o.FloorId ?? null, o.FloorName ?? null, o.TableCapacity ?? null,
-    1, userEmail, userEmail,
+    1, userPhone, userPhone,
   ]);
 
 // A moved round was genuinely served at its NEW table, so its venue snapshot is
@@ -124,24 +124,24 @@ const deleteOrder = (conn, id, tenantId) =>
 // Keep a round's kitchen ticket pointing at the right table. Without this a
 // transfer left the KOT showing the table the guests walked away from, so the
 // pass delivered to an empty seat.
-const moveKotsToTable = (conn, orderId, tableId, tenantId, userEmail) =>
+const moveKotsToTable = (conn, orderId, tableId, tenantId, userPhone) =>
   conn.execute(
     'UPDATE pos_kot SET TableId = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE OrderId = ? AND TenantId = ?',
-    [tableId ?? null, userEmail, orderId, tenantId],
+    [tableId ?? null, userPhone, orderId, tenantId],
   );
 
 // Repoint a round's tickets at another round. Required before deleting an order
 // that has any: pos_kot.OrderId is a FOREIGN KEY with no ON DELETE, so the
 // delete would simply fail on any round that had been sent to the kitchen.
-const reassignKots = (conn, fromOrderId, toOrderId, toTableId, tenantId, userEmail) =>
+const reassignKots = (conn, fromOrderId, toOrderId, toTableId, tenantId, userPhone) =>
   conn.execute(
     'UPDATE pos_kot SET OrderId = ?, TableId = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE OrderId = ? AND TenantId = ?',
-    [toOrderId, toTableId ?? null, userEmail, fromOrderId, tenantId],
+    [toOrderId, toTableId ?? null, userPhone, fromOrderId, tenantId],
   );
 
 // Re-derive a table's occupancy from its remaining open orders — the source may
 // have emptied and the destination may have just become occupied.
-const refreshTable = async (conn, tableId, tenantId, userEmail) => {
+const refreshTable = async (conn, tableId, tenantId, userPhone) => {
   if (!tableId) return;
   const [trows] = await conn.execute(QUERIES.POS_TABLE.SELECT_BY_ID, [tableId, tenantId]);
   if (trows.length === 0) return;
@@ -155,14 +155,14 @@ const refreshTable = async (conn, tableId, tenantId, userEmail) => {
   await conn.execute(QUERIES.POS_TABLE.UPDATE, [
     t.Name, t.FloorId, t.Capacity, occupied ? 'occupied' : 'free',
     occupied ? open[0].Id : null, t.BranchDetailId, t.Active != null ? t.Active : 1,
-    userEmail, tableId, tenantId,
+    userPhone, tableId, tenantId,
   ]);
 };
 
 // ── Operations ───────────────────────────────────────────────────────────────
 
 // Reassign whole orders (one round, or a table's every round) to another table.
-const moveOrders = async (conn, { orderIds, toTableId }, tenantId, userEmail) => {
+const moveOrders = async (conn, { orderIds, toTableId }, tenantId, userPhone) => {
   const dest = await loadTable(conn, toTableId, tenantId);
   const fromTables = new Set();
   for (const id of orderIds) {
@@ -172,12 +172,12 @@ const moveOrders = async (conn, { orderIds, toTableId }, tenantId, userEmail) =>
       o.TableId = toTableId;
       o.BranchDetailId = dest.BranchDetailId ?? o.BranchDetailId;
       await restampVenue(conn, o, tenantId);
-      await writeOrder(conn, o, userEmail, tenantId);
-      await moveKotsToTable(conn, o.Id, toTableId, tenantId, userEmail);
+      await writeOrder(conn, o, userPhone, tenantId);
+      await moveKotsToTable(conn, o.Id, toTableId, tenantId, userPhone);
     }
   }
-  for (const ft of fromTables) await refreshTable(conn, ft, tenantId, userEmail);
-  await refreshTable(conn, toTableId, tenantId, userEmail);
+  for (const ft of fromTables) await refreshTable(conn, ft, tenantId, userPhone);
+  await refreshTable(conn, toTableId, tenantId, userPhone);
   const origin = [...fromTables][0] || null;
   return {
     scope: 'orders',
@@ -189,7 +189,7 @@ const moveOrders = async (conn, { orderIds, toTableId }, tenantId, userEmail) =>
 
 // Split specific lines (with per-line quantities) off a round into a new round on
 // the destination table. Leaves the un-moved lines — and their totals — behind.
-const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo }, tenantId, userEmail) => {
+const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo }, tenantId, userPhone) => {
   const src = await loadOrder(conn, sourceOrderId, tenantId);
   const fromTableId = src.TableId;
   const dest = await loadTable(conn, toTableId, tenantId);
@@ -216,10 +216,10 @@ const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo },
     src.TableId = toTableId;
     src.BranchDetailId = dest.BranchDetailId ?? src.BranchDetailId;
     await restampVenue(conn, src, tenantId);
-    await writeOrder(conn, src, userEmail, tenantId);
-    await moveKotsToTable(conn, src.Id, toTableId, tenantId, userEmail);
-    await refreshTable(conn, fromTableId, tenantId, userEmail);
-    await refreshTable(conn, toTableId, tenantId, userEmail);
+    await writeOrder(conn, src, userPhone, tenantId);
+    await moveKotsToTable(conn, src.Id, toTableId, tenantId, userPhone);
+    await refreshTable(conn, fromTableId, tenantId, userPhone);
+    await refreshTable(conn, toTableId, tenantId, userPhone);
     return {
       scope: 'items', movedOrderIds: [sourceOrderId], createdOrderId: null,
       undo: { scope: 'orders', orderIds: [sourceOrderId], toTableId: fromTableId },
@@ -229,7 +229,7 @@ const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo },
   // Trim the source to what remains.
   const srcTotals = sumTotals(newSource);
   Object.assign(src, { Items: newSource, ...srcTotals });
-  await writeOrder(conn, src, userEmail, tenantId);
+  await writeOrder(conn, src, userPhone, tenantId);
 
   // The moved lines arrive as a fresh round on the destination. Whether the
   // kitchen needs to hear about it depends entirely on whether it already has:
@@ -244,7 +244,7 @@ const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo },
   const destOrder = {
     Id: destId,
     OrderNo: destOrderNo
-      || (await issuePosNumber(conn, 'POS_ORDER', 'ORD', tenantId, userEmail)),
+      || (await issuePosNumber(conn, 'POS_ORDER', 'ORD', tenantId, userPhone)),
     TableId: toTableId,
     CustomerId: src.CustomerId ?? null,
     OrderType: src.OrderType || 'dinein',
@@ -255,11 +255,11 @@ const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo },
     BranchDetailId: dest.BranchDetailId ?? src.BranchDetailId,
     ...(await resolveVenueTx(conn, toTableId, tenantId)),
   };
-  await insertOrder(conn, destOrder, userEmail, tenantId);
-  if (srcWasSent) await writeKot(conn, destOrder, tenantId, userEmail);
+  await insertOrder(conn, destOrder, userPhone, tenantId);
+  if (srcWasSent) await writeKot(conn, destOrder, tenantId, userPhone);
 
-  await refreshTable(conn, fromTableId, tenantId, userEmail);
-  await refreshTable(conn, toTableId, tenantId, userEmail);
+  await refreshTable(conn, fromTableId, tenantId, userPhone);
+  await refreshTable(conn, toTableId, tenantId, userPhone);
   return {
     scope: 'items',
     sourceOrderId,
@@ -272,28 +272,28 @@ const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo },
 
 // Fold every line of one order into another, then delete the emptied order. Used
 // to reverse an item split (merge the new round back into its origin).
-const mergeOrders = async (conn, { sourceOrderId, targetOrderId }, tenantId, userEmail) => {
+const mergeOrders = async (conn, { sourceOrderId, targetOrderId }, tenantId, userPhone) => {
   const src = await loadOrder(conn, sourceOrderId, tenantId);
   const tgt = await loadOrder(conn, targetOrderId, tenantId);
   const merged = [...asArray(tgt.Items), ...asArray(src.Items)];
   Object.assign(tgt, { Items: merged, ...sumTotals(merged) });
-  await writeOrder(conn, tgt, userEmail, tenantId);
+  await writeOrder(conn, tgt, userPhone, tenantId);
   // The source's tickets move to the target BEFORE the source row goes: the
   // food is already cooking, and pos_kot.OrderId is a FOREIGN KEY with no
   // ON DELETE, so leaving them behind would fail the delete outright.
-  await reassignKots(conn, sourceOrderId, targetOrderId, tgt.TableId, tenantId, userEmail);
+  await reassignKots(conn, sourceOrderId, targetOrderId, tgt.TableId, tenantId, userPhone);
   await deleteOrder(conn, sourceOrderId, tenantId);
-  await refreshTable(conn, src.TableId, tenantId, userEmail);
-  await refreshTable(conn, tgt.TableId, tenantId, userEmail);
+  await refreshTable(conn, src.TableId, tenantId, userPhone);
+  await refreshTable(conn, tgt.TableId, tenantId, userPhone);
   return { scope: 'merge', movedOrderIds: [targetOrderId], deletedOrderId: sourceOrderId, undo: null };
 };
 
 // Entry point — dispatches on scope. Runs inside a caller-supplied transaction.
-const transfer = (conn, payload, tenantId, userEmail) => {
+const transfer = (conn, payload, tenantId, userPhone) => {
   switch (payload.scope) {
-    case 'orders': return moveOrders(conn, payload, tenantId, userEmail);
-    case 'items':  return moveItems(conn, payload, tenantId, userEmail);
-    case 'merge':  return mergeOrders(conn, payload, tenantId, userEmail);
+    case 'orders': return moveOrders(conn, payload, tenantId, userPhone);
+    case 'items':  return moveItems(conn, payload, tenantId, userPhone);
+    case 'merge':  return mergeOrders(conn, payload, tenantId, userPhone);
     default: throw new HttpError(`Unknown transfer scope: ${payload.scope}`, 400);
   }
 };

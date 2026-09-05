@@ -66,15 +66,15 @@ const getTaxTypeById = asyncHandler(async (req, res) => {
  * @param {Object} res - Express response object
  */
 const createTaxType = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   const taxTypeData = req.body;
 
-  logger.info('createTaxType called', { tenantId, email });
+  logger.info('createTaxType called', { tenantId, phone });
 
   const newTaxType = await taxTypeService.createTaxType(
     taxTypeData,
     tenantId,
-    email
+    phone
   );
 
   createdResponse(res, newTaxType, 'Tax type created successfully');
@@ -87,16 +87,16 @@ const createTaxType = asyncHandler(async (req, res) => {
  */
 const updateTaxType = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   const updateData = req.body;
 
-  logger.info('updateTaxType called', { id, tenantId, email });
+  logger.info('updateTaxType called', { id, tenantId, phone });
 
   const updatedTaxType = await taxTypeService.updateTaxType(
     id,
     updateData,
     tenantId,
-    email
+    phone
   );
 
   successResponse(res, updatedTaxType, 'Tax type updated successfully');

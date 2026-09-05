@@ -269,10 +269,10 @@ const coerce = (doc, key, raw) => {
  * @param {Object} values - { fieldKey: value }
  * @param {string} branchId
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<Object>} The resolved document after saving.
  */
-const save = async (doc, values, branchId, tenantId, userEmail) => {
+const save = async (doc, values, branchId, tenantId, userPhone) => {
   if (!DOCUMENTS[doc]) {
     throw new HttpError(`Unknown document type “${doc}”.`, MESSAGES.HTTP_STATUS.NOT_FOUND);
   }
@@ -303,14 +303,14 @@ const save = async (doc, values, branchId, tenantId, userEmail) => {
       } else {
         // eslint-disable-next-line no-await-in-loop
         await conn.execute(QUERIES.POS_SETTING.UPSERT, [
-          uuidv4(), tenantId, branchId, storageKey, value, userEmail, userEmail,
+          uuidv4(), tenantId, branchId, storageKey, value, userPhone, userPhone,
         ]);
       }
     }
   });
 
   logger.info('Receipt format updated', {
-    tenantId, branchId, doc, fields: Object.keys(values).length, userEmail,
+    tenantId, branchId, doc, fields: Object.keys(values).length, userPhone,
   });
 
   return describe(doc, branchId, tenantId);
@@ -327,9 +327,9 @@ const save = async (doc, values, branchId, tenantId, userEmail) => {
  * @param {string} taxMode
  * @param {string} branchId
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  */
-const setTaxMode = async (taxMode, branchId, tenantId, userEmail) => {
+const setTaxMode = async (taxMode, branchId, tenantId, userPhone) => {
   if (!Object.values(TAX_MODE).includes(taxMode)) {
     throw new HttpError(
       `Tax mode must be one of: ${Object.values(TAX_MODE).join(', ')}.`,
@@ -338,10 +338,10 @@ const setTaxMode = async (taxMode, branchId, tenantId, userEmail) => {
   }
 
   await withConnection((conn) => conn.execute(QUERIES.POS_SETTING.UPSERT, [
-    uuidv4(), tenantId, branchId, TAX_MODE_KEY, taxMode, userEmail, userEmail,
+    uuidv4(), tenantId, branchId, TAX_MODE_KEY, taxMode, userPhone, userPhone,
   ]));
 
-  logger.info('Receipt tax mode changed', { tenantId, branchId, taxMode, userEmail });
+  logger.info('Receipt tax mode changed', { tenantId, branchId, taxMode, userPhone });
   return resolveAll(branchId, tenantId);
 };
 

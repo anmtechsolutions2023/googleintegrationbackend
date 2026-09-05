@@ -59,7 +59,7 @@ const applyRoundOff = (gross) => {
  * the rule, `transactiontypeconversionmapper` is the event.
  */
 const transitionStatus = async (
-  conn, { logId, configId, fromStatusId, toStatusId, settledAt }, tenantId, userEmail,
+  conn, { logId, configId, fromStatusId, toStatusId, settledAt }, tenantId, userPhone,
 ) => {
   const [permitted] = await conn.execute(QUERIES.LEDGER.SELECT_TRANSITION, [
     configId, fromStatusId, toStatusId, tenantId,
@@ -72,10 +72,10 @@ const transitionStatus = async (
   }
 
   await conn.execute(QUERIES.LEDGER.INSERT_CONVERSION_MAPPER, [
-    uuidv4(), tenantId, permitted[0].Id, logId, toStatusId, userEmail, userEmail,
+    uuidv4(), tenantId, permitted[0].Id, logId, toStatusId, userPhone, userPhone,
   ]);
   await conn.execute(QUERIES.LEDGER.UPDATE_LOG_STATUS, [
-    toStatusId, settledAt ?? null, userEmail, logId, tenantId,
+    toStatusId, settledAt ?? null, userPhone, logId, tenantId,
   ]);
 };
 

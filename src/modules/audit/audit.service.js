@@ -12,7 +12,7 @@ const { HttpError } = require('../../middleware/errorHandler');
  *
  * @param {Object} filters
  * @param {string}  [filters.tenantId]   - Filter to a single tenant (super-admin only).
- * @param {string}  [filters.userEmail]  - Filter by exact user email.
+ * @param {string}  [filters.userPhone]  - Filter by exact user email.
  * @param {string}  [filters.category]   - Filter by AUDIT_CATEGORIES value.
  * @param {string}  [filters.logLevel]   - Filter by log level (DEBUG|INFO|WARN|ERROR).
  * @param {string}  [filters.startDate]  - ISO date string lower bound (inclusive).
@@ -26,7 +26,7 @@ const getAuditLogs = async (filters = {}) => {
 
   const {
     tenantId,
-    userEmail,
+    userPhone,
     category,
     logLevel,
     startDate,
@@ -46,9 +46,9 @@ const getAuditLogs = async (filters = {}) => {
     conditions.push('tenant_id = ?');
     params.push(tenantId);
   }
-  if (userEmail) {
-    conditions.push('user_email = ?');
-    params.push(userEmail);
+  if (userPhone) {
+    conditions.push('user_phone = ?');
+    params.push(userPhone);
   }
   if (category) {
     conditions.push('category = ?');

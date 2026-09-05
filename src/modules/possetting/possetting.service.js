@@ -92,14 +92,14 @@ const getBranchSettings = (branchId, tenantId) =>
  * @param {string} branchId
  * @param {Object} patch - { '<key>': '<value>' } — keys already validated.
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<Object>} The branch's resulting settings.
  */
-const setBranchSettings = async (branchId, patch, tenantId, userEmail) => {
+const setBranchSettings = async (branchId, patch, tenantId, userPhone) => {
   await withConnection(async (conn) => {
     for (const [key, value] of Object.entries(patch)) {
       await conn.execute(QUERIES.POS_SETTING.UPSERT, [
-        uuidv4(), tenantId, branchId, key, value, userEmail, userEmail,
+        uuidv4(), tenantId, branchId, key, value, userPhone, userPhone,
       ]);
     }
   });

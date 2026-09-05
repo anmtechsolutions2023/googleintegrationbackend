@@ -37,7 +37,7 @@ jest.mock('../../utils/dbHelper', () => ({
 const { name, servicePath, exports: ex, createData, updateData, existingRow } =
   MODULE_REGISTRY.find((m) => m.name === 'batchdetail');
 
-const USER_EMAIL = 'test@example.com';
+const USER_PHONE = '+919876500099';
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -48,13 +48,13 @@ describe(`${name} — service`, () => {
   describe('create', () => {
     it('returns a generated id', async () => {
       setupInsertMock(mockConnection);
-      const result = await svc[ex.create](createData, TENANT_ID, USER_EMAIL);
+      const result = await svc[ex.create](createData, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('id');
     });
 
     it('includes submitted data in the response', async () => {
       setupInsertMock(mockConnection);
-      const result = await svc[ex.create](createData, TENANT_ID, USER_EMAIL);
+      const result = await svc[ex.create](createData, TENANT_ID, USER_PHONE);
       expect(result).toMatchObject(createData);
     });
   });
@@ -62,19 +62,19 @@ describe(`${name} — service`, () => {
   describe('update', () => {
     it('returns a record with the correct Id', async () => {
       setupReadWriteMock(mockConnection, row);
-      const result = await svc[ex.update](RECORD_ID, updateData, TENANT_ID, USER_EMAIL);
+      const result = await svc[ex.update](RECORD_ID, updateData, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('Id', RECORD_ID);
     });
 
     it('falls back to existing values when a field is omitted from the patch', async () => {
       setupReadWriteMock(mockConnection, row);
-      const result = await svc[ex.update](RECORD_ID, {}, TENANT_ID, USER_EMAIL);
+      const result = await svc[ex.update](RECORD_ID, {}, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('Id', RECORD_ID);
     });
 
     it('applies provided Active flag correctly', async () => {
       setupReadWriteMock(mockConnection, row);
-      const result = await svc[ex.update](RECORD_ID, { Active: false }, TENANT_ID, USER_EMAIL);
+      const result = await svc[ex.update](RECORD_ID, { Active: false }, TENANT_ID, USER_PHONE);
       expect(result).toHaveProperty('Id', RECORD_ID);
     });
   });
@@ -213,17 +213,17 @@ describe('normalizeDate — branch coverage', () => {
   beforeEach(() => setupInsertMock(mockConnection));
 
   it('accepts ISO datetime strings for date fields', async () => {
-    const result = await svc.create({ BatchNo: 'B-ISO', IsNonReturnable: false, MfgDate: '2026-01-15T00:00:00.000Z', Expdate: '2027-01-15T00:00:00.000Z' }, TENANT_ID, USER_EMAIL);
+    const result = await svc.create({ BatchNo: 'B-ISO', IsNonReturnable: false, MfgDate: '2026-01-15T00:00:00.000Z', Expdate: '2027-01-15T00:00:00.000Z' }, TENANT_ID, USER_PHONE);
     expect(result).toHaveProperty('id');
   });
 
   it('accepts DD-MM-YYYY strings for date fields', async () => {
-    const result = await svc.create({ BatchNo: 'B-DMY', IsNonReturnable: false, MfgDate: '15-01-2026' }, TENANT_ID, USER_EMAIL);
+    const result = await svc.create({ BatchNo: 'B-DMY', IsNonReturnable: false, MfgDate: '15-01-2026' }, TENANT_ID, USER_PHONE);
     expect(result).toHaveProperty('id');
   });
 
   it('accepts Date objects for date fields', async () => {
-    const result = await svc.create({ BatchNo: 'B-OBJ', IsNonReturnable: false, MfgDate: new Date('2026-01-15') }, TENANT_ID, USER_EMAIL);
+    const result = await svc.create({ BatchNo: 'B-OBJ', IsNonReturnable: false, MfgDate: new Date('2026-01-15') }, TENANT_ID, USER_PHONE);
     expect(result).toHaveProperty('id');
   });
 });

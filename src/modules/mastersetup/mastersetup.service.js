@@ -43,12 +43,12 @@ const { provisionPosMasters } = require('./posMasters.provision');
  *
  * @param {Object} payload - Validated nested payload (see mastersetup.schemas).
  * @param {string} tenantId - Tenant ID.
- * @param {string} userEmail - Acting user's email.
+ * @param {string} userPhone - Acting user's email.
  * @returns {Promise<Object>} Map of every created entity → generated id.
  * @throws {HttpError} 409 when this tenant has already completed setup.
  */
-const bootstrap = async (payload, tenantId, userEmail) => {
-  logger.info('Master-data bootstrap started', { tenantId, userEmail });
+const bootstrap = async (payload, tenantId, userPhone) => {
+  logger.info('Master-data bootstrap started', { tenantId, userPhone });
 
   if (await setupRepository.isSetupComplete(tenantId)) {
     logger.warn('Master-data bootstrap rejected — already completed', { tenantId });
@@ -62,7 +62,7 @@ const bootstrap = async (payload, tenantId, userEmail) => {
     const created = {};
 
     // 1) Organization ---------------------------------------------------------
-    const org = await organization.createTx(conn, payload.organization, tenantId, userEmail);
+    const org = await organization.createTx(conn, payload.organization, tenantId, userPhone);
     created.organization = org.id;
 
     // 2) Branch subtree (bottom-up so FKs resolve) ----------------------------
@@ -71,13 +71,13 @@ const bootstrap = async (payload, tenantId, userEmail) => {
     // 2a) Address → location mapper chain (mapper is optional; built all-or-nothing)
     let mapperId = null;
     if (b.address.locationMapper) {
-      const provider = await mapProvider.createTx(conn, b.address.locationMapper.mapProvider, tenantId, userEmail);
-      const location = await locationDetail.createTx(conn, b.address.locationMapper.locationDetail, tenantId, userEmail);
+      const provider = await mapProvider.createTx(conn, b.address.locationMapper.mapProvider, tenantId, userPhone);
+      const location = await locationDetail.createTx(conn, b.address.locationMapper.locationDetail, tenantId, userPhone);
       const mapper = await mapProviderLocationMapper.createTx(
         conn,
         { ...b.address.locationMapper, MapProviderId: provider.id, LocationDetailId: location.id },
         tenantId,
-        userEmail,
+        userPhone,
       );
       mapperId = mapper.id;
       Object.assign(created, {
@@ -93,21 +93,21 @@ const bootstrap = async (payload, tenantId, userEmail) => {
       conn,
       b.address.contactAddressType.Name,
       tenantId,
-      userEmail,
+      userPhone,
     );
     const address = await addressDetail.createTx(
       conn,
       { ...b.address, MapProviderLocationMapperId: mapperId, ContactAddressTypeId: addrType.id },
       tenantId,
-      userEmail,
+      userPhone,
     );
 
     // 2b) Contact + transaction type config
-    const contact = await contactDetail.createTx(conn, b.contact, tenantId, userEmail);
+    const contact = await contactDetail.createTx(conn, b.contact, tenantId, userPhone);
     // Transaction type config is reused if a same-TagName config already exists
     // for the tenant (UNIQUE TagName); otherwise it is created. The wizard sends
     // the fixed 'Onboarding' TagName, so repeated onboarding reuses the same row.
-    const ttc = await transactionTypeConfig.getOrCreateByTagNameTx(conn, b.transactionTypeConfig, tenantId, userEmail);
+    const ttc = await transactionTypeConfig.getOrCreateByTagNameTx(conn, b.transactionTypeConfig, tenantId, userPhone);
 
     // 2c) Branch (needs org + contact + address + txn-config)
     const branch = await branchDetail.createTx(
@@ -120,7 +120,7 @@ const bootstrap = async (payload, tenantId, userEmail) => {
         TransactionTypeConfigId: ttc.id,
       },
       tenantId,
-      userEmail,
+      userPhone,
     );
 
     Object.assign(created, {
@@ -135,13 +135,13 @@ const bootstrap = async (payload, tenantId, userEmail) => {
     // type, permitted transitions, accounts, received types). Seeded here so a
     // brand-new tenant can settle bills and post to the ledger immediately —
     // no per-tenant seed script. Idempotent + atomic with the rest of setup.
-    await provisionPosMasters(conn, { tenantId, configId: ttc.id }, userEmail);
+    await provisionPosMasters(conn, { tenantId, configId: ttc.id }, userPhone);
 
     // 3) Item subtree (optional) ---------------------------------------------
     if (payload.item) {
       const it = payload.item;
-      const cat = await category.createTx(conn, it.category, tenantId, userEmail);
-      const unit = await uom.createTx(conn, it.uom, tenantId, userEmail);
+      const cat = await category.createTx(conn, it.category, tenantId, userPhone);
+      const unit = await uom.createTx(conn, it.uom, tenantId, userPhone);
 
       // The tax group, and the RATES inside it.
       //
@@ -154,20 +154,20 @@ const bootstrap = async (payload, tenantId, userEmail) => {
       // import applies, for the same reason: a menu priced at 0% is the worse
       // failure. The wizard announces it before sending.
       const { taxTypes, ...taxGroupRow } = it.costInfo.taxGroup;
-      const tax = await taxGroup.createTx(conn, taxGroupRow, tenantId, userEmail);
+      const tax = await taxGroup.createTx(conn, taxGroupRow, tenantId, userPhone);
       const rates = (taxTypes && taxTypes.length > 0)
         ? taxTypes.map((t) => ({ name: t.Name, value: t.Value }))
         : taxComponents.defaultComponents();
       await taxComponents.attachComponentsTx(conn, {
-        taxGroupId: tax.id, components: rates, tenantId, userEmail,
+        taxGroupId: tax.id, components: rates, tenantId, userPhone,
       });
 
-      const cost = await costInfo.createTx(conn, { ...it.costInfo, TaxGroupId: tax.id }, tenantId, userEmail);
+      const cost = await costInfo.createTx(conn, { ...it.costInfo, TaxGroupId: tax.id }, tenantId, userPhone);
       const item = await itemDetail.createTx(
         conn,
         { ...it, CategoryId: cat.id, UOMId: unit.id, CostInfoId: cost.id },
         tenantId,
-        userEmail,
+        userPhone,
       );
 
       Object.assign(created, {
@@ -183,7 +183,7 @@ const bootstrap = async (payload, tenantId, userEmail) => {
     // Inside the transaction on purpose: if any step above fails, the rollback
     // takes this with it and the tenant stays gated. A tenant must never be
     // unlocked by a bootstrap that did not actually persist its master data.
-    await setupRepository.markCompletedTx(conn, tenantId, userEmail);
+    await setupRepository.markCompletedTx(conn, tenantId, userPhone);
 
     return created;
   });

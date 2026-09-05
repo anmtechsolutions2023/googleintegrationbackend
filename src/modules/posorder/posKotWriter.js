@@ -22,14 +22,14 @@ const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.strin
  * @param {Object} conn - Open transaction connection.
  * @param {Object} order - { Id, TableId, Items, BranchDetailId }
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @param {string} [kotNo] - Explicit number; otherwise issued from the series.
  * @returns {Promise<Object>} { KotId, KotNo, OrderId, Status }
  */
-const writeKot = async (conn, order, tenantId, userEmail, kotNo) => {
+const writeKot = async (conn, order, tenantId, userPhone, kotNo) => {
   const kotId = uuidv4();
   const number = kotNo
-    || (await issuePosNumber(conn, 'POS_KOT', 'KOT', tenantId, userEmail));
+    || (await issuePosNumber(conn, 'POS_KOT', 'KOT', tenantId, userPhone));
   await conn.execute(QUERIES.POS_KOT.INSERT, [
     kotId,
     tenantId,
@@ -41,8 +41,8 @@ const writeKot = async (conn, order, tenantId, userEmail, kotNo) => {
     new Date(),
     order.BranchDetailId ?? null,
     1,
-    userEmail,
-    userEmail,
+    userPhone,
+    userPhone,
   ]);
   return { KotId: kotId, KotNo: number, OrderId: order.Id, Status: 'pending' };
 };

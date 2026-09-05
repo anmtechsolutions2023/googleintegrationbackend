@@ -78,7 +78,7 @@ const resolveTender = (portal) => {
  * @param {Object} onlineOrder - The pos_online_order row (with portal columns joined).
  * @returns {Promise<Object|null>} Settlement result, or null when there is nothing to settle.
  */
-const settleForOrder = async (onlineOrder, tenantId, userEmail) => {
+const settleForOrder = async (onlineOrder, tenantId, userPhone) => {
   if (!onlineOrder?.OrderId) {
     // Never accepted, so no pos_order exists. Nothing to bill — and that is a
     // legitimate state (a rejected order), not an error.
@@ -104,7 +104,7 @@ const settleForOrder = async (onlineOrder, tenantId, userEmail) => {
       BranchDetailId: onlineOrder.BranchDetailId,
     },
     tenantId,
-    userEmail,
+    userPhone,
   );
 
   const billId = bill.Id || bill.id;
@@ -117,7 +117,7 @@ const settleForOrder = async (onlineOrder, tenantId, userEmail) => {
     billId,
     { Tenders: [{ paymentModeId, amount: Number(bill.Total) || 0, refNo: onlineOrder.ExternalRef || null }] },
     tenantId,
-    userEmail,
+    userPhone,
   );
 
   logger.info('Portal order settled to the ledger', {

@@ -24,15 +24,15 @@ class PosExpenseService extends BaseCRUDService {
    * Approves a draft expense.
    * @param {string} id
    * @param {string} tenantId
-   * @param {string} userEmail - Recorded as the approver.
+   * @param {string} userPhone - Recorded as the approver.
    */
-  async approve(id, tenantId, userEmail) {
+  async approve(id, tenantId, userPhone) {
     const existing = await this.getById(id, tenantId);
     if (existing.Status !== EXPENSE_STATUS.DRAFT) {
       throw new HttpError(MESSAGES.ERROR.EXPENSE_NOT_DRAFT, MESSAGES.HTTP_STATUS.CONFLICT);
     }
     return withTransaction(async (conn) => {
-      await conn.execute(this.queries.APPROVE, [userEmail, userEmail, id, tenantId]);
+      await conn.execute(this.queries.APPROVE, [userPhone, userPhone, id, tenantId]);
       // Same connection: a pooled read sits outside this transaction and would
       // return the row as it was before the approval.
       return this.getByIdTx(conn, id, tenantId);
@@ -40,13 +40,13 @@ class PosExpenseService extends BaseCRUDService {
   }
 
   /** Rejects a draft expense. Nothing was posted, so nothing is reversed. */
-  async reject(id, tenantId, userEmail) {
+  async reject(id, tenantId, userPhone) {
     const existing = await this.getById(id, tenantId);
     if (existing.Status !== EXPENSE_STATUS.DRAFT) {
       throw new HttpError(MESSAGES.ERROR.EXPENSE_NOT_DRAFT, MESSAGES.HTTP_STATUS.CONFLICT);
     }
     return withTransaction(async (conn) => {
-      await conn.execute(this.queries.REJECT, [userEmail, id, tenantId]);
+      await conn.execute(this.queries.REJECT, [userPhone, id, tenantId]);
       return this.getByIdTx(conn, id, tenantId);
     });
   }
@@ -57,9 +57,9 @@ class PosExpenseService extends BaseCRUDService {
    * @param {string} id
    * @param {Object} data - { PaymentModeId? } — overrides the mode captured at entry.
    * @param {string} tenantId
-   * @param {string} userEmail
+   * @param {string} userPhone
    */
-  async settle(id, data, tenantId, userEmail) {
+  async settle(id, data, tenantId, userPhone) {
     return withTransaction(async (conn) => {
       const existing = await this.getByIdTx(conn, id, tenantId);
 
@@ -85,7 +85,7 @@ class PosExpenseService extends BaseCRUDService {
           expenseDate: existing.ExpenseDate,
         },
         tenantId,
-        userEmail,
+        userPhone,
       );
 
       const expense = await this.getByIdTx(conn, id, tenantId);
@@ -94,12 +94,12 @@ class PosExpenseService extends BaseCRUDService {
   }
 
   /** A settled expense is corrected by reversing its document, never by editing. */
-  async update(id, data, tenantId, userEmail) {
+  async update(id, data, tenantId, userPhone) {
     const existing = await this.getById(id, tenantId);
     if (existing.TransactionDetailLogId) {
       throw new HttpError(MESSAGES.ERROR.LEDGER_IMMUTABLE, MESSAGES.HTTP_STATUS.CONFLICT);
     }
-    return super.update(id, data, tenantId, userEmail);
+    return super.update(id, data, tenantId, userPhone);
   }
 
   async delete(id, tenantId) {
@@ -110,7 +110,7 @@ class PosExpenseService extends BaseCRUDService {
     return super.delete(id, tenantId);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -124,12 +124,12 @@ class PosExpenseService extends BaseCRUDService {
       EXPENSE_STATUS.DRAFT,
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.ExpenseCategoryId !== undefined ? data.ExpenseCategoryId : existing.ExpenseCategoryId,
       data.Description !== undefined ? data.Description : existing.Description,
@@ -138,7 +138,7 @@ class PosExpenseService extends BaseCRUDService {
       data.PaymentModeId !== undefined ? data.PaymentModeId : existing.PaymentModeId,
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -150,10 +150,10 @@ const service = new PosExpenseService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
-  approve: (id, tenantId, userEmail) => service.approve(id, tenantId, userEmail),
-  reject: (id, tenantId, userEmail) => service.reject(id, tenantId, userEmail),
-  settle: (id, data, tenantId, userEmail) => service.settle(id, data, tenantId, userEmail),
+  approve: (id, tenantId, userPhone) => service.approve(id, tenantId, userPhone),
+  reject: (id, tenantId, userPhone) => service.reject(id, tenantId, userPhone),
+  settle: (id, data, tenantId, userPhone) => service.settle(id, data, tenantId, userPhone),
 };

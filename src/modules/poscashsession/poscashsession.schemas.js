@@ -6,11 +6,12 @@
 // would make the variance meaningless.
 
 const Joi = require('joi');
+const { phoneField } = require('../../utils/phoneSchema');
 
 const openSchema = Joi.object({
   BranchDetailId: Joi.string().uuid().required(),
   // Defaults to the caller — a cashier opens their own till.
-  CashierEmail: Joi.string().email().optional().allow(null),
+  CashierPhone: phoneField().optional().allow(null),
   ShiftLabel: Joi.string().max(50).optional().allow(null, '').trim(),
   OpeningFloat: Joi.number().min(0).optional().default(0),
 });

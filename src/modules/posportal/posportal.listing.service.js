@@ -30,7 +30,7 @@ class PosPortalListingService extends BaseCRUDService {
     super('POS Portal Listing', QUERIES.POS_PORTAL_LISTING);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -49,12 +49,12 @@ class PosPortalListingService extends BaseCRUDService {
       data.SyncStatus ?? 'pending',
       data.SyncError ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     // Any change to what the portal shows puts the listing back out of sync.
     // Deriving this rather than trusting the caller is the point: a screen that
     // forgot to send SyncStatus would otherwise leave a stale price marked
@@ -85,7 +85,7 @@ class PosPortalListingService extends BaseCRUDService {
         : (touchesPortalFacingFields ? 'pending' : existing.SyncStatus),
       data.SyncError !== undefined ? data.SyncError : existing.SyncError,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -124,10 +124,10 @@ class PosPortalListingService extends BaseCRUDService {
     }
   }
 
-  async create(data, tenantId, userEmail) {
+  async create(data, tenantId, userPhone) {
     return withTransaction(async (connection) => {
       await this.assertChannelGate(connection, data.PortalId, data.ItemMetaId, tenantId);
-      return this.createTx(connection, data, tenantId, userEmail);
+      return this.createTx(connection, data, tenantId, userPhone);
     });
   }
 
@@ -162,7 +162,7 @@ class PosPortalListingService extends BaseCRUDService {
    *
    * @param {Object} data - { ListingIds: [], Available: boolean }
    */
-  async setAvailabilityBulk(data, tenantId, userEmail) {
+  async setAvailabilityBulk(data, tenantId, userPhone) {
     const ids = Array.isArray(data.ListingIds) ? data.ListingIds.filter(Boolean) : [];
     if (ids.length === 0) {
       throw new HttpError('No listings selected', MESSAGES.HTTP_STATUS.BAD_REQUEST);
@@ -172,7 +172,7 @@ class PosPortalListingService extends BaseCRUDService {
       const available = data.Available ? 1 : 0;
       for (const id of ids) {
         await connection.execute(QUERIES.POS_PORTAL_LISTING.SET_AVAILABILITY, [
-          available, userEmail, id, tenantId,
+          available, userPhone, id, tenantId,
         ]);
       }
       logger.info('POS Portal listings availability set in bulk', {
@@ -188,16 +188,16 @@ class PosPortalListingService extends BaseCRUDService {
    * Fire-and-RECORD, never fire-and-assume: "3 items out of sync with Zomato"
    * is only sayable if failure is written down rather than hoped away.
    */
-  async recordSyncResult(result, tenantId, userEmail) {
+  async recordSyncResult(result, tenantId, userPhone) {
     return withTransaction(async (connection) => {
       for (const id of result.synced || []) {
         await connection.execute(QUERIES.POS_PORTAL_LISTING.MARK_SYNCED, [
-          'synced', null, userEmail, id, tenantId,
+          'synced', null, userPhone, id, tenantId,
         ]);
       }
       for (const failure of result.failed || []) {
         await connection.execute(QUERIES.POS_PORTAL_LISTING.MARK_SYNCED, [
-          'failed', String(failure.error || '').slice(0, 500), userEmail, failure.id, tenantId,
+          'failed', String(failure.error || '').slice(0, 500), userPhone, failure.id, tenantId,
         ]);
       }
       return {
@@ -228,14 +228,14 @@ const service = new PosPortalListingService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
   listByPortal: (portalId, tenantId) => service.listByPortal(portalId, tenantId),
-  setAvailabilityBulk: (data, tenantId, userEmail) =>
-    service.setAvailabilityBulk(data, tenantId, userEmail),
-  recordSyncResult: (result, tenantId, userEmail) =>
-    service.recordSyncResult(result, tenantId, userEmail),
+  setAvailabilityBulk: (data, tenantId, userPhone) =>
+    service.setAvailabilityBulk(data, tenantId, userPhone),
+  recordSyncResult: (result, tenantId, userPhone) =>
+    service.recordSyncResult(result, tenantId, userPhone),
   findByExternalItem: (conn, portalId, externalItemId, tenantId) =>
     service.findByExternalItem(conn, portalId, externalItemId, tenantId),
 };

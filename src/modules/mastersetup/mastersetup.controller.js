@@ -7,8 +7,8 @@ const { bootstrapSchema } = require('./mastersetup.schemas');
 const { reissueTokenWithSetupComplete } = require('../auth/auth.service');
 
 const bootstrap = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  const ids = await service.bootstrap(req.validatedBody, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const ids = await service.bootstrap(req.validatedBody, tenantId, phone);
 
   // The caller's JWT still says setupCompleted: false, so without a fresh token
   // they would finish the wizard and stay gated until it expired. Hand back a

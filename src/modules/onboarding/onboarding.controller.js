@@ -13,7 +13,7 @@ const noteSchema = Joi.object({
 
 const getStatus = [
   asyncHandler(async (req, res) => {
-    const status = await service.getStatus(req.user.email);
+    const status = await service.getStatus(req.user.phone);
     successResponse(res, 'Onboarding status retrieved', status);
   }),
 ];
@@ -21,7 +21,7 @@ const getStatus = [
 const updateNote = [
   validateBody(noteSchema),
   asyncHandler(async (req, res) => {
-    await service.updateNote(req.user.email, req.body.requestNote ?? '');
+    await service.updateNote(req.user.phone, req.body.requestNote ?? '');
     successResponse(res, MESSAGES.SUCCESS.ONBOARDING_REQUEST_SUBMITTED);
   }),
 ];

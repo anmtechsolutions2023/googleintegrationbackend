@@ -72,7 +72,7 @@ const asObject = (v) => {
  *
  * @returns {Promise<Object>} { TokenNumber, TokenLabel, TokenDate } or {}.
  */
-const issueCounterTokenTx = async (conn, { billId, orderIds, bill }, tenantId, userEmail) => {
+const issueCounterTokenTx = async (conn, { billId, orderIds, bill }, tenantId, userPhone) => {
   const orders = await repository.getOrdersMetaTx(conn, orderIds, tenantId);
   if (orders.length === 0) return {};
 
@@ -93,7 +93,7 @@ const issueCounterTokenTx = async (conn, { billId, orderIds, bill }, tenantId, u
   }
 
   const token = await tokenService.issueTokenTx(
-    conn, { branchId, orderId: orders[0].Id }, tenantId, userEmail,
+    conn, { branchId, orderId: orders[0].Id }, tenantId, userPhone,
   );
   return {
     TokenNumber: token.TokenNumber,
@@ -186,10 +186,10 @@ class PosBillService extends BaseCRUDService {
    * @param {string} id - Bill ID
    * @param {Object} data - { Payments, Discount?, Total? }
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - Acting user
+   * @param {string} userPhone - Acting user
    * @returns {Promise<Object>} Settled bill
    */
-  async settle(id, data, tenantId, userEmail) {
+  async settle(id, data, tenantId, userPhone) {
     return withTransaction(async (connection) => {
       // Refuses a bill that is already posted, before any work is done — a
       // second settle must not be able to issue a second invoice.
@@ -251,7 +251,7 @@ class PosBillService extends BaseCRUDService {
       }
 
       await connection.execute(this.queries.UPDATE_TOTALS, [
-        recomputed.SubTotal, recomputed.TaxAmount, userEmail, id, tenantId,
+        recomputed.SubTotal, recomputed.TaxAmount, userPhone, id, tenantId,
       ]);
 
       // ── Post to the accounting ledger ──────────────────────────────────
@@ -267,7 +267,7 @@ class PosBillService extends BaseCRUDService {
           branchId: existing.BranchDetailId,
         },
         tenantId,
-        userEmail,
+        userPhone,
       );
 
       // What the campaigns actually gave away, against the document that gave
@@ -280,14 +280,14 @@ class PosBillService extends BaseCRUDService {
         branchId: existing.BranchDetailId,
         posCustomerId,
         billGrossAmount: posted.payable,
-      }, tenantId, userEmail);
+      }, tenantId, userPhone);
 
       // ── CRM ────────────────────────────────────────────────────────────
       // Visits, spend and loyalty. On this transaction on purpose: a sale that
       // rolls back must take its visit with it, or a customer is credited for
       // something that never happened. Walk-ins (no customer) record nothing.
       await customerStats.recordSaleTx(
-        connection, posCustomerId, posted.payable, tenantId, userEmail,
+        connection, posCustomerId, posted.payable, tenantId, userPhone,
       );
 
       // Points, through the loyalty ledger rather than a bare counter — so the
@@ -298,7 +298,7 @@ class PosBillService extends BaseCRUDService {
         billId: id,
         amount: posted.payable,
         branchDetailId: existing.BranchDetailId,
-      }, tenantId, userEmail);
+      }, tenantId, userPhone);
 
       await connection.execute(this.queries.SETTLE, [
         toJson(data.Payments ?? data.Tenders),
@@ -307,14 +307,14 @@ class PosBillService extends BaseCRUDService {
         posted.payable,
         // A part-tendered bill stays open — "paid" would be a lie.
         posted.balanceDue > 0 ? POS_BILL_STATUS.PARTIALLY_PAID : POS_BILL_STATUS.PAID,
-        userEmail,
+        userPhone,
         id,
         tenantId,
       ]);
 
       // ── Counter token ──────────────────────────────────────────────────
       const token = await issueCounterTokenTx(
-        connection, { billId: id, orderIds, bill: existing }, tenantId, userEmail,
+        connection, { billId: id, orderIds, bill: existing }, tenantId, userPhone,
       );
 
       // Read back on the transaction's own connection, or the caller gets the
@@ -331,9 +331,9 @@ class PosBillService extends BaseCRUDService {
   }
 
   /** A posted bill is corrected by refund, never by editing or deleting. */
-  async update(id, data, tenantId, userEmail) {
+  async update(id, data, tenantId, userPhone) {
     await this.assertBillMutable(id, tenantId);
-    return super.update(id, data, tenantId, userEmail);
+    return super.update(id, data, tenantId, userPhone);
   }
 
   async delete(id, tenantId) {
@@ -348,7 +348,7 @@ class PosBillService extends BaseCRUDService {
    * billed together. `OrderId` is still accepted (and kept in the row) so single
    * -order callers are unaffected.
    */
-  async create(data, tenantId, userEmail) {
+  async create(data, tenantId, userPhone) {
     const orderIds = Array.isArray(data.OrderIds) && data.OrderIds.length > 0
       ? data.OrderIds
       : [data.OrderId].filter(Boolean);
@@ -357,8 +357,8 @@ class PosBillService extends BaseCRUDService {
     // rounds has to go through the numbering transaction.
     if (orderIds.length === 0) {
       return withTransaction(async (connection) => {
-        const BillNo = await issuePosNumber(connection, 'POS_BILL', 'BILL', tenantId, userEmail);
-        return this.createTx(connection, { ...data, BillNo }, tenantId, userEmail);
+        const BillNo = await issuePosNumber(connection, 'POS_BILL', 'BILL', tenantId, userPhone);
+        return this.createTx(connection, { ...data, BillNo }, tenantId, userPhone);
       });
     }
 
@@ -374,16 +374,16 @@ class PosBillService extends BaseCRUDService {
       // BillNo comes from the POS_BILL series, not from the client, which minted
       // it from the last 6 digits of Date.now() — a value that wraps every
       // ~16m40s and then collides with UNIQUE (BillNo, TenantId).
-      row.BillNo = await issuePosNumber(connection, 'POS_BILL', 'BILL', tenantId, userEmail);
+      row.BillNo = await issuePosNumber(connection, 'POS_BILL', 'BILL', tenantId, userPhone);
       // TaxByComponent is a computed footer, not a column.
       delete row.TaxByComponent;
       delete row.OrderIds;
 
       await connection.execute(
         this.queries.INSERT,
-        this.prepareInsertParams(id, row, tenantId, userEmail),
+        this.prepareInsertParams(id, row, tenantId, userPhone),
       );
-      await repository.setBillOrdersTx(connection, id, orderIds, tenantId, userEmail);
+      await repository.setBillOrdersTx(connection, id, orderIds, tenantId, userPhone);
 
       return { id, ...row, OrderIds: orderIds, TaxByComponent: recomputed?.TaxByComponent ?? [] };
     });
@@ -417,7 +417,7 @@ class PosBillService extends BaseCRUDService {
     });
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -437,12 +437,12 @@ class PosBillService extends BaseCRUDService {
       data.SettledAt ?? null,
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.BillNo !== undefined ? data.BillNo : existing.BillNo,
       data.OrderId !== undefined ? data.OrderId : existing.OrderId,
@@ -457,7 +457,7 @@ class PosBillService extends BaseCRUDService {
       data.SettledAt !== undefined ? data.SettledAt : existing.SettledAt,
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -469,8 +469,8 @@ const service = new PosBillService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
-  settle: (id, data, tenantId, userEmail) => service.settle(id, data, tenantId, userEmail),
+  settle: (id, data, tenantId, userPhone) => service.settle(id, data, tenantId, userPhone),
 };

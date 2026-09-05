@@ -23,7 +23,7 @@ class CostInfoService extends BaseCRUDService {
     return attachBreakdownToOne(row, tenantId, { idField: 'Id' });
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -31,12 +31,12 @@ class CostInfoService extends BaseCRUDService {
       data.TaxGroupId || null,
       data.IsTaxIncluded !== undefined ? data.IsTaxIncluded : false,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.Amount !== undefined ? data.Amount : existing.Amount,
       data.TaxGroupId !== undefined ? data.TaxGroupId : existing.TaxGroupId,
@@ -44,7 +44,7 @@ class CostInfoService extends BaseCRUDService {
         ? data.IsTaxIncluded
         : existing.IsTaxIncluded,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -53,13 +53,13 @@ class CostInfoService extends BaseCRUDService {
 
 const service = new CostInfoService();
 module.exports = {
-  createTx: (conn, data, tenantId, userEmail) => service.createTx(conn, data, tenantId, userEmail),
+  createTx: (conn, data, tenantId, userPhone) => service.createTx(conn, data, tenantId, userPhone),
   getAll: (tenantId, page, limit, expand) =>
     service.getAll(tenantId, page, limit, expand),
   getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),
-  create: (data, tenantId, userEmail) =>
-    service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) =>
-    service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) =>
+    service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) =>
+    service.update(id, data, tenantId, userPhone),
   delete: (id, tenantId) => service.delete(id, tenantId),
 };

@@ -30,6 +30,13 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: config.DATABASE.CONNECTION_LIMIT,
   queueLimit: config.DATABASE.QUEUE_LIMIT,
+  // Both of these, or neither: mysql2 schedules its idle sweeper only when
+  // maxIdle < connectionLimit, and maxIdle defaults to connectionLimit. Passing
+  // idleTimeout alone is silently inert — the pool then never closes a
+  // connection it has opened, which is exactly how production reached the
+  // server's max_connections. See config.DATABASE.MAX_IDLE for the full story.
+  maxIdle: config.DATABASE.MAX_IDLE,
+  idleTimeout: config.DATABASE.IDLE_TIMEOUT_MS,
   // Use UTC timezone for consistent date handling between app and DB
   timezone: 'Z',
 })

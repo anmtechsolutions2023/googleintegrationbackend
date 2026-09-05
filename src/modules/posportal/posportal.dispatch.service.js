@@ -43,7 +43,7 @@ const loadPortal = async (portalId, tenantId) => withConnection(async (conn) => 
  *
  * @returns {Promise<{ pushed:boolean, synced:number, failed:number, detail?:string }>}
  */
-const publishMenu = async (portalId, tenantId, userEmail) => {
+const publishMenu = async (portalId, tenantId, userPhone) => {
   const { portal, credential } = await loadPortal(portalId, tenantId);
   const adapter = resolveAdapter(portal.Adapter);
 
@@ -55,7 +55,7 @@ const publishMenu = async (portalId, tenantId, userEmail) => {
   }
 
   const result = await adapter.pushMenu(publishable, credential || {});
-  const recorded = await listingService.recordSyncResult(result, tenantId, userEmail);
+  const recorded = await listingService.recordSyncResult(result, tenantId, userPhone);
 
   logger.info('Portal menu publish finished', {
     portal: portal.Code, tenantId, ...recorded, pushed: result.pushed,

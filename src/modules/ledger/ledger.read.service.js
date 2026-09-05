@@ -356,10 +356,10 @@ const pendingSettlements = (tenantId) =>
   });
 
 /** Mark a refund as actually paid out, failed, or back to pending. */
-const setSettlementStatus = (noteId, body, tenantId, userEmail) =>
+const setSettlementStatus = (noteId, body, tenantId, userPhone) =>
   withConnection(async (conn) => {
     const [result] = await conn.execute(QUERIES.LEDGER.SET_SETTLEMENT_STATUS, [
-      body.SettlementStatus, body.SettlementRef || null, userEmail, noteId, tenantId,
+      body.SettlementStatus, body.SettlementRef || null, userPhone, noteId, tenantId,
     ]);
     if (!result.affectedRows) {
       throw new HttpError('Credit note not found.', MESSAGES.HTTP_STATUS.NOT_FOUND);

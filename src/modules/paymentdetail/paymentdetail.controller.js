@@ -43,7 +43,7 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const newData = await service.create(req.body, req.user.tid, req.user.email);
+  const newData = await service.create(req.body, req.user.tid, req.user.phone);
   createdResponse(res, newData, 'Payment detail created successfully');
 });
 
@@ -52,7 +52,7 @@ const update = asyncHandler(async (req, res) => {
     req.params.id,
     req.body,
     req.user.tid,
-    req.user.email
+    req.user.phone
   );
   successResponse(res, updated, 'Payment detail updated successfully');
 });

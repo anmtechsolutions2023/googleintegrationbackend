@@ -1083,7 +1083,7 @@ const swaggerSpec = {
       AdminUser: {
         type: 'object',
         properties: {
-          user_email:     { type: 'string', format: 'email' },
+          user_phone:     { type: 'string', example: '+919876543210' },
           tenant_id:      { type: 'string' },
           is_admin:       { type: 'integer', enum: [0, 1] },
           is_super_admin: { type: 'integer', enum: [0, 1] },
@@ -1104,7 +1104,7 @@ const swaggerSpec = {
         type: 'object',
         properties: {
           id:             { type: 'string', format: 'uuid' },
-          user_email:     { type: 'string', format: 'email' },
+          user_phone:     { type: 'string', example: '+919876543210' },
           tenant_id:      { type: 'string' },
           role_id:        { type: 'string', format: 'uuid' },
           role_name:      { type: 'string', example: 'EDITOR' },
@@ -3157,15 +3157,15 @@ const swaggerSpec = {
         description: 'A tenancy asking a person to join it — the counterpart to an onboarding '
           + 'request. A request is raised BY a person and carries no tenant until an admin picks '
           + 'one; an invitation is raised BY a tenancy and carries its tenant and roles from '
-          + 'creation. Claimed at login: an invited email joins the INVITING tenancy instead of '
+          + 'creation. Claimed at login: an invited number joins the INVITING tenancy instead of '
           + 'being auto-provisioned a tenancy of its own.',
         properties: {
           id: { type: 'string', format: 'uuid' },
           tenant_id: { type: 'string', format: 'uuid', description: 'Always the inviter\'s own tenancy — taken from the token, never the request body.' },
-          email: { type: 'string', format: 'email', description: 'Stored lower-cased; matched case-insensitively at login.' },
+          phone: { type: 'string', example: '+919876543210', description: 'E.164. Normalised on write; every spelling of one number resolves to this form.' },
           is_admin: { type: 'integer', enum: [0, 1], description: 'TENANT:ADMIN derives from user_tenants.is_admin, not from a role, so this is the only way to invite a co-admin.' },
           status: { type: 'string', enum: ['PENDING', 'ACCEPTED', 'REVOKED', 'EXPIRED'] },
-          invited_by: { type: 'string', format: 'email' },
+          invited_by: { type: 'string', example: '+919876543210' },
           expires_at: { type: 'string', format: 'date-time', nullable: true },
           accepted_at: { type: 'string', format: 'date-time', nullable: true },
           role_names: { type: 'string', nullable: true, description: 'Comma-separated, resolved server-side so a list needs no second round trip.' },
@@ -3291,9 +3291,9 @@ const swaggerSpec = {
         description: 'A membership: the person, what they may do, and their staff details. '
           + 'Staff and users are one entity — the membership row IS the staff record.',
         properties: {
-          user_email: { type: 'string', format: 'email' },
+          user_phone: { type: 'string', example: '+919876543210' },
           tenant_id: { type: 'string', format: 'uuid' },
-          full_name: { type: 'string', nullable: true, description: 'Null until somebody sets it; fall back to the email.' },
+          full_name: { type: 'string', nullable: true, description: 'Required: a bare number identifies nobody in a list.' },
           phone: { type: 'string', nullable: true },
           branch_detail_id: { type: 'string', format: 'uuid', nullable: true },
           branch_name: { type: 'string', nullable: true },
@@ -3307,11 +3307,11 @@ const swaggerSpec = {
       },
       InvitationCreate: {
         type: 'object',
-        required: ['email'],
+        required: ['phone'],
         description: 'The tenancy is NOT accepted here — it comes from the caller\'s token, so a '
           + 'tenant admin can only invite into their own.',
         properties: {
-          email: { type: 'string', format: 'email', maxLength: 255 },
+          phone: { type: 'string', example: '+919876543210' },
           roleIds: {
             type: 'array', items: { type: 'string', format: 'uuid' },
             description: 'Roles granted on acceptance. Must belong to the inviting tenancy. '
@@ -3320,12 +3320,13 @@ const swaggerSpec = {
           isAdmin: { type: 'boolean', default: false, description: 'Invite them as a tenant admin.' },
           fullName: {
             type: 'string', maxLength: 100,
+            // Required: user_tenants.full_name is NOT NULL because a bare
+            // number identifies nobody in a list or an audit trail.
             description: 'Staff details, stamped onto the membership when the invitation is '
               + 'claimed. Adding a staff member IS inviting them — a membership of a tenancy is '
               + 'the staff record — so these travel with the invite rather than needing a second '
               + 'edit once the person first signs in.',
           },
-          phone: { type: 'string', maxLength: 20 },
           branchDetailId: { type: 'string', format: 'uuid', description: 'Home branch.' },
         },
       },
@@ -4259,7 +4260,7 @@ const swaggerSpec = {
           + 'what they may DO and whether they may ADMINISTER are three decisions carrying three '
           + 'different risks, and correcting a phone number should not go near a permission.',
         security,
-        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
         requestBody: {
           required: true,
           content: { 'application/json': { schema: {
@@ -4291,7 +4292,7 @@ const swaggerSpec = {
           + 'across tenancies, so it stays a deployment decision. '
           + 'Scopes live in the JWT, so the affected user must sign in again for this to take effect.',
         security,
-        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
         requestBody: {
           required: true,
           content: { 'application/json': { schema: {
@@ -4307,7 +4308,7 @@ const swaggerSpec = {
         },
       },
     },
-    '/api/admin/users/{email}': {
+    '/api/admin/users/{phone}': {
       delete: {
         tags: ['AdminUsers'],
         summary: 'Remove a user from THIS tenancy',
@@ -4318,7 +4319,7 @@ const swaggerSpec = {
           + '(a new onboarding request, or a new tenancy if auto-approval is on). '
           + 'Use PUT /users/{email}/status to suspend reversibly instead.',
         security,
-        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
         responses: {
           200: { description: 'Removed from this tenancy' },
           403: { description: 'You cannot remove your own account' },
@@ -4748,10 +4749,10 @@ const swaggerSpec = {
         },
       },
     },
-    '/api/admin/users/{email}': {
+    '/api/admin/users/{phone}': {
       get: {
         tags: ['Admin — Users'], summary: 'Get user detail (including roles)', security,
-        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
         responses: { ...singleResponse('AdminUser'), ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },
       delete: {
@@ -4759,14 +4760,14 @@ const swaggerSpec = {
         summary: 'Remove user from tenant',
         description: '**Protected operation.** Rejected with 403 when the target email matches the authenticated caller — you cannot remove your own account. Email matching is case-insensitive.',
         security,
-        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
         responses: { 200: { description: 'Removed' }, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },
     },
     '/api/admin/users/{email}/roles': {
       get: {
         tags: ['Admin — Users'], summary: 'Get current roles for a user', security,
-        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
         responses: {
           200: {
             description: 'User roles',
@@ -4784,7 +4785,7 @@ const swaggerSpec = {
       },
       put: {
         tags: ['Admin — Users'], summary: 'Replace user\'s roles', security,
-        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/UserRolesUpdate' } } } },
         responses: { 200: { description: 'Roles updated' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },
@@ -4795,7 +4796,7 @@ const swaggerSpec = {
         summary: 'Activate or suspend a user',
         description: '**Protected operation.** Rejected with 403 when the target email matches the authenticated caller and status is not ACTIVE — you cannot suspend your own account. Self-ACTIVATE is still permitted. Email matching is case-insensitive.',
         security,
-        parameters: [{ name: 'email', in: 'path', required: true, schema: { type: 'string', format: 'email' } }],
+        parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/UserStatusUpdate' } } } },
         responses: { 200: { description: 'Status updated' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },

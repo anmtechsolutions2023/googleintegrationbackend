@@ -10,6 +10,7 @@
     "test:coverage": "jest --coverage",
     "test:report": "jest --coverage --coverageReporters=html && echo 'Coverage report at coverage/index.html'",
     "test:watch": "jest --watch",
+    "admin:token": "node scripts/admin-token.js",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix"
   },

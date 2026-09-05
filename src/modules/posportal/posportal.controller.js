@@ -50,16 +50,16 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosPortal.create called', { tenantId, email });
-  const created = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosPortal.create called', { tenantId, phone });
+  const created = await service.create(req.body, tenantId, phone);
   createdResponse(res, created, 'POS Portal created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'POS Portal updated successfully');
 });
 
@@ -74,9 +74,9 @@ const deleteById = asyncHandler(async (req, res) => {
 // receipt that the portal is configured, never the secrets themselves.
 const saveCredential = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosPortal.saveCredential called', { portalId: id, tenantId, email });
-  const result = await service.saveCredential(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosPortal.saveCredential called', { portalId: id, tenantId, phone });
+  const result = await service.saveCredential(id, req.body, tenantId, phone);
   successResponse(res, result, 'Portal credentials saved');
 });
 
@@ -90,15 +90,15 @@ const listBranches = asyncHandler(async (req, res) => {
 });
 
 const createBranch = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  const created = await branchService.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const created = await branchService.create(req.body, tenantId, phone);
   createdResponse(res, created, 'Portal branch mapping created successfully');
 });
 
 const updateBranch = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  const updated = await branchService.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const updated = await branchService.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'Portal branch mapping updated successfully');
 });
 
@@ -113,9 +113,9 @@ const deleteBranch = asyncHandler(async (req, res) => {
 // rush; a full-row PUT from a stale form would roll back whatever else changed.
 const setOnline = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   logger.info('PosPortal.setOnline called', { id, tenantId, isOnline: req.body.IsOnline });
-  const result = await branchService.setOnline(id, req.body, tenantId, email);
+  const result = await branchService.setOnline(id, req.body, tenantId, phone);
   successResponse(res, result, req.body.IsOnline ? 'Now accepting orders' : 'Orders paused');
 });
 
@@ -129,15 +129,15 @@ const listListings = asyncHandler(async (req, res) => {
 });
 
 const createListing = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  const created = await listingService.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const created = await listingService.create(req.body, tenantId, phone);
   createdResponse(res, created, 'Portal listing created successfully');
 });
 
 const updateListing = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  const updated = await listingService.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const updated = await listingService.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'Portal listing updated successfully');
 });
 
@@ -149,20 +149,20 @@ const deleteListing = asyncHandler(async (req, res) => {
 });
 
 const setAvailability = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   logger.info('PosPortal.setAvailability called', {
     tenantId, count: req.body.ListingIds?.length, available: req.body.Available,
   });
-  const result = await listingService.setAvailabilityBulk(req.body, tenantId, email);
+  const result = await listingService.setAvailabilityBulk(req.body, tenantId, phone);
   successResponse(res, result, 'Availability updated');
 });
 
 // Publish the catalogue to the portal and RECORD what it accepted.
 const publishMenu = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosPortal.publishMenu called', { portalId: id, tenantId, email });
-  const result = await dispatchService.publishMenu(id, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosPortal.publishMenu called', { portalId: id, tenantId, phone });
+  const result = await dispatchService.publishMenu(id, tenantId, phone);
   successResponse(res, result, 'Menu publish attempted');
 });
 

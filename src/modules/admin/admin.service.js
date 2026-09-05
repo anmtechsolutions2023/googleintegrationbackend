@@ -46,19 +46,19 @@ const listOnboardingRequests = (status = 'PENDING', page = 1, limit = 20) =>
  * @param {Object} conn - Active transaction connection.
  * @param {Object} p
  * @param {string} [p.requestId] - Onboarding request to mark APPROVED (optional).
- * @param {string} p.email
+ * @param {string} p.phone
  * @param {string} p.tenantId
  * @param {string[]} p.roleIds
- * @param {string} p.reviewerEmail
+ * @param {string} p.reviewerPhone
  * @param {boolean} [p.isAdmin=false] - Whether to grant the tenant-admin flag.
  */
 const provisionApprovedUser = async (
   conn,
-  { requestId, email, tenantId, roleIds, reviewerEmail, isAdmin = false }
+  { requestId, phone, fullName, tenantId, roleIds, reviewerPhone, isAdmin = false }
 ) => {
   const [existing] = await conn.execute(
-    'SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
-    [email, tenantId]
+    'SELECT id FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
+    [phone, tenantId]
   );
   if (existing.length > 0) {
     throw new HttpError(MESSAGES.ERROR.USER_ALREADY_EXISTS, 409);
@@ -70,7 +70,10 @@ const provisionApprovedUser = async (
 
   await conn.execute(QUERIES.ADMIN_USERS.INSERT_USER_TENANT_FLAGS, [
     uuidv4(),
-    email,
+    phone,
+    // Never null: the column is NOT NULL, and a missing name must not cost
+    // somebody their access. A number is a poor label, not a broken one.
+    fullName || phone,
     tenantId,
     isAdmin ? 1 : 0,
     // is_super_admin is hardcoded 0 here and in invitation acceptance: the
@@ -82,10 +85,10 @@ const provisionApprovedUser = async (
   for (const roleId of roleIds) {
     await conn.execute(QUERIES.USER_ROLES.INSERT, [
       uuidv4(),
-      email,
+      phone,
       tenantId,
       roleId,
-      reviewerEmail,
+      reviewerPhone,
     ]);
   }
 
@@ -93,7 +96,7 @@ const provisionApprovedUser = async (
     await conn.execute(QUERIES.ONBOARDING_REQUESTS.UPDATE_STATUS, [
       'APPROVED',
       null,
-      reviewerEmail,
+      reviewerPhone,
       tenantId,
       requestId,
     ]);
@@ -153,7 +156,7 @@ const provisionTenantIam = async (
   return roleIdByName;
 };
 
-const approveRequest = (requestId, tenantId, roleIds, reviewerEmail) =>
+const approveRequest = (requestId, tenantId, roleIds, reviewerPhone) =>
   withTransaction(async (conn) => {
     const [reqRows] = await conn.execute(
       "SELECT * FROM onboarding_requests WHERE id = ? AND status = 'PENDING'",
@@ -162,38 +165,38 @@ const approveRequest = (requestId, tenantId, roleIds, reviewerEmail) =>
     if (reqRows.length === 0) {
       throw new HttpError('Onboarding request not found or already reviewed.', 404);
     }
-    const { email, name } = reqRows[0];
+    const { phone, name } = reqRows[0];
 
     await provisionApprovedUser(conn, {
       requestId,
-      email,
+      phone,
+      fullName: name,
       tenantId,
       roleIds,
-      reviewerEmail,
+      reviewerPhone,
       isAdmin: false,
     });
 
-    return { email, name, tenantId, roleIds };
+    return { phone, name, tenantId, roleIds };
   });
 
 /**
- * Auto-approves a brand-new (unprovisioned) email: creates a new tenant, clones
+ * Auto-approves a brand-new (unprovisioned) phone: creates a new tenant, clones
  * the standard IAM catalog into it, provisions the user as its TENANT_ADMIN, and
  * marks a fresh onboarding request APPROVED — all in one transaction. Called
  * from the auth guest path when the super-admin has enabled auto-approval.
- * @param {Object} p - { email, name, googleSub }
+ * @param {Object} p - { phone, name }
  * @returns {Promise<Object>} { tenantId, requestId, roleName }
  */
-const autoApproveOnboarding = ({ email, name, googleSub }) =>
+const autoApproveOnboarding = ({ phone, name }) =>
   withTransaction(async (conn) => {
     const newTenantId = uuidv4();
     const requestId = uuidv4();
 
     await conn.execute(QUERIES.ONBOARDING_REQUESTS.INSERT, [
       requestId,
-      email,
+      phone,
       name,
-      googleSub || null,
     ]);
 
     const roleIdByName = await provisionTenantIam(conn, newTenantId);
@@ -207,21 +210,22 @@ const autoApproveOnboarding = ({ email, name, googleSub }) =>
 
     await provisionApprovedUser(conn, {
       requestId,
-      email,
+      phone,
+      fullName: name,
       tenantId: newTenantId,
       roleIds: [adminRoleId],
-      reviewerEmail: ONBOARDING.AUTO_REVIEWER,
+      reviewerPhone: ONBOARDING.AUTO_REVIEWER,
       isAdmin: true,
     });
 
     logger.info('Onboarding auto-approved into new tenant', {
-      email,
+      phone,
       tenantId: newTenantId,
     });
     return { tenantId: newTenantId, requestId, roleName: ONBOARDING.AUTO_APPROVE_ROLE };
   });
 
-const rejectRequest = (requestId, reason, reviewerEmail) =>
+const rejectRequest = (requestId, reason, reviewerPhone) =>
   withConnection(async (conn) => {
     const [reqRows] = await conn.execute(
       "SELECT * FROM onboarding_requests WHERE id = ? AND status = 'PENDING'",
@@ -233,7 +237,7 @@ const rejectRequest = (requestId, reason, reviewerEmail) =>
     await conn.execute(QUERIES.ONBOARDING_REQUESTS.UPDATE_STATUS, [
       'REJECTED',
       reason,
-      reviewerEmail,
+      reviewerPhone,
       null,
       requestId,
     ]);
@@ -241,7 +245,7 @@ const rejectRequest = (requestId, reason, reviewerEmail) =>
 
 // Reopen a previously REJECTED request, returning it to PENDING for another review.
 // Only REJECTED requests can be reopened; the prior review metadata is cleared.
-const reopenRequest = (requestId, reviewerEmail) =>
+const reopenRequest = (requestId, reviewerPhone) =>
   withConnection(async (conn) => {
     const [reqRows] = await conn.execute(
       "SELECT * FROM onboarding_requests WHERE id = ? AND status = 'REJECTED'",
@@ -258,7 +262,7 @@ const reopenRequest = (requestId, reviewerEmail) =>
        WHERE id = ?`,
       [requestId]
     );
-    void reviewerEmail; // reviewer captured via audit log, not persisted on the row
+    void reviewerPhone; // reviewer captured via audit log, not persisted on the row
   });
 
 // ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
@@ -336,21 +340,21 @@ const listUsersInTenant = (tenantId) =>
     return rows;
   });
 
-const getUserDetail = (email, tenantId) =>
+const getUserDetail = (phone, tenantId) =>
   withConnection(async (conn) => {
-    const [rows] = await conn.execute(QUERIES.ADMIN_USERS.SELECT_BY_EMAIL, [
-      email,
+    const [rows] = await conn.execute(QUERIES.ADMIN_USERS.SELECT_BY_PHONE, [
+      phone,
       tenantId,
     ]);
     if (rows.length === 0) throw new HttpError('User not found in tenant.', 404);
     const [roleRows] = await conn.execute(
       QUERIES.USER_ROLES.SELECT_BY_USER_TENANT,
-      [email, tenantId]
+      [phone, tenantId]
     );
     return { ...rows[0], roleDetails: roleRows };
   });
 
-const updateUserRoles = (email, tenantId, roleIds, adminEmail) =>
+const updateUserRoles = (phone, tenantId, roleIds, adminPhone) =>
   withTransaction(async (conn) => {
     // An admin must not edit their own roles. Role assignment REPLACES the set,
     // so one save with the wrong boxes ticked strips their own access to the
@@ -358,13 +362,13 @@ const updateUserRoles = (email, tenantId, roleIds, adminEmail) =>
     // state tells them why. Same family of guard as assertNotSelfSuspend and
     // assertNotSelfRemove; their tenant-admin access is unaffected either way,
     // because that comes from the membership flag rather than from a role.
-    if (isSameUser(email, adminEmail)) {
+    if (isSameUser(phone, adminPhone)) {
       throw new HttpError(MESSAGES.ERROR.SELF_ROLE_CHANGE_FORBIDDEN, 403);
     }
 
     const [check] = await conn.execute(
-      'SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
-      [email, tenantId]
+      'SELECT id FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
+      [phone, tenantId]
     );
     if (check.length === 0) throw new HttpError('User not found in tenant.', 404);
 
@@ -372,14 +376,14 @@ const updateUserRoles = (email, tenantId, roleIds, adminEmail) =>
     // the user with no roles at all.
     await assertRolesGrantable(conn, roleIds, tenantId);
 
-    await conn.execute(QUERIES.USER_ROLES.DELETE_ALL_FOR_USER, [email, tenantId]);
+    await conn.execute(QUERIES.USER_ROLES.DELETE_ALL_FOR_USER, [phone, tenantId]);
     for (const roleId of roleIds) {
       await conn.execute(QUERIES.USER_ROLES.INSERT, [
         uuidv4(),
-        email,
+        phone,
         tenantId,
         roleId,
-        adminEmail,
+        adminPhone,
       ]);
     }
   });
@@ -392,28 +396,28 @@ const isSameUser = (a, b) =>
 // Self-service lockout guards. An admin must not be able to suspend or remove
 // their own account — either would revoke their own access with no way back in.
 // Self-ACTIVATE stays allowed: it is a harmless no-op for an already-active
-// caller. actorEmail is optional so the guard degrades to today's behaviour if
+// caller. actorPhone is optional so the guard degrades to today's behaviour if
 // a caller does not supply it.
-const assertNotSelfSuspend = (email, actorEmail, status) => {
-  if (status !== 'ACTIVE' && isSameUser(email, actorEmail)) {
+const assertNotSelfSuspend = (phone, actorPhone, status) => {
+  if (status !== 'ACTIVE' && isSameUser(phone, actorPhone)) {
     throw new HttpError(MESSAGES.ERROR.SELF_SUSPEND_FORBIDDEN, 403);
   }
 };
 
-const assertNotSelfRemove = (email, actorEmail) => {
-  if (isSameUser(email, actorEmail)) {
+const assertNotSelfRemove = (phone, actorPhone) => {
+  if (isSameUser(phone, actorPhone)) {
     throw new HttpError(MESSAGES.ERROR.SELF_REMOVE_FORBIDDEN, 403);
   }
 };
 
-const updateUserStatus = async (email, tenantId, status, actorEmail) => {
-  assertNotSelfSuspend(email, actorEmail, status);
+const updateUserStatus = async (phone, tenantId, status, actorPhone) => {
+  assertNotSelfSuspend(phone, actorPhone, status);
   return withConnection(async (conn) => {
     const isActive = status === 'ACTIVE' ? 1 : 0;
     await conn.execute(QUERIES.ADMIN_USERS.UPDATE_STATUS, [
       isActive,
       status,
-      email,
+      phone,
       tenantId,
     ]);
   });
@@ -423,12 +427,12 @@ const updateUserStatus = async (email, tenantId, status, actorEmail) => {
 // login because USER_TENANTS.SELECT filters is_active = TRUE). Guards against
 // suspending yourself, and against disabling any super admin, to avoid a
 // system lockout.
-const updateUserStatusCrossTenant = async (email, tenantId, status, actorEmail) => {
-  assertNotSelfSuspend(email, actorEmail, status);
+const updateUserStatusCrossTenant = async (phone, tenantId, status, actorPhone) => {
+  assertNotSelfSuspend(phone, actorPhone, status);
   return withConnection(async (conn) => {
     const [rows] = await conn.execute(
-      QUERIES.ADMIN_USERS.SELECT_FLAGS_BY_EMAIL_TENANT,
-      [email, tenantId]
+      QUERIES.ADMIN_USERS.SELECT_FLAGS_BY_PHONE_TENANT,
+      [phone, tenantId]
     );
     if (rows.length === 0) throw new HttpError('User not found in tenant.', 404);
     if (rows[0].is_super_admin) {
@@ -438,7 +442,7 @@ const updateUserStatusCrossTenant = async (email, tenantId, status, actorEmail) 
     await conn.execute(QUERIES.ADMIN_USERS.UPDATE_STATUS, [
       isActive,
       status,
-      email,
+      phone,
       tenantId,
     ]);
   });
@@ -458,24 +462,27 @@ const updateUserStatusCrossTenant = async (email, tenantId, status, actorEmail) 
  * three different decisions with three different risks. A cashier correcting a
  * phone number should not go anywhere near a permission.
  *
- * @param {string} email
+ * @param {string} phone
  * @param {string} tenantId - The caller's own tenancy.
  * @param {Object} profile - { fullName, phone, branchDetailId }
- * @param {string} actorEmail
+ * @param {string} actorPhone
  */
-const updateUserProfile = (email, tenantId, profile, actorEmail) =>
+const updateUserProfile = (phone, tenantId, profile, actorPhone) =>
   withConnection(async (conn) => {
     const [rows] = await conn.execute(
-      'SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
-      [email, tenantId],
+      'SELECT id FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
+      [phone, tenantId],
     );
     if (rows.length === 0) throw new HttpError('User not found in tenant.', 404);
 
-    const { fullName = null, phone = null, branchDetailId = null } = profile || {};
+    // No `phone` here any more: the membership's number is user_phone, the
+    // identity itself, and is changed by rebinding the account rather than by
+    // editing a profile field.
+    const { fullName = null, branchDetailId = null } = profile || {};
     await conn.execute(QUERIES.ADMIN_USERS.UPDATE_PROFILE, [
-      fullName, phone, branchDetailId, email, tenantId,
+      fullName, branchDetailId, phone, tenantId,
     ]);
-    logger.info('Staff profile updated', { email, tenantId, actorEmail });
+    logger.info('Staff profile updated', { phone, tenantId, actorPhone });
   });
 
 /**
@@ -495,22 +502,22 @@ const updateUserProfile = (email, tenantId, profile, actorEmail) =>
  * check in checkScope and reaches across tenancies, so it stays a deployment
  * decision made in the seed, not something an API can hand out.
  *
- * @param {string} email - The member whose access is changing.
+ * @param {string} phone - The member whose access is changing.
  * @param {string} tenantId - Always the caller's own tenancy.
  * @param {boolean} isAdmin
- * @param {string} actorEmail
+ * @param {string} actorPhone
  */
-const setTenantAdmin = async (email, tenantId, isAdmin, actorEmail) => {
+const setTenantAdmin = async (phone, tenantId, isAdmin, actorPhone) => {
   // Same reasoning as assertNotSelfSuspend: an admin who withdraws their own
   // access has no way to restore it.
-  if (!isAdmin && isSameUser(email, actorEmail)) {
+  if (!isAdmin && isSameUser(phone, actorPhone)) {
     throw new HttpError(MESSAGES.ERROR.SELF_DEMOTE_FORBIDDEN, 403);
   }
 
   return withConnection(async (conn) => {
     const [rows] = await conn.execute(
-      'SELECT is_super_admin FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
-      [email, tenantId],
+      'SELECT is_super_admin FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
+      [phone, tenantId],
     );
     if (rows.length === 0) throw new HttpError('User not found in tenant.', 404);
     // A super admin already passes every check via the bypass; toggling their
@@ -520,17 +527,17 @@ const setTenantAdmin = async (email, tenantId, isAdmin, actorEmail) => {
     }
 
     await conn.execute(QUERIES.ADMIN_USERS.SET_ADMIN_FLAG, [
-      isAdmin ? 1 : 0, email, tenantId,
+      isAdmin ? 1 : 0, phone, tenantId,
     ]);
-    logger.info('Tenant admin access changed', { email, tenantId, isAdmin, actorEmail });
+    logger.info('Tenant admin access changed', { phone, tenantId, isAdmin, actorPhone });
   });
 };
 
-const removeUser = async (email, tenantId, actorEmail) => {
-  assertNotSelfRemove(email, actorEmail);
+const removeUser = async (phone, tenantId, actorPhone) => {
+  assertNotSelfRemove(phone, actorPhone);
   return withTransaction(async (conn) => {
-    await conn.execute(QUERIES.USER_ROLES.DELETE_ALL_FOR_USER, [email, tenantId]);
-    await conn.execute(QUERIES.ADMIN_USERS.DELETE, [email, tenantId]);
+    await conn.execute(QUERIES.USER_ROLES.DELETE_ALL_FOR_USER, [phone, tenantId]);
+    await conn.execute(QUERIES.ADMIN_USERS.DELETE, [phone, tenantId]);
   });
 };
 
@@ -549,8 +556,8 @@ const removeUser = async (email, tenantId, actorEmail) => {
  * case that needs building — removing the membership IS disassociation, and it
  * is all the sweep can do. The only thing that genuinely differs between a
  * member who belongs elsewhere and one who does not is a single row in
- * onboarding_requests, which is keyed UNIQUE(email) and therefore platform-wide
- * rather than per tenancy. See DELETE_ONBOARDING_BY_EMAIL for what leaving it
+ * onboarding_requests, which is keyed UNIQUE(phone) and therefore platform-wide
+ * rather than per tenancy. See DELETE_ONBOARDING_BY_PHONE for what leaving it
  * behind does to somebody's next sign-in.
  *
  * Both member lists are read BEFORE the sweep, because user_tenants is deleted
@@ -604,8 +611,8 @@ const deleteTenant = async (tenantId, actorTenantId) => {
 
     // Only the people this tenancy was the last of. Anybody still holding a
     // membership elsewhere keeps their onboarding record exactly as it was.
-    for (const { user_email: email } of soleMembers) {
-      await conn.execute(QUERIES.TENANT_DELETE.DELETE_ONBOARDING_BY_EMAIL, [email]);
+    for (const { user_phone: phone } of soleMembers) {
+      await conn.execute(QUERIES.TENANT_DELETE.DELETE_ONBOARDING_BY_PHONE, [phone]);
     }
 
     const result = {
@@ -613,7 +620,7 @@ const deleteTenant = async (tenantId, actorTenantId) => {
       membersRemoved: members.length,
       accountsReset: soleMembers.length,
       disassociated: members.length - soleMembers.length,
-      adminEmails: admins.map((a) => a.user_email),
+      adminPhones: admins.map((a) => a.user_phone),
     };
     logger.warn('Tenancy deleted', result);
     return result;
@@ -685,14 +692,14 @@ const setRolePermissions = (roleId, tenantId, featureIds) =>
 
 // ─── USER ROLES READ ─────────────────────────────────────────────────────────
 
-const getUserRoles = (email, tenantId) =>
+const getUserRoles = (phone, tenantId) =>
   withConnection(async (conn) => {
     const [check] = await conn.execute(
-      'SELECT id FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
-      [email, tenantId]
+      'SELECT id FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
+      [phone, tenantId]
     );
     if (check.length === 0) throw new HttpError('User not found in tenant.', 404);
-    const [rows] = await conn.execute(QUERIES.USER_ROLES.SELECT_BY_USER_TENANT, [email, tenantId]);
+    const [rows] = await conn.execute(QUERIES.USER_ROLES.SELECT_BY_USER_TENANT, [phone, tenantId]);
     return rows;
   });
 

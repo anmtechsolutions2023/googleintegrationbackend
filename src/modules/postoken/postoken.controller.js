@@ -44,17 +44,17 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosToken.create called', { tenantId, email });
-  const created = await service.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosToken.create called', { tenantId, phone });
+  const created = await service.create(req.body, tenantId, phone);
   createdResponse(res, created, 'POS Token created successfully');
 });
 
 const update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosToken.update called', { id, tenantId, email });
-  const updated = await service.update(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosToken.update called', { id, tenantId, phone });
+  const updated = await service.update(id, req.body, tenantId, phone);
   successResponse(res, updated, 'POS Token updated successfully');
 });
 
@@ -70,17 +70,17 @@ const deleteById = asyncHandler(async (req, res) => {
 // "call #7" is an event with its own timestamp, not a field being edited.
 const call = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosToken.call called', { id, tenantId, email });
-  const token = await service.call(id, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosToken.call called', { id, tenantId, phone });
+  const token = await service.call(id, tenantId, phone);
   successResponse(res, token, 'Token called');
 });
 
 const serve = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosToken.serve called', { id, tenantId, email });
-  const token = await service.serve(id, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosToken.serve called', { id, tenantId, phone });
+  const token = await service.serve(id, tenantId, phone);
   successResponse(res, token, 'Token served');
 });
 

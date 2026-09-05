@@ -35,9 +35,24 @@ const errorHandler = (err, req, res, next) => {
   ]
   // The pool refusing a waiter is overload, not breakage: mysql2 raises a plain
   // Error with no code when queueLimit is hit, so the message is the only handle.
-  if (err.message === 'Queue limit reached.' || err.message === 'No connections available.') {
+  //
+  // ER_CON_COUNT_ERROR is the same condition one level out — the DATABASE is out
+  // of connections, not this pool — and it belongs here rather than with the
+  // unreachable codes below: the host is up and answering, it is declining to
+  // open another session. Left unclassified it fell through to the generic
+  // branch and every caller saw an unhandled 500, which reads as a broken
+  // endpoint instead of a busy server and sends debugging the wrong way.
+  if (
+    err.message === 'Queue limit reached.' ||
+    err.message === 'No connections available.' ||
+    err.code === 'ER_CON_COUNT_ERROR' ||
+    err.errno === 1040
+  ) {
+    const serverIsFull = err.code === 'ER_CON_COUNT_ERROR' || err.errno === 1040
     logger.error(
-      'Connection pool exhausted — every pooled connection is busy and the wait queue is full.'
+      serverIsFull
+        ? 'Database refused a new connection (ER_CON_COUNT_ERROR) — the SERVER is at max_connections. Every warm instance holds its own pool, so compare max_connections against DATABASE.MAX_IDLE x warm instances, not against CONNECTION_LIMIT.'
+        : 'Connection pool exhausted — every pooled connection is busy and the wait queue is full.'
     )
     return res.status(MESSAGES.HTTP_STATUS.SERVICE_UNAVAILABLE).json({
       success: false,

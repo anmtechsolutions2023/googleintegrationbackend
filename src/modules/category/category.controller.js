@@ -66,15 +66,15 @@ const getCategoryById = asyncHandler(async (req, res) => {
  * @param {Object} res - Express response object
  */
 const createCategory = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   const categoryData = req.body;
 
-  logger.info('createCategory called', { tenantId, email });
+  logger.info('createCategory called', { tenantId, phone });
 
   const newCategory = await categoryService.createCategory(
     categoryData,
     tenantId,
-    email
+    phone
   );
 
   createdResponse(res, newCategory, 'Category created successfully');
@@ -87,16 +87,16 @@ const createCategory = asyncHandler(async (req, res) => {
  */
 const updateCategory = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   const updateData = req.body;
 
-  logger.info('updateCategory called', { id, tenantId, email });
+  logger.info('updateCategory called', { id, tenantId, phone });
 
   const updatedCategory = await categoryService.updateCategory(
     id,
     updateData,
     tenantId,
-    email
+    phone
   );
 
   successResponse(res, updatedCategory, 'Category updated successfully');

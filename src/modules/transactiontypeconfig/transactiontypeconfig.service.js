@@ -10,7 +10,7 @@ class TransactionTypeConfigService extends BaseCRUDService {
     super('Transaction Type Config', QUERIES.TRANSACTION_TYPE_CONFIG);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -19,8 +19,8 @@ class TransactionTypeConfigService extends BaseCRUDService {
       data.Format,
       data.TagName,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
@@ -32,10 +32,10 @@ class TransactionTypeConfigService extends BaseCRUDService {
    * @param {Object} connection - Active DB connection (inside withTransaction)
    * @param {Object} data - Config data (must include TagName)
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - Acting user's email
+   * @param {string} userPhone - Acting user's email
    * @returns {Promise<Object>} { id, ...row/data, reused } — reused=true when found
    */
-  async getOrCreateByTagNameTx(connection, data, tenantId, userEmail) {
+  async getOrCreateByTagNameTx(connection, data, tenantId, userPhone) {
     const [rows] = await connection.execute(
       this.queries.SELECT_BY_TAGNAME,
       [data.TagName, tenantId],
@@ -47,11 +47,11 @@ class TransactionTypeConfigService extends BaseCRUDService {
       });
       return { id: rows[0].Id, ...rows[0], reused: true };
     }
-    const created = await this.createTx(connection, data, tenantId, userEmail);
+    const created = await this.createTx(connection, data, tenantId, userPhone);
     return { ...created, reused: false };
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.StartCounterNo !== undefined
         ? data.StartCounterNo
@@ -60,7 +60,7 @@ class TransactionTypeConfigService extends BaseCRUDService {
       data.Format !== undefined ? data.Format : existing.Format,
       data.TagName !== undefined ? data.TagName : existing.TagName,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -83,21 +83,21 @@ class TransactionTypeConfigService extends BaseCRUDService {
     return await super.getById(id, tenantId);
   }
 
-  async create(data, tenantId, userEmail) {
+  async create(data, tenantId, userPhone) {
     logger.info('TransactionTypeConfigService.create called', {
       tenantId,
-      userEmail,
+      userPhone,
     });
-    return await super.create(data, tenantId, userEmail);
+    return await super.create(data, tenantId, userPhone);
   }
 
-  async update(id, data, tenantId, userEmail) {
+  async update(id, data, tenantId, userPhone) {
     logger.info('TransactionTypeConfigService.update called', {
       id,
       tenantId,
-      userEmail,
+      userPhone,
     });
-    return await super.update(id, data, tenantId, userEmail);
+    return await super.update(id, data, tenantId, userPhone);
   }
 
   async delete(id, tenantId) {
@@ -109,14 +109,14 @@ class TransactionTypeConfigService extends BaseCRUDService {
 const service = new TransactionTypeConfigService();
 
 module.exports = {
-  createTx: (conn, data, tenantId, userEmail) => service.createTx(conn, data, tenantId, userEmail),
-  getOrCreateByTagNameTx: (conn, data, tenantId, userEmail) =>
-    service.getOrCreateByTagNameTx(conn, data, tenantId, userEmail),
+  createTx: (conn, data, tenantId, userPhone) => service.createTx(conn, data, tenantId, userPhone),
+  getOrCreateByTagNameTx: (conn, data, tenantId, userPhone) =>
+    service.getOrCreateByTagNameTx(conn, data, tenantId, userPhone),
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) =>
-    service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) =>
-    service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) =>
+    service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) =>
+    service.update(id, data, tenantId, userPhone),
   delete: (id, tenantId) => service.delete(id, tenantId),
 };

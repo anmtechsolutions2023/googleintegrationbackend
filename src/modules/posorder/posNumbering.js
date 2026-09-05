@@ -33,11 +33,11 @@ const { logger } = require('../../utils/logger');
  * @param {string} tagName - Series tag, e.g. 'POS_ORDER'.
  * @param {string} prefix - Prefix for the fallback value, e.g. 'ORD'.
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<string>}
  */
-const issuePosNumber = async (conn, tagName, prefix, tenantId, userEmail) => {
-  const issued = await issueByTag(conn, tagName, tenantId, userEmail);
+const issuePosNumber = async (conn, tagName, prefix, tenantId, userPhone) => {
+  const issued = await issueByTag(conn, tagName, tenantId, userPhone);
   if (issued) return issued;
 
   logger.warn(`No ${tagName} numbering series for tenant — falling back`, {

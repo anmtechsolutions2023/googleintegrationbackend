@@ -19,7 +19,7 @@ class PosPortalBranchService extends BaseCRUDService {
     super('POS Portal Branch', QUERIES.POS_PORTAL_BRANCH);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -30,12 +30,12 @@ class PosPortalBranchService extends BaseCRUDService {
       data.PausedUntil ?? null,
       data.PauseReason ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.PortalId !== undefined ? data.PortalId : existing.PortalId,
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
@@ -44,7 +44,7 @@ class PosPortalBranchService extends BaseCRUDService {
       data.PausedUntil !== undefined ? data.PausedUntil : existing.PausedUntil,
       data.PauseReason !== undefined ? data.PauseReason : existing.PauseReason,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -77,7 +77,7 @@ class PosPortalBranchService extends BaseCRUDService {
    * @param {string} id - pos_portal_branch id
    * @param {Object} data - { IsOnline, PauseMinutes?, PauseReason? }
    */
-  async setOnline(id, data, tenantId, userEmail) {
+  async setOnline(id, data, tenantId, userPhone) {
     return withConnection(async (connection) => {
       const [rows] = await connection.execute(
         QUERIES.POS_PORTAL_BRANCH.SELECT_BY_ID, [id, tenantId],
@@ -95,7 +95,7 @@ class PosPortalBranchService extends BaseCRUDService {
         isOnline ? 1 : 0,
         pausedUntil,
         isOnline ? null : (data.PauseReason ?? null),
-        userEmail,
+        userPhone,
         id,
         tenantId,
       ]);
@@ -130,11 +130,11 @@ const service = new PosPortalBranchService();
 module.exports = {
   getAll: (tenantId, page, limit) => service.getAll(tenantId, page, limit),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
   listByPortal: (portalId, tenantId) => service.listByPortal(portalId, tenantId),
-  setOnline: (id, data, tenantId, userEmail) => service.setOnline(id, data, tenantId, userEmail),
+  setOnline: (id, data, tenantId, userPhone) => service.setOnline(id, data, tenantId, userPhone),
   findByExternalStore: (conn, portalId, storeId, tenantId) =>
     service.findByExternalStore(conn, portalId, storeId, tenantId),
 };

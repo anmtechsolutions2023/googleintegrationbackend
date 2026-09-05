@@ -24,7 +24,7 @@ class ItemDetailService extends BaseCRUDService {
     return attachBreakdownToOne(row, tenantId, PRICING_OPTS);
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -38,12 +38,12 @@ class ItemDetailService extends BaseCRUDService {
       data.Barcode || null,
       data.HSNCode || null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.Name !== undefined ? data.Name : existing.Name,
       data.Code !== undefined ? data.Code : existing.Code,
@@ -55,7 +55,7 @@ class ItemDetailService extends BaseCRUDService {
       data.Barcode !== undefined ? data.Barcode : existing.Barcode,
       data.HSNCode !== undefined ? data.HSNCode : existing.HSNCode,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -64,17 +64,17 @@ class ItemDetailService extends BaseCRUDService {
 
 const service = new ItemDetailService();
 module.exports = {
-  createTx: (conn, data, tenantId, userEmail) => service.createTx(conn, data, tenantId, userEmail),
+  createTx: (conn, data, tenantId, userPhone) => service.createTx(conn, data, tenantId, userPhone),
   // Exposed for the bulk import's update mode, which re-points an item at a new
   // cost info inside one transaction. Same wrapper shape as createTx above.
-  updateTx: (conn, id, data, tenantId, userEmail) =>
-    service.updateTx(conn, id, data, tenantId, userEmail),
+  updateTx: (conn, id, data, tenantId, userPhone) =>
+    service.updateTx(conn, id, data, tenantId, userPhone),
   getAll: (tenantId, page, limit, expand) =>
     service.getAll(tenantId, page, limit, expand),
   getById: (id, tenantId, expand) => service.getById(id, tenantId, expand),
-  create: (data, tenantId, userEmail) =>
-    service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) =>
-    service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) =>
+    service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) =>
+    service.update(id, data, tenantId, userPhone),
   delete: (id, tenantId) => service.delete(id, tenantId),
 };

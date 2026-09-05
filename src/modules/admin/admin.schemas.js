@@ -2,6 +2,7 @@
 // Joi validation schemas for all admin module endpoints.
 
 const Joi = require('joi');
+const { phoneField } = require('../../utils/phoneSchema');
 
 const approveRequestSchema = Joi.object({
   tenantId: Joi.string().required(),
@@ -33,7 +34,7 @@ const updateUserStatusSchema = Joi.object({
 
 // Super-admin cross-tenant status change: target user + tenant come in the body.
 const updateUserStatusCrossTenantSchema = Joi.object({
-  email: Joi.string().email().required(),
+  phone: phoneField().required(),
   tenantId: Joi.string().required(),
   status: Joi.string().valid('ACTIVE', 'SUSPENDED').required(),
 });

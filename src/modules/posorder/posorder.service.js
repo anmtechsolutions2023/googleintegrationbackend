@@ -192,7 +192,7 @@ class PosOrderService extends BaseCRUDService {
    * The venue snapshot (table/floor name, capacity) is resolved and frozen here;
    * see resolveVenueTx for why it is copied rather than joined at read time.
    */
-  async create(data, tenantId, userEmail) {
+  async create(data, tenantId, userPhone) {
     const priced = await this.priceItems(data.Items, tenantId);
     const order = priced
       ? {
@@ -205,7 +205,7 @@ class PosOrderService extends BaseCRUDService {
       : { ...data };
 
     return withTransaction(async (connection) => this.createRoundTx(
-      connection, order, tenantId, userEmail,
+      connection, order, tenantId, userPhone,
     ));
   }
 
@@ -229,22 +229,22 @@ class PosOrderService extends BaseCRUDService {
    * @param {Object} connection - Open transaction connection.
    * @param {Object} order - Priced order data.
    * @param {string} tenantId
-   * @param {string} userEmail
+   * @param {string} userPhone
    * @returns {Promise<Object>} { id, ...order }
    */
-  async createRoundTx(connection, order, tenantId, userEmail) {
+  async createRoundTx(connection, order, tenantId, userPhone) {
     const row = { ...order };
-    row.OrderNo = await issuePosNumber(connection, 'POS_ORDER', 'ORD', tenantId, userEmail);
+    row.OrderNo = await issuePosNumber(connection, 'POS_ORDER', 'ORD', tenantId, userPhone);
     Object.assign(row, await resolveVenueTx(connection, row.TableId, tenantId));
-    return this.createTx(connection, row, tenantId, userEmail);
+    return this.createTx(connection, row, tenantId, userPhone);
   }
 
-  async update(id, data, tenantId, userEmail) {
+  async update(id, data, tenantId, userPhone) {
     // Only re-price when the caller actually changes the lines; a status-only
     // update must not disturb the totals already recorded.
-    if (data.Items === undefined) return super.update(id, data, tenantId, userEmail);
+    if (data.Items === undefined) return super.update(id, data, tenantId, userPhone);
     const priced = await this.priceItems(data.Items, tenantId);
-    if (!priced) return super.update(id, data, tenantId, userEmail);
+    if (!priced) return super.update(id, data, tenantId, userPhone);
     return super.update(
       id,
       {
@@ -255,7 +255,7 @@ class PosOrderService extends BaseCRUDService {
         Total: priced.totals.grossAmount,
       },
       tenantId,
-      userEmail,
+      userPhone,
     );
   }
 
@@ -274,11 +274,11 @@ class PosOrderService extends BaseCRUDService {
    * @param {string} id - Order ID
    * @param {Object} data - Optional { KotNo }
    * @param {string} tenantId - Tenant ID
-   * @param {string} userEmail - Acting user
+   * @param {string} userPhone - Acting user
    * @returns {Promise<Object>} The ticket, with AlreadySent telling the caller
    *                            whether this call is what put it there.
    */
-  async fireKot(id, data, tenantId, userEmail) {
+  async fireKot(id, data, tenantId, userPhone) {
     return withTransaction(async (connection) => {
       const order = await this.getByIdTx(connection, id, tenantId); // 404 if missing
       if (CLOSED_STATUSES.has(String(order.Status || '').toLowerCase())) {
@@ -297,11 +297,11 @@ class PosOrderService extends BaseCRUDService {
       }
 
       const kot = await writeKot(
-        connection, order, tenantId, userEmail, data && data.KotNo,
+        connection, order, tenantId, userPhone, data && data.KotNo,
       );
       await connection.execute(this.queries.SET_STATUS, [
         'fired',
-        userEmail,
+        userPhone,
         id,
         tenantId,
       ]);
@@ -315,12 +315,12 @@ class PosOrderService extends BaseCRUDService {
    * tables' occupancy update together. Returns a reversible `undo` payload.
    * @param {Object} payload - { scope, ... } see posorder.transfer.
    * @param {string} tenantId
-   * @param {string} userEmail
+   * @param {string} userPhone
    * @returns {Promise<Object>} transfer result incl. `undo`
    */
-  async transfer(payload, tenantId, userEmail) {
+  async transfer(payload, tenantId, userPhone) {
     return withTransaction((connection) =>
-      transferImpl(connection, payload, tenantId, userEmail),
+      transferImpl(connection, payload, tenantId, userPhone),
     );
   }
 
@@ -331,10 +331,10 @@ class PosOrderService extends BaseCRUDService {
    * open round. Atomic.
    * @param {string} id - Order ID
    * @param {string} tenantId
-   * @param {string} userEmail
+   * @param {string} userPhone
    * @returns {Promise<Object>} { deletedOrderId }
    */
-  async deleteRound(id, tenantId, userEmail) {
+  async deleteRound(id, tenantId, userPhone) {
     return withTransaction(async (connection) => {
       const [rows] = await connection.execute(QUERIES.POS_ORDER.SELECT_BY_ID, [id, tenantId]);
       if (rows.length === 0) throw new HttpError('POS Order not found', 404);
@@ -363,12 +363,12 @@ class PosOrderService extends BaseCRUDService {
       // worse than no token at all.
       await connection.execute(QUERIES.POS_TOKEN.DELETE_BY_ORDER, [id, tenantId]);
       await connection.execute(QUERIES.POS_ORDER.DELETE, [id, tenantId]);
-      await refreshTable(connection, order.TableId, tenantId, userEmail);
+      await refreshTable(connection, order.TableId, tenantId, userPhone);
       return { deletedOrderId: id };
     });
   }
 
-  prepareInsertParams(id, data, tenantId, userEmail) {
+  prepareInsertParams(id, data, tenantId, userPhone) {
     return [
       id,
       tenantId,
@@ -395,12 +395,12 @@ class PosOrderService extends BaseCRUDService {
       data.FloorName ?? null,
       data.TableCapacity ?? null,
       data.Active !== undefined ? data.Active : true,
-      userEmail,
-      userEmail,
+      userPhone,
+      userPhone,
     ];
   }
 
-  prepareUpdateParams(data, existing, userEmail, id, tenantId) {
+  prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.OrderNo !== undefined ? data.OrderNo : existing.OrderNo,
       data.TableId !== undefined ? data.TableId : existing.TableId,
@@ -421,7 +421,7 @@ class PosOrderService extends BaseCRUDService {
       data.FloorName !== undefined ? data.FloorName : existing.FloorName,
       data.TableCapacity !== undefined ? data.TableCapacity : existing.TableCapacity,
       data.Active !== undefined ? data.Active : existing.Active,
-      userEmail,
+      userPhone,
       id,
       tenantId,
     ];
@@ -433,15 +433,15 @@ const service = new PosOrderService();
 module.exports = {
   getAll: (tenantId, page, limit, filters) => service.getAll(tenantId, page, limit, filters),
   getById: (id, tenantId) => service.getById(id, tenantId),
-  create: (data, tenantId, userEmail) => service.create(data, tenantId, userEmail),
-  update: (id, data, tenantId, userEmail) => service.update(id, data, tenantId, userEmail),
+  create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
+  update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   // Delete now cascades KOTs + frees the table (see deleteRound), so a fired
   // round can be removed when the customer changes their order.
-  remove: (id, tenantId, userEmail) => service.deleteRound(id, tenantId, userEmail),
-  fireKot: (id, data, tenantId, userEmail) => service.fireKot(id, data, tenantId, userEmail),
+  remove: (id, tenantId, userPhone) => service.deleteRound(id, tenantId, userPhone),
+  fireKot: (id, data, tenantId, userPhone) => service.fireKot(id, data, tenantId, userPhone),
   // Composition seam for callers that own the transaction — see createRoundTx.
   priceItems: (items, tenantId) => service.priceItems(items, tenantId),
-  createRoundTx: (conn, order, tenantId, userEmail) =>
-    service.createRoundTx(conn, order, tenantId, userEmail),
-  transfer: (payload, tenantId, userEmail) => service.transfer(payload, tenantId, userEmail),
+  createRoundTx: (conn, order, tenantId, userPhone) =>
+    service.createRoundTx(conn, order, tenantId, userPhone),
+  transfer: (payload, tenantId, userPhone) => service.transfer(payload, tenantId, userPhone),
 };

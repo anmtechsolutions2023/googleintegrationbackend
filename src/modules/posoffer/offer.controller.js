@@ -26,27 +26,27 @@ const getCampaign = asyncHandler(async (req, res) => {
 });
 
 const createCampaign = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('Campaign.create called', { tenantId, email });
-  const data = await campaignService.create(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('Campaign.create called', { tenantId, phone });
+  const data = await campaignService.create(req.body, tenantId, phone);
   res.status(201).json({ success: true, message: 'Campaign created successfully', data });
 });
 
 const updateCampaign = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  const data = await campaignService.update(req.params.id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const data = await campaignService.update(req.params.id, req.body, tenantId, phone);
   successResponse(res, data, 'Campaign updated successfully');
 });
 
 const setCampaignStatus = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  const data = await campaignService.setStatus(req.params.id, req.body.Status, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const data = await campaignService.setStatus(req.params.id, req.body.Status, tenantId, phone);
   successResponse(res, data, 'Campaign status updated successfully');
 });
 
 const deleteCampaign = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  const data = await campaignService.remove(req.params.id, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const data = await campaignService.remove(req.params.id, tenantId, phone);
   successResponse(res, data, 'Campaign deleted successfully');
 });
 
@@ -62,20 +62,20 @@ const listOffers = asyncHandler(async (req, res) => {
 });
 
 const createOffer = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  const data = await offerService.create(req.params.id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const data = await offerService.create(req.params.id, req.body, tenantId, phone);
   res.status(201).json({ success: true, message: 'Offer created successfully', data });
 });
 
 const updateOffer = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  const data = await offerService.update(req.params.id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const data = await offerService.update(req.params.id, req.body, tenantId, phone);
   successResponse(res, data, 'Offer updated successfully');
 });
 
 const deleteOffer = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  const data = await offerService.remove(req.params.id, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  const data = await offerService.remove(req.params.id, tenantId, phone);
   successResponse(res, data, 'Offer deleted successfully');
 });
 

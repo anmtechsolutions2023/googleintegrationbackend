@@ -25,8 +25,8 @@ jest.mock('../../config/constants', () => ({
       SELECT_ALL: 'SELECT * FROM user_tenants WHERE tenant_id = ?',
       SELECT_ALL_TENANTS: 'SELECT * FROM user_tenants',
       COUNT_ALL_TENANTS: 'SELECT COUNT(*) as total FROM user_tenants',
-      SELECT_FLAGS_BY_EMAIL_TENANT: 'SELECT is_super_admin FROM user_tenants WHERE user_email = ? AND tenant_id = ?',
-      SELECT_BY_EMAIL: 'SELECT * FROM user_tenants WHERE user_email = ?',
+      SELECT_FLAGS_BY_PHONE_TENANT: 'SELECT is_super_admin FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
+      SELECT_BY_EMAIL: 'SELECT * FROM user_tenants WHERE user_phone = ?',
       INSERT_USER_TENANT: 'INSERT INTO user_tenants ...',
       INSERT_USER_TENANT_FLAGS: 'INSERT INTO user_tenants (... is_admin, is_super_admin ...) VALUES (?, ?, ?, ?, ?, ...)',
       UPDATE_STATUS: 'UPDATE user_tenants SET is_active=? ...',
@@ -112,7 +112,7 @@ describe('approveRequest', () => {
 
   it('throws 409 when user already exists in tenant', async () => {
     mockConn.execute
-      .mockResolvedValueOnce([[{ id: 'req-1', email: 'u@t.com', name: 'U' }]])
+      .mockResolvedValueOnce([[{ id: 'req-1', phone: '+919876500021', name: 'U' }]])
       .mockResolvedValueOnce([[{ id: 'ut-1' }]]); // already exists
     await expect(service.approveRequest('req-1', 'tid', ['role-1'], 'admin@test.com'))
       .rejects.toBeInstanceOf(HttpError);
@@ -120,14 +120,14 @@ describe('approveRequest', () => {
 
   it('provisions user, assigns roles, updates request status', async () => {
     mockConn.execute
-      .mockResolvedValueOnce([[{ id: 'req-1', email: 'u@t.com', name: 'U' }]])
+      .mockResolvedValueOnce([[{ id: 'req-1', phone: '+919876500021', name: 'U' }]])
       .mockResolvedValueOnce([[]])                    // no existing user_tenant
       .mockResolvedValueOnce([[{ name: 'POS_MANAGER' }]]) // roleGuard: resolve role names
       .mockResolvedValueOnce([{ affectedRows: 1 }])  // INSERT user_tenant
       .mockResolvedValueOnce([{ affectedRows: 1 }])  // INSERT user_role
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE onboarding_requests
     const result = await service.approveRequest('req-1', 'tid', ['role-1'], 'admin@test.com');
-    expect(result).toMatchObject({ email: 'u@t.com', tenantId: 'tid' });
+    expect(result).toMatchObject({ phone: '+919876500021', tenantId: 'tid' });
   });
 });
 
@@ -168,7 +168,7 @@ describe('autoApproveOnboarding', () => {
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT user_tenant (flags)
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT user_role
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE onboarding status
-    const result = await service.autoApproveOnboarding({ email: 'new@user.com', name: 'New', googleSub: 'g1' });
+    const result = await service.autoApproveOnboarding({ phone: '+919876503011', name: 'New', googleSub: 'g1' });
     expect(result).toMatchObject({ roleName: 'TENANT_ADMIN' });
     expect(result.tenantId).toBeDefined();
     // Located by query rather than by call index: the index moved when the role
@@ -186,7 +186,7 @@ describe('autoApproveOnboarding', () => {
       .mockResolvedValueOnce([[{ id: 'tr1', name: 'VIEWER', description: 'Read', is_system_role: 0, is_active: 1 }]]) // no TENANT_ADMIN
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT role
       .mockResolvedValueOnce([[]]);                 // features
-    await expect(service.autoApproveOnboarding({ email: 'x@y.com', name: 'X' }))
+    await expect(service.autoApproveOnboarding({ phone: '+919876503011', name: 'X' }))
       .rejects.toBeInstanceOf(HttpError);
   });
 });
@@ -260,12 +260,12 @@ describe('getUserRoles', () => {
 describe('approveRequest with empty roleIds', () => {
   it('provisions user without assigning any roles when roleIds is empty', async () => {
     mockConn.execute
-      .mockResolvedValueOnce([[{ id: 'req-1', email: 'u@t.com', name: 'U' }]])
+      .mockResolvedValueOnce([[{ id: 'req-1', phone: '+919876503011', name: 'U' }]])
       .mockResolvedValueOnce([[]])                    // no existing user_tenant
       .mockResolvedValueOnce([{ affectedRows: 1 }])  // INSERT user_tenant
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE onboarding_requests status
     const result = await service.approveRequest('req-1', 'tid', [], 'admin@test.com');
-    expect(result).toMatchObject({ email: 'u@t.com', tenantId: 'tid', roleIds: [] });
+    expect(result).toMatchObject({ phone: '+919876503011', tenantId: 'tid', roleIds: [] });
   });
 });
 
@@ -273,7 +273,7 @@ describe('approveRequest with empty roleIds', () => {
 describe('rejectRequest with rejectionReason', () => {
   it('rejects a pending request with a custom reason string', async () => {
     mockConn.execute
-      .mockResolvedValueOnce([[{ id: 'req-1', email: 'u@t.com' }]])
+      .mockResolvedValueOnce([[{ id: 'req-1', phone: '+919876503011' }]])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
     await expect(service.rejectRequest('req-1', 'Not eligible at this time.', 'admin@test.com'))
       .resolves.toBeUndefined();
@@ -315,8 +315,8 @@ describe('listAllUsers', () => {
   it('returns users across all tenants with pagination metadata', async () => {
     mockConn.execute.mockResolvedValueOnce([[{ total: 3 }]]); // COUNT_ALL_TENANTS
     mockConn.query.mockResolvedValueOnce([[
-      { user_email: 'a@x.com', tenant_id: 't1' },
-      { user_email: 'b@y.com', tenant_id: 't2' },
+      { user_phone: 'a@x.com', tenant_id: 't1' },
+      { user_phone: 'b@y.com', tenant_id: 't2' },
     ]]);
     const result = await service.listAllUsers(1, 20);
     expect(result.data).toHaveLength(2);
@@ -326,7 +326,7 @@ describe('listAllUsers', () => {
   it('passes through the per-tenant setup status used by the tracking column', async () => {
     mockConn.execute.mockResolvedValueOnce([[{ total: 1 }]]);
     mockConn.query.mockResolvedValueOnce([[
-      { user_email: 'a@x.com', tenant_id: 't1', setup_status: 'COMPLETED' },
+      { user_phone: 'a@x.com', tenant_id: 't1', setup_status: 'COMPLETED' },
     ]]);
 
     const result = await service.listAllUsers(1, 20);
@@ -343,7 +343,7 @@ describe('listAllUsers', () => {
     // A tenant with no tenant_setup row must report PENDING, not null.
     expect(sql).toContain("COALESCE(ts.status, 'PENDING') AS setup_status");
     // Grouped columns must include the joined ones under ONLY_FULL_GROUP_BY.
-    expect(sql).toContain('GROUP BY ut.user_email, ut.tenant_id, ts.status, ts.completed_at');
+    expect(sql).toContain('GROUP BY ut.user_phone, ut.tenant_id, ts.status, ts.completed_at');
   });
 });
 

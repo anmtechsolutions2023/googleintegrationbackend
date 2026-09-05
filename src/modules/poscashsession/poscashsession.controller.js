@@ -37,17 +37,17 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const open = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosCashSession.open called', { tenantId, email });
-  const record = await service.open(req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosCashSession.open called', { tenantId, phone });
+  const record = await service.open(req.body, tenantId, phone);
   createdResponse(res, record, 'Till opened');
 });
 
 const close = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, email } = req.user;
-  logger.info('PosCashSession.close called', { id, tenantId, email });
-  const record = await service.close(id, req.body, tenantId, email);
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosCashSession.close called', { id, tenantId, phone });
+  const record = await service.close(id, req.body, tenantId, phone);
   successResponse(res, record, 'Till closed');
 });
 

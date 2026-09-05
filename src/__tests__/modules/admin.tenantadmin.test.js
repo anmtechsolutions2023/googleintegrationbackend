@@ -68,7 +68,7 @@ describe('granting tenant-admin access', () => {
 
   it('is confined to the caller\'s tenancy', async () => {
     await service.setTenantAdmin('staff@x.com', TENANT, true, ACTOR);
-    expect(flagUpdate().sql).toMatch(/WHERE user_email = \? AND tenant_id = \?/);
+    expect(flagUpdate().sql).toMatch(/WHERE user_phone = \? AND tenant_id = \?/);
   });
 
   it('404s for somebody who is not in this tenancy', async () => {
@@ -118,7 +118,7 @@ describe('what removing a user from a tenancy does', () => {
     expect(roles.params).toEqual(['staff@x.com', TENANT]);
     expect(member.params).toEqual(['staff@x.com', TENANT]);
     // Never an unscoped delete of the person.
-    expect(member.sql).toMatch(/WHERE user_email = \? AND tenant_id = \?/);
+    expect(member.sql).toMatch(/WHERE user_phone = \? AND tenant_id = \?/);
   });
 
   it('refuses to let an admin remove themselves', async () => {
@@ -158,17 +158,19 @@ describe('the staff details on a membership', () => {
   const profileWrite = () => executed.find((e) => /UPDATE user_tenants SET full_name/.test(e.sql));
 
   it('are written to the membership, scoped to this tenancy', async () => {
-    await service.updateUserProfile('staff@x.com', TENANT,
-      { fullName: 'Priya R', phone: '9876543210', branchDetailId: 'branch-1' }, ACTOR);
+    // No phone in the profile any more: the membership's number IS the
+    // identity (user_phone) and is changed by rebinding, not by editing here.
+    await service.updateUserProfile('+919876543210', TENANT,
+      { fullName: 'Priya R', branchDetailId: 'branch-1' }, ACTOR);
     expect(profileWrite().params)
-      .toEqual(['Priya R', '9876543210', 'branch-1', 'staff@x.com', TENANT]);
-    expect(profileWrite().sql).toMatch(/WHERE user_email = \? AND tenant_id = \?/);
+      .toEqual(['Priya R', 'branch-1', '+919876543210', TENANT]);
+    expect(profileWrite().sql).toMatch(/WHERE user_phone = \? AND tenant_id = \?/);
   });
 
-  // Clearing a phone number or unassigning a branch is a legitimate edit.
+  // Clearing a name or unassigning a branch is a legitimate edit.
   it('can be cleared', async () => {
-    await service.updateUserProfile('staff@x.com', TENANT, {}, ACTOR);
-    expect(profileWrite().params.slice(0, 3)).toEqual([null, null, null]);
+    await service.updateUserProfile('+919876543210', TENANT, {}, ACTOR);
+    expect(profileWrite().params.slice(0, 2)).toEqual([null, null]);
   });
 
   it('404s for somebody who is not in this tenancy', async () => {
@@ -219,7 +221,7 @@ describe('listing every tenancy', () => {
     state.tenants = [TENANCY];
     await service.listTenants();
     const sql = executed.find((e) => /FROM user_tenants ut/.test(e.sql)).sql;
-    expect(sql).toMatch(/COUNT\(DISTINCT CASE WHEN ut\.is_admin = 1 THEN ut\.user_email END\)/);
+    expect(sql).toMatch(/COUNT\(DISTINCT CASE WHEN ut\.is_admin = 1 THEN ut\.user_phone END\)/);
     expect(sql).not.toMatch(/SUM\(ut\.is_admin\)/);
   });
 
@@ -233,7 +235,7 @@ describe('listing every tenancy', () => {
 
 describe('reading one tenancy\'s people', () => {
   it('takes the tenancy as an argument — never from the caller\'s token', async () => {
-    state.tenants = [{ user_email: 'a@b.com', full_name: 'Priya R', roles: 'TENANT_ADMIN' }];
+    state.tenants = [{ user_phone: 'a@b.com', full_name: 'Priya R', roles: 'TENANT_ADMIN' }];
     const rows = await service.listUsersInTenant('some-other-tenant');
     expect(rows[0].full_name).toBe('Priya R');
     const read = executed.find((e) => /FROM user_tenants ut/.test(e.sql));

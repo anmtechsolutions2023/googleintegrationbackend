@@ -40,7 +40,7 @@ const setupRepository = require('../../modules/mastersetup/mastersetup.repositor
 const { SCOPES } = require('../../config/constants');
 
 const req = { headers: {}, ip: '127.0.0.1' };
-const userData = { email: 'new@user.com', name: 'New User', googleId: 'g-123' };
+const userData = { phone: '+919876500011', name: 'New User', googleId: 'g-123' };
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -53,7 +53,7 @@ describe('findAndGetPermissions — guest path auto-approval', () => {
 
     mockConn.execute
       .mockResolvedValueOnce([[]])  // USER_TENANTS.SELECT → not provisioned
-      .mockResolvedValueOnce([[]])  // ONBOARDING_REQUESTS.SELECT_BY_EMAIL → none
+      .mockResolvedValueOnce([[]])  // ONBOARDING_REQUESTS.SELECT_BY_PHONE → none
       // re-read provisioned user_tenants
       .mockResolvedValueOnce([[{ tenant_id: 'new-tenant', is_admin: 1, is_super_admin: 0 }]])
       // getScopesForTenant → ONE statement, the UNION of direct and role grants.
@@ -65,7 +65,7 @@ describe('findAndGetPermissions — guest path auto-approval', () => {
     const result = await findAndGetPermissions(req, userData);
 
     expect(adminService.autoApproveOnboarding).toHaveBeenCalledWith({
-      email: 'new@user.com', name: 'New User', googleSub: 'g-123',
+      phone: '+919876500011', name: 'New User', googleSub: 'g-123',
     });
     expect(result.onboardingStatus).toBe('APPROVED');
     expect(result.tenantId).toBe('new-tenant');
@@ -108,7 +108,7 @@ describe('findAndGetPermissions — guest path auto-approval', () => {
 
     mockConn.execute
       .mockResolvedValueOnce([[]])                 // USER_TENANTS.SELECT → not provisioned
-      .mockResolvedValueOnce([[]])                 // ONBOARDING_REQUESTS.SELECT_BY_EMAIL → none
+      .mockResolvedValueOnce([[]])                 // ONBOARDING_REQUESTS.SELECT_BY_PHONE → none
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // ONBOARDING_REQUESTS.INSERT
 
     const result = await findAndGetPermissions(req, userData);
@@ -125,7 +125,7 @@ describe('findAndGetPermissions — guest path auto-approval', () => {
 
     mockConn.execute
       .mockResolvedValueOnce([[]])                 // USER_TENANTS.SELECT
-      .mockResolvedValueOnce([[]])                 // ONBOARDING_REQUESTS.SELECT_BY_EMAIL
+      .mockResolvedValueOnce([[]])                 // ONBOARDING_REQUESTS.SELECT_BY_PHONE
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // ONBOARDING_REQUESTS.INSERT (fallback)
 
     const result = await findAndGetPermissions(req, userData);

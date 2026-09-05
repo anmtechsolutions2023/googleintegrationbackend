@@ -31,9 +31,9 @@ const wire = ({ memberships = 1, superAdmins = 0, members = [], sole = [], admin
   mockConn.execute.mockImplementation((sql) => {
     if (sql === QUERIES.TENANT_DELETE.COUNT_MEMBERSHIPS) return [[{ total: memberships }]];
     if (sql === QUERIES.TENANT_DELETE.COUNT_SUPER_ADMINS) return [[{ total: superAdmins }]];
-    if (sql === QUERIES.TENANT_DELETE.SELECT_MEMBERS) return [members.map((e) => ({ user_email: e }))];
-    if (sql === QUERIES.TENANT_DELETE.SELECT_SOLE_MEMBERS) return [sole.map((e) => ({ user_email: e }))];
-    if (sql === QUERIES.TENANT_DELETE.SELECT_ADMINS) return [admins.map((e) => ({ user_email: e }))];
+    if (sql === QUERIES.TENANT_DELETE.SELECT_MEMBERS) return [members.map((e) => ({ user_phone: e }))];
+    if (sql === QUERIES.TENANT_DELETE.SELECT_SOLE_MEMBERS) return [sole.map((e) => ({ user_phone: e }))];
+    if (sql === QUERIES.TENANT_DELETE.SELECT_ADMINS) return [admins.map((e) => ({ user_phone: e }))];
     return [{ affectedRows: 0 }];
   });
 };
@@ -64,7 +64,7 @@ describe('deleteTenant — guards', () => {
 
 describe('deleteTenant — the sweep', () => {
   it('runs every sweep statement, in order, scoped to the tenancy', async () => {
-    wire({ members: ['a@x.com'], sole: [] });
+    wire({ members: ['+919876500051'], sole: [] });
     await deleteTenant(TENANT, ACTOR_TENANT);
 
     const swept = mockConn.execute.mock.calls
@@ -77,7 +77,7 @@ describe('deleteTenant — the sweep', () => {
   });
 
   it('never deletes from the global tables or from onboarding_requests by tenant', async () => {
-    wire({ members: ['a@x.com'], sole: ['a@x.com'] });
+    wire({ members: ['+919876500051'], sole: ['+919876500051'] });
     await deleteTenant(TENANT, ACTOR_TENANT);
 
     const sweptTables = QUERIES.TENANT_DELETE.SWEEP.map((q) => q.match(/DELETE FROM (\w+)/)[1]);
@@ -89,7 +89,7 @@ describe('deleteTenant — the sweep', () => {
   });
 
   it('reads the membership picture BEFORE user_tenants is swept away', async () => {
-    wire({ members: ['a@x.com'], sole: ['a@x.com'] });
+    wire({ members: ['+919876500051'], sole: ['+919876500051'] });
     await deleteTenant(TENANT, ACTOR_TENANT);
 
     const calls = sqlCalls();
@@ -107,38 +107,38 @@ describe('deleteTenant — the sweep', () => {
 
 describe('deleteTenant — what happens to the people', () => {
   it('clears the onboarding record of a member who belonged nowhere else', async () => {
-    wire({ members: ['solo@x.com'], sole: ['solo@x.com'] });
+    wire({ members: ['+919876500053'], sole: ['+919876500053'] });
     await deleteTenant(TENANT, ACTOR_TENANT);
 
     expect(mockConn.execute).toHaveBeenCalledWith(
-      QUERIES.TENANT_DELETE.DELETE_ONBOARDING_BY_EMAIL, ['solo@x.com']
+      QUERIES.TENANT_DELETE.DELETE_ONBOARDING_BY_PHONE, ['+919876500053']
     );
   });
 
   it('leaves a multi-tenant member\'s onboarding record alone', async () => {
     // Belongs here AND somewhere else, so SELECT_SOLE_MEMBERS excludes them.
-    wire({ members: ['multi@x.com'], sole: [] });
+    wire({ members: ['+919876500059'], sole: [] });
     await deleteTenant(TENANT, ACTOR_TENANT);
 
-    expect(sqlCalls()).not.toContain(QUERIES.TENANT_DELETE.DELETE_ONBOARDING_BY_EMAIL);
+    expect(sqlCalls()).not.toContain(QUERIES.TENANT_DELETE.DELETE_ONBOARDING_BY_PHONE);
   });
 
   it('clears only the sole members when the tenancy holds both kinds', async () => {
-    wire({ members: ['solo@x.com', 'multi@x.com'], sole: ['solo@x.com'] });
+    wire({ members: ['+919876500053', '+919876500059'], sole: ['+919876500053'] });
     const result = await deleteTenant(TENANT, ACTOR_TENANT);
 
     const cleared = mockConn.execute.mock.calls
-      .filter(([sql]) => sql === QUERIES.TENANT_DELETE.DELETE_ONBOARDING_BY_EMAIL)
+      .filter(([sql]) => sql === QUERIES.TENANT_DELETE.DELETE_ONBOARDING_BY_PHONE)
       .map(([, params]) => params[0]);
 
-    expect(cleared).toEqual(['solo@x.com']);
+    expect(cleared).toEqual(['+919876500053']);
     expect(result).toEqual({
       tenantId: TENANT,
       membersRemoved: 2,
       accountsReset: 1,
       disassociated: 1,
       // Named for the audit trail — see the owner describe block below.
-      adminEmails: [],
+      adminPhones: [],
     });
   });
 
@@ -170,7 +170,7 @@ describe('deleteTenant — the sweep against the live schema', () => {
   const CASCADES = ['tenant_features', 'role_permissions', 'tenant_invitation_roles'];
   // Platform-wide, shared by every tenancy.
   const GLOBALS = ['features', 'app_settings'];
-  // Keyed UNIQUE(email), cleared per person instead — see DELETE_ONBOARDING_BY_EMAIL.
+  // Keyed UNIQUE(phone), cleared per person instead — see DELETE_ONBOARDING_BY_PHONE.
   const BY_EMAIL = ['onboarding_requests'];
 
   it('sweeps every table that carries a tenant column', () => {
@@ -233,14 +233,14 @@ describe('deleteTenant — the sweep against the live schema', () => {
 // BEFORE the sweep: afterwards user_tenants holds nothing to join to, and the
 // trail could never say whose tenancy was erased.
 describe('deleteTenant — naming the owner for the audit trail', () => {
-  it('returns the admin emails it read', async () => {
-    wire({ memberships: 3, members: ['a@x.com', 'b@x.com'], admins: ['a@x.com'] });
+  it('returns the admin numbers it read', async () => {
+    wire({ memberships: 3, members: ['+919876500051', '+919876500052'], admins: ['+919876500051'] });
     const result = await deleteTenant(TENANT, ACTOR_TENANT);
-    expect(result.adminEmails).toEqual(['a@x.com']);
+    expect(result.adminPhones).toEqual(['+919876500051']);
   });
 
   it('reads them BEFORE the sweep runs', async () => {
-    wire({ memberships: 2, members: ['a@x.com'], admins: ['a@x.com'] });
+    wire({ memberships: 2, members: ['+919876500051'], admins: ['+919876500051'] });
     await deleteTenant(TENANT, ACTOR_TENANT);
 
     const calls = sqlCalls();
@@ -249,16 +249,16 @@ describe('deleteTenant — naming the owner for the audit trail', () => {
   });
 
   it('carries every admin when a tenancy has more than one', async () => {
-    wire({ memberships: 4, members: ['a@x.com', 'b@x.com'], admins: ['a@x.com', 'b@x.com'] });
+    wire({ memberships: 4, members: ['+919876500051', '+919876500052'], admins: ['+919876500051', '+919876500052'] });
     const result = await deleteTenant(TENANT, ACTOR_TENANT);
-    expect(result.adminEmails).toEqual(['a@x.com', 'b@x.com']);
+    expect(result.adminPhones).toEqual(['+919876500051', '+919876500052']);
   });
 
   // A tenancy whose admin was already removed still gets deleted — the trail
   // says so rather than the request failing.
   it('reports an empty list rather than throwing when no admin remains', async () => {
-    wire({ memberships: 1, members: ['a@x.com'], admins: [] });
+    wire({ memberships: 1, members: ['+919876500051'], admins: [] });
     const result = await deleteTenant(TENANT, ACTOR_TENANT);
-    expect(result.adminEmails).toEqual([]);
+    expect(result.adminPhones).toEqual([]);
   });
 });

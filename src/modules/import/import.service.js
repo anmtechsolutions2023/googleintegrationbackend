@@ -78,7 +78,7 @@ const OUTCOME = { CREATED: 'created', UPDATED: 'updated', SKIPPED: 'skipped', FA
  * them must produce eight categories, not 56.
  *
  * @param {Object} conn - Active transaction connection.
- * @param {Object} ctx - { cache, tenantId, userEmail, created }
+ * @param {Object} ctx - { cache, tenantId, userPhone, created }
  * @param {string} kind - 'category' | 'uom' | 'taxGroup', for the cache and counters.
  * @param {string} lookupSql
  * @param {string} name
@@ -108,16 +108,16 @@ const ensureByName = async (conn, ctx, kind, lookupSql, name, create) => {
  * @param {Array<Object>} rows - Validated rows: { name, category, unit, price, taxGroup, … }
  * @param {Object} options - { onDuplicate: 'skip' | 'update' }
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<{summary: Object, created: Object, rows: Array}>}
  */
-const importItems = async (rows, options, tenantId, userEmail) => {
+const importItems = async (rows, options, tenantId, userPhone) => {
   const onDuplicate = options?.onDuplicate === 'update' ? 'update' : 'skip';
 
   // Shared across rows so the masters are resolved once, not 56 times. Safe
   // because each id it holds was committed by the row that created it.
   const ctx = {
-    cache: new Map(), tenantId, userEmail, created: {},
+    cache: new Map(), tenantId, userPhone, created: {},
     // What each group looked like BEFORE this run, and what this run has asked
     // of it. Both are per-import, not per-row — see the tax rules below.
     groupHadRates: new Map(),
@@ -146,15 +146,15 @@ const importItems = async (rows, options, tenantId, userEmail) => {
 
         const categoryId = await ensureByName(
           conn, ctx, 'categories', QUERIES.CATEGORY.SELECT_BY_NAME, row.category,
-          (c) => category.createTx(c, { Name: row.category, Active: true }, tenantId, userEmail),
+          (c) => category.createTx(c, { Name: row.category, Active: true }, tenantId, userPhone),
         );
         const uomId = await ensureByName(
           conn, ctx, 'units', QUERIES.UOM.SELECT_BY_NAME, row.unit,
-          (c) => uom.createTx(c, { UnitName: row.unit, IsPrimary: true, Active: true }, tenantId, userEmail),
+          (c) => uom.createTx(c, { UnitName: row.unit, IsPrimary: true, Active: true }, tenantId, userPhone),
         );
         const taxGroupId = await ensureByName(
           conn, ctx, 'taxGroups', QUERIES.TAX_GROUP.SELECT_BY_NAME, row.taxGroup,
-          (c) => taxGroup.createTx(c, { Name: row.taxGroup, Active: true }, tenantId, userEmail),
+          (c) => taxGroup.createTx(c, { Name: row.taxGroup, Active: true }, tenantId, userPhone),
         );
 
         // The group alone prices at 0%, so give it the rates it is named for —
@@ -205,7 +205,7 @@ const importItems = async (rows, options, tenantId, userEmail) => {
         if (already === null) {
           // Empty group: fill it, whether from the file or from the default.
           const added = await taxComponents.attachComponentsTx(conn, {
-            taxGroupId, components: wanted, tenantId, userEmail, cache: ctx.cache,
+            taxGroupId, components: wanted, tenantId, userPhone, cache: ctx.cache,
           });
           ctx.created.taxTypes = (ctx.created.taxTypes || 0) + added.taxTypes;
           ctx.created.taxMappings = (ctx.created.taxMappings || 0) + added.mappings;
@@ -228,7 +228,7 @@ const importItems = async (rows, options, tenantId, userEmail) => {
           TaxGroupId: taxGroupId,
           IsTaxIncluded: row.taxIncluded !== false,
           Active: true,
-        }, tenantId, userEmail);
+        }, tenantId, userPhone);
 
         if (existing) {
           // Update re-points the item at a NEW cost info rather than editing the
@@ -242,7 +242,7 @@ const importItems = async (rows, options, tenantId, userEmail) => {
             UOMId: uomId,
             CostInfoId: cost.id,
             Active: true,
-          }, tenantId, userEmail);
+          }, tenantId, userPhone);
           return { status: OUTCOME.UPDATED, itemId: existing.Id };
         }
 
@@ -254,7 +254,7 @@ const importItems = async (rows, options, tenantId, userEmail) => {
           UOMId: uomId,
           CostInfoId: cost.id,
           Active: true,
-        }, tenantId, userEmail);
+        }, tenantId, userPhone);
 
         return { status: OUTCOME.CREATED, itemId: item.id };
       });
@@ -320,10 +320,10 @@ const findEmptyTaxGroups = (names, tenantId) =>
  *
  * @param {Object} payload - { branchDetailId, defaultFoodType, channelIds, variantIds, items }
  * @param {string} tenantId
- * @param {string} userEmail
+ * @param {string} userPhone
  * @returns {Promise<{summary: Object, rows: Array}>}
  */
-const importMenuEntries = async (payload, tenantId, userEmail) => {
+const importMenuEntries = async (payload, tenantId, userPhone) => {
   const { branchDetailId, defaultFoodType, channelIds = [], variantIds = [], items } = payload;
   const results = [];
   // Loaded once and matched in JS. The tenancy has three food types; fetching
@@ -407,7 +407,7 @@ const importMenuEntries = async (payload, tenantId, userEmail) => {
           ChannelIds: channelIds,
           VariantIds: variantIds,
           Active: true,
-        }, tenantId, userEmail);
+        }, tenantId, userPhone);
         outcome = { status: OUTCOME.CREATED, menuItemId: meta.id };
       }
 

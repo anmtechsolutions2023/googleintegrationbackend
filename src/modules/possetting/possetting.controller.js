@@ -17,10 +17,10 @@ const getForBranch = asyncHandler(async (req, res) => {
 });
 
 const updateForBranch = asyncHandler(async (req, res) => {
-  const { tid: tenantId, email } = req.user;
+  const { tid: tenantId, phone } = req.user;
   const { branchId } = req.query;
-  logger.info('PosSetting.updateForBranch called', { tenantId, branchId, email });
-  const settings = await service.setBranchSettings(branchId, req.body, tenantId, email);
+  logger.info('PosSetting.updateForBranch called', { tenantId, branchId, phone });
+  const settings = await service.setBranchSettings(branchId, req.body, tenantId, phone);
   successResponse(res, settings, 'POS settings updated successfully');
 });
 
