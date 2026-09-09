@@ -32,7 +32,12 @@ jest.mock('../../utils/dbHelper', () => ({
   withTransaction: jest.fn((cb) => cb(mockConnection)),
   findOneOrFail:   jest.fn(),
   findAll:         jest.fn(),
-  executeQuery:    jest.fn(),
+  // Defaults to an empty ROW SET, not undefined. executeQuery always returns
+  // an array in production (it destructures connection.execute's rows), and
+  // callers destructure the first element — positemmeta.getById reads the
+  // optional 1:1 nutrition row that way. A bare jest.fn() returns undefined and
+  // makes those callers throw for a reason that could never happen live.
+  executeQuery:    jest.fn(async () => []),
 }));
 
 const USER_PHONE = '+919876500099';

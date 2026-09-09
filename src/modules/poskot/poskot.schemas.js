@@ -2,6 +2,7 @@
 // Joi validation schemas for POS KOT operations.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { POS_KOT_STATUSES } = require('../../config/constants');
 
 // Status was previously a free-text VARCHAR(20) with no validation, which let
@@ -13,23 +14,23 @@ const statusField = Joi.string().lowercase().valid(...POS_KOT_STATUSES);
 // the client no longer has to invent one (it used to send an epoch timestamp).
 const createSchema = Joi.object({
   KotNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  OrderId: Joi.string().uuid().optional().allow(null),
-  TableId: Joi.string().uuid().optional().allow(null),
+  OrderId: entityId.optional().allow(null),
+  TableId: entityId.optional().allow(null),
   Items: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   Status: statusField.optional().allow(null, '').default('pending'),
   FiredAt: Joi.date().optional().allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   KotNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  OrderId: Joi.string().uuid().optional().allow(null),
-  TableId: Joi.string().uuid().optional().allow(null),
+  OrderId: entityId.optional().allow(null),
+  TableId: entityId.optional().allow(null),
   Items: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   Status: statusField.optional().allow(null, ''),
   FiredAt: Joi.date().optional().allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional(),
 }).min(1);
 
@@ -39,7 +40,7 @@ const paginationSchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = { createSchema, updateSchema, paginationSchema, uuidParamSchema };

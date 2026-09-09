@@ -8,14 +8,15 @@
 // See receipt.format.service.coerce().
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { DOCUMENTS, TAX_MODE } = require('./receipt.catalogue');
 
 const branchQuerySchema = Joi.object({
-  branchId: Joi.string().uuid().required(),
+  branchId: entityId.required(),
 });
 
 const docQuerySchema = Joi.object({
-  branchId: Joi.string().uuid().required(),
+  branchId: entityId.required(),
   doc: Joi.string().valid(...Object.keys(DOCUMENTS)).required(),
 });
 

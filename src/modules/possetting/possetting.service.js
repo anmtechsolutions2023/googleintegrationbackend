@@ -20,6 +20,7 @@ const {
   TOKEN_NUMBERING_DEFAULT,
   LOYALTY,
   KOT_AUTO_PRINT_DEFAULT,
+  KPT,
 } = require('../../config/constants');
 
 // Every key this module recognises, with the value it falls back to. Unknown
@@ -32,6 +33,11 @@ const DEFAULTS = {
   // On by default: a kitchen that has a printer expects the ticket, and a
   // branch with no printer sees the browser dialog once and turns it off.
   [POS_SETTING_KEYS.KOT_AUTO_PRINT]: KOT_AUTO_PRINT_DEFAULT,
+  // Fallback Kitchen Preparation Time for portal orders, in minutes. Used when
+  // no dish on the order carries its own PrepTimeMinutes — a KPT of zero would
+  // promise a portal the food is already made. Stored as a string like every
+  // other setting; the KPT resolver reads it back through Number().
+  [POS_SETTING_KEYS.KPT_DEFAULT_MINUTES]: String(KPT.DEFAULT_MINUTES),
 };
 
 /**

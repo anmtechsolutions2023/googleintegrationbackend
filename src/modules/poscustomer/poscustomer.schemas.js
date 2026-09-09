@@ -2,6 +2,7 @@
 // Joi validation schemas for POS Customer operations.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 
 const createSchema = Joi.object({
   Name: Joi.string().required().max(100).allow(null).trim(),
@@ -10,7 +11,7 @@ const createSchema = Joi.object({
   Visits: Joi.number().integer().optional().default(0).allow(null),
   TotalSpent: Joi.number().optional().default(0).allow(null),
   LoyaltyPoints: Joi.number().integer().optional().default(0).allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional().default(true),
 });
 
@@ -21,7 +22,7 @@ const updateSchema = Joi.object({
   Visits: Joi.number().integer().optional().allow(null),
   TotalSpent: Joi.number().optional().allow(null),
   LoyaltyPoints: Joi.number().integer().optional().allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional(),
 }).min(1);
 
@@ -37,7 +38,7 @@ const searchQuerySchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif; }
+    a { color: #2980b9; } a:hover { color: #0f3460; }
+    .lbl { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #7f8c8d; margin-bottom: 4px; display: block; }
+    .fld { padding: 8px 10px; border: 1px solid #d0d4da; border-radius: 6px; font-size: 14px; color: #2c3e50; background: #ffffff; }
+    .badge { align-self: center; display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 5px 8px; border-radius: 5px; background: #f0f4f8; color: #2c3e50; font-size: 12px; font-weight: 700; }
+  </style>
+</helmet>
+
+<div style="width: 860px; min-height: 900px; background: #f5f7fa; padding: 28px 32px;">
+
+  <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 4px;">Front Desk › Setup › Category Hours</div>
+  <h1 style="margin: 0 0 6px; font-size: 22px; font-weight: 600; color: #2c3e50;">Category Availability</h1>
+  <p style="margin: 0 0 22px; font-size: 13px; line-height: 1.6; color: #5a6c7d; max-width: 64ch;">
+    Choose a category to set when it appears on the menu. A category with no rules is available <strong style="color: #2c3e50;">all the time</strong> — that is the default.
+  </p>
+
+  <div style="max-width: 420px; margin-bottom: 22px;">
+    <span class="lbl">Category</span>
+    <div class="fld" style="display: flex; align-items: center; justify-content: space-between;">
+      <span>Mains → Curries</span>
+      <span style="color: #7f8c8d; font-size: 11px;">▾</span>
+    </div>
+  </div>
+
+  <div style="background: #eef4fb; border: 1px solid #a9c8e8; border-radius: 6px; padding: 12px 16px; font-size: 14px; color: #1c4f80; margin-bottom: 16px;">
+    “Curries” is available only during the 2 windows below.
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+
+    <div style="display: grid; grid-template-columns: auto 1fr 1fr 1fr auto; gap: 12px; align-items: end; padding: 14px; border: 1px solid #e1e5eb; border-radius: 8px; background: #ffffff;">
+      <span class="badge">Fri</span>
+      <div><span class="lbl">Day</span><div class="fld">Friday</div></div>
+      <div><span class="lbl">From</span><div class="fld">22:00</div></div>
+      <div><span class="lbl">To</span><div class="fld">02:00</div></div>
+      <div style="align-self: end;"><div style="padding: 8px 12px; border: 1px solid #f0c8c2; background: #ffffff; color: #a5382a; border-radius: 6px; font-size: 13px; font-weight: 600;">Remove</div></div>
+      <p style="grid-column: 1 / -1; margin: 2px 0 0; font-size: 12.5px; color: #5a6c7d;">Runs past midnight into Sat.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: auto 1fr 1fr 1fr auto; gap: 12px; align-items: end; padding: 14px; border: 1px solid #e1e5eb; border-radius: 8px; background: #ffffff;">
+      <span class="badge">Sun</span>
+      <div><span class="lbl">Day</span><div class="fld">Sunday</div></div>
+      <div><span class="lbl">From</span><div class="fld">12:00</div></div>
+      <div><span class="lbl">To</span><div class="fld">16:00</div></div>
+      <div style="align-self: end;"><div style="padding: 8px 12px; border: 1px solid #f0c8c2; background: #ffffff; color: #a5382a; border-radius: 6px; font-size: 13px; font-weight: 600;">Remove</div></div>
+    </div>
+
+  </div>
+
+  <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 26px;">
+    <div style="padding: 10px 16px; border: 1px solid #d0d4da; background: #ffffff; color: #2c3e50; border-radius: 6px; font-size: 14px; font-weight: 600;">Add a window</div>
+    <div style="padding: 10px 16px; border: 1px solid #0f3460; background: #0f3460; color: #ffffff; border-radius: 6px; font-size: 14px; font-weight: 600;">Save schedule</div>
+    <div style="padding: 10px 16px; border: 1px solid #f0c8c2; background: #ffffff; color: #a5382a; border-radius: 6px; font-size: 14px; font-weight: 600;">Clear (always available)</div>
+  </div>
+
+  <div style="background: #ffffff; border: 1px solid #e1e5eb; border-radius: 6px; padding: 20px 22px;">
+    <div style="font-size: 15px; font-weight: 600; color: #2c3e50; margin-bottom: 12px;">What happens when you save the Friday window</div>
+
+    <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+      <div style="padding: 10px 14px; border: 1px solid #d0d4da; border-radius: 6px; background: #f8fafc; font-size: 13px; color: #2c3e50;">
+        <div style="font-size: 11px; color: #7f8c8d; margin-bottom: 2px;">You enter</div>
+        <div style="font-weight: 600;">Fri 22:00 → 02:00</div>
+      </div>
+      <div style="font-size: 18px; color: #7f8c8d;">→</div>
+      <div style="display: flex; gap: 10px;">
+        <div style="padding: 10px 14px; border: 1px solid #a9c8e8; border-radius: 6px; background: #eef4fb; font-size: 13px; color: #1c4f80;">
+          <div style="font-size: 11px; color: #4a7ba8; margin-bottom: 2px;">Stored as</div>
+          <div style="font-weight: 600;">Fri 22:00 → 24:00</div>
+        </div>
+        <div style="padding: 10px 14px; border: 1px solid #a9c8e8; border-radius: 6px; background: #eef4fb; font-size: 13px; color: #1c4f80;">
+          <div style="font-size: 11px; color: #4a7ba8; margin-bottom: 2px;">and</div>
+          <div style="font-weight: 600;">Sat 00:00 → 02:00</div>
+        </div>
+      </div>
+    </div>
+
+    <p style="margin: 14px 0 0; font-size: 13px; line-height: 1.6; color: #5a6c7d;">
+      A window that crosses midnight is split in two. Kept as one row it could never match anything — every lookup asks “is now between the start and the end?”, and with the end <em>before</em> the start nothing ever is. The category would look scheduled and silently never appear.
+    </p>
+
+    <div style="height: 1px; background: #e1e5eb; margin: 18px 0;"></div>
+
+    <div style="font-size: 13px; font-weight: 600; color: #2c3e50; margin-bottom: 10px;">Is “Curries” on the menu right now?</div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;">
+      <div style="display: flex; justify-content: space-between; padding: 9px 12px; background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 5px; font-size: 13px;">
+        <span style="color: #5a6c7d;">Friday 23:00</span><span style="color: #1e8449; font-weight: 600;">On the menu</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding: 9px 12px; background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 5px; font-size: 13px;">
+        <span style="color: #5a6c7d;">Saturday 01:00</span><span style="color: #1e8449; font-weight: 600;">On the menu</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding: 9px 12px; background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 5px; font-size: 13px;">
+        <span style="color: #5a6c7d;">Friday 12:00</span><span style="color: #a5382a; font-weight: 600;">Off the menu</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding: 9px 12px; background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 5px; font-size: 13px;">
+        <span style="color: #5a6c7d;">“Mains” — no rules set</span><span style="color: #1e8449; font-weight: 600;">Always on</span>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

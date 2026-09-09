@@ -26,6 +26,7 @@ const posOrderService = require('../posorder/posorder.service');
 const { writeKot, findLiveKotTx } = require('../posorder/posKotWriter');
 const { resolveAdapter } = require('../posportal/adapters');
 const { settleForOrder } = require('./posonlineorder.settle');
+const { decideKptTx } = require('./posonlineorder.kpt');
 
 const asArray = (v) => {
   if (Array.isArray(v)) return v;
@@ -186,8 +187,17 @@ const accept = async (id, data, tenantId, userPhone) => {
       userPhone,
     );
 
+    // What we promise the kitchen needs. Decided on THIS connection, inside the
+    // transaction, so the number that is stored is the number that is pushed.
+    const kpt = await decideKptTx(conn, {
+      explicit: data?.KptMinutes,
+      itemMetaIds: lines.map((l) => l.ItemMetaId),
+      branchDetailId: order.BranchDetailId,
+      tenantId,
+    });
+
     await conn.execute(QUERIES.POS_ONLINE_ORDER.SET_ACCEPTED, [
-      created.id, userPhone, id, tenantId,
+      created.id, kpt.minutes, userPhone, id, tenantId,
     ]);
 
     // Send-once, by the same guard the till uses: a double-tap, a retry or a
@@ -199,7 +209,16 @@ const accept = async (id, data, tenantId, userPhone) => {
         ? { KotId: live.Id, KotNo: live.KotNo, OrderId: created.id, Status: live.Status, AlreadySent: true }
         : await writeKot(
           conn,
-          { Id: created.id, TableId: null, Items: priced ? priced.items : priceable, BranchDetailId: order.BranchDetailId },
+          {
+            Id: created.id,
+            TableId: null,
+            Items: priced ? priced.items : priceable,
+            BranchDetailId: order.BranchDetailId,
+            // The whole point of the phase: the instruction always arrived,
+            // but nothing carried it to the pass, so the kitchen never saw it.
+            CookingInstructions: order.CookingInstructions ?? null,
+            NoCutlery: order.NoCutlery,
+          },
           tenantId,
           userPhone,
         );
@@ -215,12 +234,25 @@ const accept = async (id, data, tenantId, userPhone) => {
       OrderNo: created.OrderNo,
       Status: 'accepted',
       Kot: kot,
+      KptMinutes: kpt.minutes,
+      // How the number was arrived at — explicit / slowest-line /
+      // branch-default / platform-default. The accept screen shows it so a
+      // manager can see whether the kitchen's own timings are being used or a
+      // fallback is quietly standing in for them.
+      KptSource: kpt.source,
       // Carried out of the transaction so the caller can push to the portal
       // after the commit — see pushStatusSafely.
       _portal: portal,
     };
   }).then(async (result) => {
-    const push = await pushStatusSafely(result._portal, { ExternalRef: prepared.ExternalRef }, 'accepted');
+    // The KPT rides on the order object rather than as a new argument, so
+    // BaseAdapter.pushStatus keeps its signature and manual/httpAggregator
+    // stay untouched.
+    const push = await pushStatusSafely(
+      result._portal,
+      { ExternalRef: prepared.ExternalRef, KptMinutes: result.KptMinutes },
+      'accepted',
+    );
     const { _portal, ...clean } = result;
     return { ...clean, PortalPush: push };
   });

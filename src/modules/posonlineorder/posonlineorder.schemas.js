@@ -2,9 +2,13 @@
 // Joi validation schemas for POS Online Order operations.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
+const { joinedEchoes } = require('../../utils/joinedEchoes');
+const { QUERIES } = require('../../config/constants');
 const {
   POS_ONLINE_ORDER_STATUSES,
   POS_ONLINE_ORDER_REJECT_REASONS,
+  KPT,
 } = require('../../config/constants');
 
 // Canonical lowercase enum, normalized on write. Status was free text, so
@@ -20,9 +24,9 @@ const money = Joi.number().min(0).precision(2);
 const lineSchema = Joi.object({
   unmapped: Joi.boolean().optional(),
   externalItemId: Joi.string().max(100).optional().allow(null, ''),
-  ItemMetaId: Joi.string().uuid().optional().allow(null),
-  ItemDetailId: Joi.string().uuid().optional().allow(null),
-  CostInfoId: Joi.string().uuid().optional().allow(null),
+  ItemMetaId: entityId.optional().allow(null),
+  ItemDetailId: entityId.optional().allow(null),
+  CostInfoId: entityId.optional().allow(null),
   PriceSource: Joi.string().max(20).optional().allow(null, ''),
   name: Joi.string().max(255).optional().allow(null, ''),
   qty: Joi.number().min(0).optional(),
@@ -36,9 +40,9 @@ const lineSchema = Joi.object({
 
 // Fields shared by create and update. Written once so the two cannot drift.
 const commonFields = {
-  PortalId: Joi.string().uuid().optional().allow(null),
-  OrderId: Joi.string().uuid().optional().allow(null),
-  PortalBranchId: Joi.string().uuid().optional().allow(null),
+  PortalId: entityId.optional().allow(null),
+  OrderId: entityId.optional().allow(null),
+  PortalBranchId: entityId.optional().allow(null),
   ExternalRef: Joi.string().optional().max(100).allow(null, '').trim(),
   Payload: jsonCol.optional(),
   OrderLines: Joi.array().items(lineSchema).optional().allow(null),
@@ -65,7 +69,15 @@ const commonFields = {
   RiderPhone: Joi.string().max(30).optional().allow(null, '').trim(),
   CancelReason: Joi.string().max(255).optional().allow(null, '').trim(),
   CancelledBy: Joi.string().max(50).optional().allow(null, '').trim(),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
+  // What the customer asked the KITCHEN for, as opposed to what they ordered.
+  // Order-level; per-dish instructions ride on each line's `notes`.
+  // 500 matches the column — a Joi rule looser than its column turns a clear
+  // 400 into a 500 from MySQL.
+  CookingInstructions: Joi.string().max(500).optional().allow(null, '').trim(),
+  // A flag rather than a phrase to grep for inside the instructions: the person
+  // bagging the order acts on it without reading the cooking notes.
+  NoCutlery: Joi.boolean().optional(),
 };
 
 // Read-only columns the list and detail reads join in. An edit form is seeded
@@ -85,6 +97,12 @@ const echoedReadOnly = {
 };
 
 const createSchema = Joi.object({
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.POS_ONLINE_ORDER),
   ...commonFields,
   ...echoedReadOnly,
   // Kept required and kept a string: it is the portal's name AS IT WAS, a
@@ -96,6 +114,12 @@ const createSchema = Joi.object({
 });
 
 const updateSchema = Joi.object({
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.POS_ONLINE_ORDER),
   ...commonFields,
   ...echoedReadOnly,
   Platform: Joi.string().optional().max(50).allow(null, '').trim(),
@@ -110,6 +134,21 @@ const updateSchema = Joi.object({
 // order that nobody is cooking is the failure this feature exists to remove.
 const acceptSchema = Joi.object({
   FireKot: Joi.boolean().optional().default(true),
+  // Kitchen Preparation Time, in minutes — what we promise the portal.
+  //
+  // OPTIONAL, and omitting it is the normal case: the server then derives one
+  // from the slowest dish on the order, falling back to the branch setting.
+  // Sending a value overrides that, because the person at the pass can see the
+  // kitchen and nothing on the server can.
+  //
+  // Bounds are advisory here — the service clamps rather than rejects, so a
+  // mistyped 200 does not fail an accept when 120 is obviously meant.
+  KptMinutes: Joi.number()
+    .integer()
+    .min(KPT.MIN_MINUTES)
+    .max(KPT.MAX_MINUTES)
+    .optional()
+    .allow(null),
 });
 
 // Portals require a coded reason, so this takes one rather than free text.
@@ -135,12 +174,12 @@ const paginationSchema = Joi.object({
 // The expo queue's filters. Statuses arrive as a comma-separated list because
 // this is a GET and a screen toggles them.
 const queueQuerySchema = Joi.object({
-  branchId: Joi.string().uuid().optional().allow(null, ''),
+  branchId: entityId.optional().allow(null, ''),
   statuses: Joi.string().max(200).optional().allow(null, ''),
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

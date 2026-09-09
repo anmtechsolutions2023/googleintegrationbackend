@@ -70,6 +70,8 @@ describe('reading a branch\'s settings', () => {
         'token.numbering': 'daily',
         'loyalty.rupees_per_point': '100',
         'kot.auto_print': 'on',
+        // Fallback prep time for portal orders with no per-dish timings.
+        'kpt.default_minutes': '20',
       });
   });
 
@@ -80,6 +82,7 @@ describe('reading a branch\'s settings', () => {
         'token.numbering': 'series',
         'loyalty.rupees_per_point': '100',
         'kot.auto_print': 'on',
+        'kpt.default_minutes': '20',
       });
   });
 

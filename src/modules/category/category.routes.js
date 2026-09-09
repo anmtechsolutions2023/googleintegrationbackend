@@ -24,6 +24,22 @@ router.get(
 );
 
 /**
+ * GET /api/categories/parent-candidates
+ * Categories eligible to be a parent — top-level, active ones only.
+ *
+ * Declared BEFORE '/:id'. Express matches in declaration order, so the literal
+ * segment has to come first or 'parent-candidates' is read as a category id and
+ * answers 400 on the uuid check for a route that exists.
+ */
+router.get(
+  '/parent-candidates',
+  authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE),
+  auditLogCrud('Category'),
+  ...categoryController.getParentCandidates
+);
+
+/**
  * GET /api/categories/:id
  * Get a specific category by ID.
  */

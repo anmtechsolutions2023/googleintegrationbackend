@@ -119,7 +119,19 @@ class BaseCRUDService {
    * @param {boolean} expand - Whether to include related entity details (default: false)
    * @returns {Promise<Object>} Record object
    */
-  async getById(id, tenantId, expand = false) {
+  /**
+   * @param {string} id
+   * @param {string} tenantId
+   * @param {boolean} [expand]
+   * @param {Object} [conn] - Borrow the CALLER'S connection instead of taking a
+   *   second one. update() and delete() pass theirs: without this a single
+   *   update cost THREE connections (its own, plus one for each getById), so
+   *   three concurrent updates exhausted a pool of four and every later request
+   *   waited on a connection nobody was left to release. mysql2 has no acquire
+   *   timeout, so that wait never ends — the process serves /api-docs and hangs
+   *   on everything touching the database.
+   */
+  async getById(id, tenantId, expand = false, conn) {
     logger.info(`Fetching ${this.entityName} by ID`, { id, tenantId, expand })
 
     return await withConnection(async (connection) => {
@@ -145,7 +157,7 @@ class BaseCRUDService {
         expand,
       })
       return rows[0]
-    })
+    }, conn)
   }
 
   /**
@@ -249,8 +261,8 @@ class BaseCRUDService {
     logger.info(`Updating ${this.entityName}`, { id, tenantId, userPhone })
 
     return await withConnection(async (connection) => {
-      // First check if record exists
-      const existing = await this.getById(id, tenantId)
+      // First check if record exists — on THIS connection, not a second one.
+      const existing = await this.getById(id, tenantId, false, connection)
 
       // Prepare update parameters - this should be overridden in child classes
       const params = this.prepareUpdateParams(
@@ -280,8 +292,8 @@ class BaseCRUDService {
 
       logger.info(`${this.entityName} updated successfully`, { id, tenantId })
 
-      // Return updated record
-      return await this.getById(id, tenantId)
+      // Return updated record — still on the connection we hold.
+      return await this.getById(id, tenantId, false, connection)
     })
   }
 
@@ -342,8 +354,8 @@ class BaseCRUDService {
     logger.info(`Deleting ${this.entityName}`, { id, tenantId })
 
     return await withConnection(async (connection) => {
-      // First check if record exists
-      await this.getById(id, tenantId)
+      // First check if record exists — on THIS connection, not a second one.
+      await this.getById(id, tenantId, false, connection)
 
       await connection.execute(this.queries.DELETE, [id, tenantId])
 

@@ -1,5 +1,6 @@
 // src/modules/batchdetail/batchdetail.schemas.js
 const Joi = require('joi')
+const { entityId } = require('../../utils/idSchema');
 const { taxBreakdownEcho } = require('../pricing/pricing.enrich');
 
 const createSchema = Joi.object({
@@ -18,11 +19,11 @@ const createSchema = Joi.object({
     .optional()
     .allow(null),
   IsNonReturnable: Joi.boolean().optional().default(false),
-  CostInfoId: Joi.string().uuid().optional().allow(null),
-  UOMId: Joi.string().uuid().optional().allow(null),
+  CostInfoId: entityId.optional().allow(null),
+  UOMId: entityId.optional().allow(null),
   Quantity: Joi.number().precision(4).optional().allow(null),
-  MapProviderLocationMapperId: Joi.string().uuid().optional().allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  MapProviderLocationMapperId: entityId.optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional().default(true),
   TaxBreakdown: taxBreakdownEcho(),
 })
@@ -43,11 +44,11 @@ const updateSchema = Joi.object({
     .optional()
     .allow(null),
   IsNonReturnable: Joi.boolean().optional(),
-  CostInfoId: Joi.string().uuid().optional().allow(null),
-  UOMId: Joi.string().uuid().optional().allow(null),
+  CostInfoId: entityId.optional().allow(null),
+  UOMId: entityId.optional().allow(null),
   Quantity: Joi.number().precision(4).optional().allow(null),
-  MapProviderLocationMapperId: Joi.string().uuid().optional().allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  MapProviderLocationMapperId: entityId.optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional(),
   TaxBreakdown: taxBreakdownEcho(),
 }).min(1)
@@ -59,7 +60,7 @@ const paginationSchema = Joi.object({
 })
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 })
 
 const getByIdQuerySchema = Joi.object({

@@ -2,6 +2,7 @@
 // Joi validation schemas for all admin module endpoints.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { phoneField } = require('../../utils/phoneSchema');
 
 const approveRequestSchema = Joi.object({
@@ -88,7 +89,7 @@ const listUsersSchema = Joi.object({
 const updateUserProfileSchema = Joi.object({
   fullName: Joi.string().max(100).allow(null, '').trim(),
   phone: Joi.string().max(20).allow(null, '').trim(),
-  branchDetailId: Joi.string().uuid().allow(null, ''),
+  branchDetailId: entityId.allow(null, ''),
 }).min(1);
 
 const setTenantAdminSchema = Joi.object({

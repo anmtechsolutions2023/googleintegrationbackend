@@ -3,6 +3,7 @@
 // Can be used across all modules for common validation patterns.
 
 const Joi = require('joi');
+const { entityId } = require('../utils/idSchema');
 const { logger } = require('../utils/logger');
 const MESSAGES = require('../config/messages');
 const { HttpError } = require('./errorHandler');
@@ -69,7 +70,7 @@ const validateQuery = (schema) => {
  */
 const validateUuidParam = (paramName) => {
   const schema = Joi.object({
-    [paramName]: Joi.string().uuid().required(),
+    [paramName]: entityId.required(),
   });
 
   return (req, res, next) => {
@@ -136,7 +137,7 @@ const validateIdParam = (paramName) => {
 const validateUuidParams = (...paramNames) => {
   const schemaObject = {};
   paramNames.forEach((param) => {
-    schemaObject[param] = Joi.string().uuid().required();
+    schemaObject[param] = entityId.required();
   });
   const schema = Joi.object(schemaObject);
 

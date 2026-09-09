@@ -1,18 +1,33 @@
 // src/modules/transactiontypebaseconversion/transactiontypebaseconversion.schemas.js
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
+const { joinedEchoes } = require('../../utils/joinedEchoes');
+const { QUERIES } = require('../../config/constants');
 
 const createSchema = Joi.object({
-  TransactionTypeConfigId: Joi.string().uuid().required(),
-  FromTransactionTypeStatusId: Joi.string().uuid().required(),
-  ToTransactionTypeStatusId: Joi.string().uuid().required(),
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.TRANSACTION_TYPE_BASE_CONVERSION),
+  TransactionTypeConfigId: entityId.required(),
+  FromTransactionTypeStatusId: entityId.required(),
+  ToTransactionTypeStatusId: entityId.required(),
   Tag: Joi.string().max(100).optional().allow(null, ''),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
-  TransactionTypeConfigId: Joi.string().uuid().optional(),
-  FromTransactionTypeStatusId: Joi.string().uuid().optional(),
-  ToTransactionTypeStatusId: Joi.string().uuid().optional(),
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.TRANSACTION_TYPE_BASE_CONVERSION),
+  TransactionTypeConfigId: entityId.optional(),
+  FromTransactionTypeStatusId: entityId.optional(),
+  ToTransactionTypeStatusId: entityId.optional(),
   Tag: Joi.string().max(100).optional().allow(null, ''),
   Active: Joi.boolean().optional(),
 }).min(1);
@@ -28,7 +43,7 @@ const getByIdQuerySchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

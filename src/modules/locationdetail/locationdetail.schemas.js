@@ -1,5 +1,6 @@
 // src/modules/locationdetail/locationdetail.schemas.js
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 
 const createSchema = Joi.object({
   Lat: Joi.number().precision(8).required(),
@@ -27,7 +28,7 @@ const paginationSchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

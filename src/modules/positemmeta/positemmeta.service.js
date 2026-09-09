@@ -8,7 +8,7 @@
 const { v4: uuidv4 } = require('uuid');
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
-const { withTransaction } = require('../../utils/dbHelper');
+const { withTransaction, executeQuery } = require('../../utils/dbHelper');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const { attachBreakdown, attachBreakdownToOne } = require('../pricing/pricing.enrich');
@@ -82,6 +82,10 @@ class PosItemMetaService extends BaseCRUDService {
       toJson(data.Channels),
       toJson(data.Prices),
       toJson(data.Variants),
+      data.ServesCount ?? null,
+      data.PortionSize ?? null,
+      data.MeatTypeId ?? null,
+      data.PrepTimeMinutes ?? null,
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,
       userPhone,
@@ -97,6 +101,10 @@ class PosItemMetaService extends BaseCRUDService {
       data.Channels !== undefined ? toJson(data.Channels) : toJson(existing.Channels),
       data.Prices !== undefined ? toJson(data.Prices) : toJson(existing.Prices),
       data.Variants !== undefined ? toJson(data.Variants) : toJson(existing.Variants),
+      data.ServesCount !== undefined ? data.ServesCount : existing.ServesCount,
+      data.PortionSize !== undefined ? data.PortionSize : existing.PortionSize,
+      data.MeatTypeId !== undefined ? data.MeatTypeId : existing.MeatTypeId,
+      data.PrepTimeMinutes !== undefined ? data.PrepTimeMinutes : existing.PrepTimeMinutes,
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
       data.Active !== undefined ? data.Active : existing.Active,
       userPhone,
@@ -105,24 +113,97 @@ class PosItemMetaService extends BaseCRUDService {
     ];
   }
 
-  // Replace all channel/variant link rows for an item within an open connection.
-  async syncLinks(connection, itemMetaId, tenantId, userPhone, channelIds, variantIds) {
-    if (Array.isArray(channelIds)) {
+  /**
+   * Replace the link sets for an item, within the caller's open connection.
+   *
+   * Takes a NAMED object rather than positional id arrays: there are four link
+   * kinds now, and `syncLinks(conn, id, tid, user, a, b, c, d)` is a call nobody
+   * can read and everybody can mis-order — two of the four are uuid arrays that
+   * would swap silently.
+   *
+   * Each key is independent and only acted on when an ARRAY is supplied.
+   * `undefined` means "not sent, leave the existing links alone"; an empty array
+   * means "detach everything". A PATCH that omits ChannelIds must not silently
+   * unpublish the dish from every channel.
+   *
+   * @param {Object} connection open transaction connection
+   * @param {string} itemMetaId
+   * @param {string} tenantId
+   * @param {string} userPhone
+   * @param {{ChannelIds?:string[], VariantIds?:string[], AddonGroupIds?:string[], TagIds?:string[]}} links
+   */
+  async syncLinks(connection, itemMetaId, tenantId, userPhone, links = {}) {
+    const { ChannelIds, VariantIds, AddonGroupIds, TagIds } = links;
+
+    if (Array.isArray(ChannelIds)) {
       await connection.execute(this.queries.DELETE_CHANNEL_LINKS, [itemMetaId, tenantId]);
-      for (const channelId of channelIds) {
+      for (const channelId of ChannelIds) {
         await connection.execute(this.queries.INSERT_CHANNEL_LINK, [
           uuidv4(), itemMetaId, channelId, tenantId, userPhone,
         ]);
       }
     }
-    if (Array.isArray(variantIds)) {
+
+    if (Array.isArray(VariantIds)) {
       await connection.execute(this.queries.DELETE_VARIANT_LINKS, [itemMetaId, tenantId]);
-      for (const variantId of variantIds) {
+      for (const variantId of VariantIds) {
         await connection.execute(this.queries.INSERT_VARIANT_LINK, [
           uuidv4(), itemMetaId, variantId, tenantId, userPhone,
         ]);
       }
     }
+
+    if (Array.isArray(AddonGroupIds)) {
+      await connection.execute(this.queries.DELETE_ADDON_GROUP_LINKS, [itemMetaId, tenantId]);
+      // Index carries the display order, so the choice blocks appear on the till
+      // in the order the menu editor arranged them rather than by insert time.
+      for (const [index, addonGroupId] of AddonGroupIds.entries()) {
+        await connection.execute(this.queries.INSERT_ADDON_GROUP_LINK, [
+          uuidv4(), itemMetaId, addonGroupId, index, tenantId, userPhone,
+        ]);
+      }
+    }
+
+    if (Array.isArray(TagIds)) {
+      await connection.execute(this.queries.DELETE_TAG_LINKS, [itemMetaId, tenantId]);
+      for (const tagId of TagIds) {
+        await connection.execute(this.queries.INSERT_TAG_LINK, [
+          uuidv4(), itemMetaId, tagId, tenantId, userPhone,
+        ]);
+      }
+    }
+  }
+
+  /**
+   * Write, replace or clear the 1:1 nutrition row.
+   *
+   * `undefined` leaves it alone. An explicit `null` DELETES the row rather than
+   * blanking its columns — a row of nulls claims "somebody recorded this as
+   * unknown", which is a different statement from "no nutrition data exists",
+   * and a compliance report has to be able to tell them apart.
+   *
+   * @param {Object} connection open transaction connection
+   * @param {string} itemMetaId
+   * @param {string} tenantId
+   * @param {string} userPhone
+   * @param {Object|null|undefined} nutrition
+   */
+  async syncNutrition(connection, itemMetaId, tenantId, userPhone, nutrition) {
+    if (nutrition === undefined) return;
+
+    if (nutrition === null) {
+      await connection.execute(this.queries.DELETE_NUTRITION, [itemMetaId, tenantId]);
+      return;
+    }
+
+    const n = (k) => (nutrition[k] === undefined ? null : nutrition[k]);
+    await connection.execute(this.queries.UPSERT_NUTRITION, [
+      uuidv4(), itemMetaId,
+      n('ServingSizeG'), n('Calories'), n('ProteinG'), n('CarbohydrateG'),
+      n('SugarG'), n('FatG'), n('SaturatedFatG'), n('FibreG'), n('SodiumMg'),
+      n('Allergens'),
+      tenantId, userPhone, userPhone,
+    ]);
   }
 
   // Create the item + its channel/variant links atomically.
@@ -135,9 +216,8 @@ class PosItemMetaService extends BaseCRUDService {
       };
       const params = this.prepareInsertParams(id, resolved, tenantId, userPhone);
       await connection.execute(this.queries.INSERT, params);
-      await this.syncLinks(
-        connection, id, tenantId, userPhone, data.ChannelIds, data.VariantIds,
-      );
+      await this.syncLinks(connection, id, tenantId, userPhone, data);
+      await this.syncNutrition(connection, id, tenantId, userPhone, data.Nutrition);
       // `resolved`, not `data`, so the response reports the CostInfoId that was
       // actually stored rather than the (absent) one the client sent.
       return { id, ...resolved };
@@ -160,9 +240,8 @@ class PosItemMetaService extends BaseCRUDService {
       const params = this.prepareUpdateParams(resolved, existing, userPhone, id, tenantId)
         .map((p) => (p === undefined ? null : p));
       await connection.execute(this.queries.UPDATE, params);
-      await this.syncLinks(
-        connection, id, tenantId, userPhone, data.ChannelIds, data.VariantIds,
-      );
+      await this.syncLinks(connection, id, tenantId, userPhone, data);
+      await this.syncNutrition(connection, id, tenantId, userPhone, data.Nutrition);
       const [rows] = await connection.execute(this.queries.SELECT_BY_ID, [id, tenantId]);
       return this.normalizeRow(rows[0]);
     });
@@ -170,7 +249,13 @@ class PosItemMetaService extends BaseCRUDService {
 
   normalizeRow(row) {
     if (!row) return row;
-    return { ...row, ChannelIds: toIdArray(row.ChannelIds), VariantIds: toIdArray(row.VariantIds) };
+    return {
+      ...row,
+      ChannelIds: toIdArray(row.ChannelIds),
+      VariantIds: toIdArray(row.VariantIds),
+      AddonGroupIds: toIdArray(row.AddonGroupIds),
+      TagIds: toIdArray(row.TagIds),
+    };
   }
 
   // Menu rows always carry the tax breakdown — the price they show is the one a
@@ -182,9 +267,20 @@ class PosItemMetaService extends BaseCRUDService {
     return { ...result, data: await attachBreakdown(rows, tenantId, PRICING_OPTS) };
   }
 
+  /**
+   * One menu row, with its nutrition attached.
+   *
+   * Nutrition is fetched HERE and not in getAll: it is a 1:1 optional row that
+   * only the edit form reads, so joining it into the list would add a column
+   * block to every page for data no list renders. `null` when the dish has no
+   * nutrition recorded, which is the common case.
+   */
   async getById(id, tenantId, expand) {
     const row = this.normalizeRow(await super.getById(id, tenantId, expand));
-    return attachBreakdownToOne(row, tenantId, PRICING_OPTS);
+    if (!row) return row;
+    const nutritionRows = await executeQuery(this.queries.SELECT_NUTRITION, [id, tenantId]);
+    const withNutrition = { ...row, Nutrition: nutritionRows[0] ?? null };
+    return attachBreakdownToOne(withNutrition, tenantId, PRICING_OPTS);
   }
 }
 

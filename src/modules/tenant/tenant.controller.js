@@ -3,6 +3,7 @@
 // Handles request/response logic for tenant switching.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { logger } = require('../../utils/logger');
 const MESSAGES = require('../../config/messages');
 const { HttpError } = require('../../middleware/errorHandler');
@@ -11,7 +12,7 @@ const { generateAppToken } = require('../auth/auth.service');
 
 // Validation schemas
 const switchTenantSchema = Joi.object({
-  tenantId: Joi.string().uuid().required(),
+  tenantId: entityId.required(),
 });
 
 /**

@@ -2,6 +2,7 @@
 // Joi validation schemas for POS Bill operations.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { POS_BILL_STATUS } = require('../../config/constants');
 
 // Canonical lowercase vocabulary, normalized on write. Status was free text, so
@@ -30,11 +31,11 @@ const lineDiscountsSchema = Joi.object()
 // sent is ignored. Clients used to generate it from Date.now().
 const createSchema = Joi.object({
   BillNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  OrderId: Joi.string().uuid().optional().allow(null),
+  OrderId: entityId.optional().allow(null),
   // A dine-in session is several rounds billed together. When present the server
   // recomputes SubTotal/TaxAmount/Total from every listed order's priced lines,
   // applying Discount BEFORE tax. OrderId alone still works for single-order bills.
-  OrderIds: Joi.array().items(Joi.string().uuid()).min(1).max(100).optional(),
+  OrderIds: Joi.array().items(entityId).min(1).max(100).optional(),
   SubTotal: Joi.number().optional().default(0).allow(null),
   TaxAmount: Joi.number().optional().default(0).allow(null),
   Discount: Joi.number().optional().default(0).allow(null),
@@ -43,13 +44,13 @@ const createSchema = Joi.object({
   Payments: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   Status: statusField.optional().allow(null, '').default(POS_BILL_STATUS.UNPAID),
   SettledAt: Joi.date().optional().allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   BillNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  OrderId: Joi.string().uuid().optional().allow(null),
+  OrderId: entityId.optional().allow(null),
   SubTotal: Joi.number().optional().allow(null),
   TaxAmount: Joi.number().optional().allow(null),
   Discount: Joi.number().optional().allow(null),
@@ -58,7 +59,7 @@ const updateSchema = Joi.object({
   Payments: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   Status: statusField.optional().allow(null, ''),
   SettledAt: Joi.date().optional().allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional(),
 }).min(1);
 
@@ -67,7 +68,7 @@ const updateSchema = Joi.object({
 // its own instrument (mode + reference), which is what makes a split settlement
 // reconcilable. RefNo is enforced server-side for card/UPI/wallet.
 const tenderSchema = Joi.object({
-  paymentModeId: Joi.string().uuid().required(),
+  paymentModeId: entityId.required(),
   amount: Joi.number().min(0).required(),
   refNo: Joi.string().max(50).optional().allow(null, ''),
   comment: Joi.string().max(100).optional().allow(null, ''),
@@ -90,7 +91,7 @@ const paginationSchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = { createSchema, updateSchema, settleSchema, paginationSchema, uuidParamSchema };

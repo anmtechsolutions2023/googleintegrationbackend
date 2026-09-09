@@ -26,8 +26,27 @@ const REQUIRED_COLUMNS = {
   pos_order: ['TableName', 'FloorId', 'FloorName', 'TableCapacity'],
   // Per-item discounts granted on a bill.
   pos_bill: ['LineDiscounts'],
+  // What the customer asked the kitchen for, snapshotted onto the ticket.
+  pos_kot: ['CookingInstructions', 'NoCutlery'],
   // The per-dish share of a discount, split from the total borne by the line.
   transactionitemdetail: ['ItemDiscountAmount'],
+
+  // ── Zomato / portal menu integration ──────────────────────────────────────
+  // Sub-category tree and portal menu ordering.
+  categorydetail: ['ParentId', 'SortOrder'],
+  // GST 9(5): a bill can carry both goods and services, taxed differently.
+  itemdetail: ['SupplyType', 'SACCode'],
+  // What the dish IS beyond its price, plus its own preparation time.
+  pos_item_meta: ['ServesCount', 'PortionSize', 'MeatTypeId', 'PrepTimeMinutes'],
+  // Kitchen promise, customer instructions, and the coded rejection.
+  pos_online_order: [
+    'KptMinutes',
+    'KptSetOn',
+    'CookingInstructions',
+    'NoCutlery',
+    'RejectionReasonId',
+    'RejectedItemIds',
+  ],
 };
 
 /**

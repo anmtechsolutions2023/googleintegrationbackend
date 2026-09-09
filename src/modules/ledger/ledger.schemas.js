@@ -1,5 +1,6 @@
 // src/modules/ledger/ledger.schemas.js
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { VALID_PRESETS, VALID_BUCKETS } = require('../../utils/dateRange');
 const { LEDGER } = require('../../config/constants');
 
@@ -23,8 +24,8 @@ const listQuerySchema = Joi.object({
     .optional(),
   fromDate: Joi.date().iso().optional(),
   toDate: Joi.date().iso().optional(),
-  branchId: Joi.string().uuid().optional(),
-  contactDetailId: Joi.string().uuid().optional(),
+  branchId: entityId.optional(),
+  contactDetailId: entityId.optional(),
   search: Joi.string().max(100).optional().allow(''),
 });
 
@@ -44,16 +45,16 @@ const returnsListQuerySchema = Joi.object({
   // Date-wise, or any custom span.
   fromDate: Joi.date().iso().optional(),
   toDate: Joi.date().iso().optional(),
-  branchId: Joi.string().uuid().optional(),
+  branchId: entityId.optional(),
   // Why it came back, and whether that reason means WE got it wrong.
-  reasonId: Joi.string().uuid().optional(),
+  reasonId: entityId.optional(),
   isFault: Joi.boolean().optional(),
   // Money owed but not yet handed back.
   settlementStatus: Joi.string().valid(...LEDGER.SETTLEMENT_STATUSES).optional(),
   // Which customer.
-  contactDetailId: Joi.string().uuid().optional(),
+  contactDetailId: entityId.optional(),
   // Which dish came back.
-  itemId: Joi.string().uuid().optional(),
+  itemId: entityId.optional(),
   // WHO refunded. The standard shrinkage control: a cashier refunding far more
   // than their colleagues is the question this answers.
   createdBy: Joi.string().max(100).optional().allow(''),
@@ -77,7 +78,7 @@ const refundSchema = Joi.object({
 // normal case — a customer sends back some of what they ordered, not a whole
 // line, and certainly not a whole bill.
 const returnLineSchema = Joi.object({
-  lineId: Joi.string().uuid().required(),
+  lineId: entityId.required(),
   quantity: Joi.number().positive().precision(4).required(),
   // Intent only — there is no stock ledger to restock into. See the
   // RestockRequested column comment in the schema.
@@ -90,7 +91,7 @@ const returnSchema = Joi.object({
   lines: Joi.array().items(returnLineSchema).max(200).optional().default([]),
   // The CODED reason. Free text cannot be grouped, so "what are we refunding
   // for?" was unanswerable — see pos_return_reason.
-  reasonId: Joi.string().uuid().optional().allow(null),
+  reasonId: entityId.optional().allow(null),
   // Alongside the code, never instead of it: the code is what reports group by,
   // the note is what a human needs to read.
   note: Joi.string().max(500).optional().allow(null, ''),
@@ -124,21 +125,21 @@ const reportQuerySchema = Joi.object({
   fromDate: Joi.date().iso().optional(),
   toDate: Joi.date().iso().optional(),
   bucket: Joi.string().valid(...VALID_BUCKETS).optional().default('day'),
-  branchId: Joi.string().uuid().optional(),
-  categoryId: Joi.string().uuid().optional(),
-  itemId: Joi.string().uuid().optional(),
+  branchId: entityId.optional(),
+  categoryId: entityId.optional(),
+  itemId: entityId.optional(),
   // Venue bounds, applied to every report that can be sliced by where the money
   // was taken. Deliberately part of the SHARED query contract: "what sold on the
   // rooftop last weekend" is the sales report with two more bounds, not a report
   // of its own — which is what keeps mix-and-match from becoming a combinatorial
   // pile of endpoints.
-  floorId: Joi.string().uuid().optional(),
-  tableId: Joi.string().uuid().optional(),
+  floorId: entityId.optional(),
+  tableId: entityId.optional(),
   limit: Joi.number().integer().min(1).max(200).optional(),
   // Customer bounds. Same reasoning as the venue bounds above: "when does this
   // regular visit" is the visit-pattern report with one more bound, not a
   // report of its own.
-  customerId: Joi.string().uuid().optional(),
+  customerId: entityId.optional(),
   minOrders: Joi.number().integer().min(1).max(1000).optional(),
   // Lapsed only: how long counts as gone.
   days: Joi.number().integer().min(1).max(365).optional(),
@@ -163,7 +164,7 @@ const reportQuerySchema = Joi.object({
     return value;
   });
 
-const uuidParamSchema = Joi.object({ id: Joi.string().uuid().required() });
+const uuidParamSchema = Joi.object({ id: entityId.required() });
 
 module.exports = {
   listQuerySchema, returnsListQuerySchema, refundSchema, returnSchema, settlementSchema,

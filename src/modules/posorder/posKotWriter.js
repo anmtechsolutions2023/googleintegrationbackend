@@ -20,7 +20,8 @@ const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.strin
  * was told to cook, which is not the same thing as what the round says today.
  *
  * @param {Object} conn - Open transaction connection.
- * @param {Object} order - { Id, TableId, Items, BranchDetailId }
+ * @param {Object} order - { Id, TableId, Items, BranchDetailId,
+ *                             CookingInstructions, NoCutlery }
  * @param {string} tenantId
  * @param {string} userPhone
  * @param {string} [kotNo] - Explicit number; otherwise issued from the series.
@@ -37,6 +38,10 @@ const writeKot = async (conn, order, tenantId, userPhone, kotNo) => {
     order.Id,
     order.TableId ?? null,
     toJson(order.Items),
+    // Snapshotted with the items, for the same reason: a ticket already on the
+    // pass must not change because somebody edited the order behind it.
+    order.CookingInstructions ?? null,
+    order.NoCutlery ? 1 : 0,
     'pending',
     new Date(),
     order.BranchDetailId ?? null,

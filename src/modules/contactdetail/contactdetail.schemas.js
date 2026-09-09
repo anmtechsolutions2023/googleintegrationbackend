@@ -1,7 +1,16 @@
 // src/modules/contactdetail/contactdetail.schemas.js
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
+const { joinedEchoes } = require('../../utils/joinedEchoes');
+const { QUERIES } = require('../../config/constants');
 
 const createSchema = Joi.object({
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.CONTACT_DETAIL),
   FirstName: Joi.string().required().max(100).trim(),
   LastName: Joi.string().required().max(100).trim(),
   MobileNo: Joi.string().optional().max(20).trim().allow(null, ''),
@@ -10,11 +19,17 @@ const createSchema = Joi.object({
   LandLine2: Joi.string().optional().max(20).trim().allow(null, ''),
   Ext1: Joi.string().optional().max(10).trim().allow(null, ''),
   Ext2: Joi.string().optional().max(10).trim().allow(null, ''),
-  ContactAddressTypeId: Joi.string().uuid().optional().allow(null),
+  ContactAddressTypeId: entityId.optional().allow(null),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.CONTACT_DETAIL),
   FirstName: Joi.string().optional().max(100).trim(),
   LastName: Joi.string().optional().max(100).trim(),
   MobileNo: Joi.string().optional().max(20).trim().allow(null, ''),
@@ -23,7 +38,7 @@ const updateSchema = Joi.object({
   LandLine2: Joi.string().optional().max(20).trim().allow(null, ''),
   Ext1: Joi.string().optional().max(10).trim().allow(null, ''),
   Ext2: Joi.string().optional().max(10).trim().allow(null, ''),
-  ContactAddressTypeId: Joi.string().uuid().optional().allow(null),
+  ContactAddressTypeId: entityId.optional().allow(null),
   Active: Joi.boolean().optional(),
 }).min(1);
 
@@ -38,7 +53,7 @@ const getByIdQuerySchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

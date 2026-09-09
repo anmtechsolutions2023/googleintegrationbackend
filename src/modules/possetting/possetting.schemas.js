@@ -2,14 +2,15 @@
 // Joi validation schemas for per-branch POS settings.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const {
-  TOKEN_NUMBERING, POS_SETTING_KEYS, KOT_AUTO_PRINT,
+  TOKEN_NUMBERING, POS_SETTING_KEYS, KOT_AUTO_PRINT, KPT,
 } = require('../../config/constants');
 
 // The branch is the address of every setting, so it is required on both the
 // read and the write — there is no tenant-wide row to fall back to.
 const branchQuerySchema = Joi.object({
-  branchId: Joi.string().uuid().required(),
+  branchId: entityId.required(),
 });
 
 // Keys are enumerated rather than free-form: an unrecognised key would be
@@ -28,6 +29,16 @@ const updateSchema = Joi.object({
     .optional(),
   [POS_SETTING_KEYS.KOT_AUTO_PRINT]: Joi.string()
     .valid(...Object.values(KOT_AUTO_PRINT))
+    .optional(),
+  // Fallback Kitchen Preparation Time, in minutes, for portal orders that have
+  // no per-dish timings. Bounded by the same range the accept path clamps to,
+  // so a branch cannot configure a default the resolver would then override.
+  // Zero is refused rather than clamped: as a stored SETTING it is a standing
+  // instruction to promise a portal the food is already made.
+  [POS_SETTING_KEYS.KPT_DEFAULT_MINUTES]: Joi.number()
+    .integer()
+    .min(KPT.MIN_MINUTES)
+    .max(KPT.MAX_MINUTES)
     .optional(),
 }).min(1);
 

@@ -2,6 +2,7 @@
 // Joi validation schemas for Transaction Type Config operations
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 
 const createTransactionTypeConfigSchema = Joi.object({
   StartCounterNo: Joi.number().integer().min(0).required(),
@@ -25,7 +26,7 @@ const paginationSchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

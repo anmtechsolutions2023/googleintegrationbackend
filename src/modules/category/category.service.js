@@ -5,6 +5,54 @@
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
 const { logger } = require('../../utils/logger');
+const { executeQuery } = require('../../utils/dbHelper');
+const { HttpError } = require('../../middleware/errorHandler');
+
+/**
+ * A menu tree is EXACTLY two levels: category → sub-category. Portals reject
+ * anything deeper, so the limit is enforced here rather than discovered when a
+ * menu push fails against a live API.
+ *
+ * Three ways to break it, all checked:
+ *   1. pointing a category at itself;
+ *   2. pointing at a category that ALREADY has a parent (would make 3 levels);
+ *   3. giving a parent to a category that already HAS children (same, from the
+ *      other direction — the subtlety a depth check usually misses).
+ *
+ * @param {string} id       the category being written, null on create
+ * @param {string} parentId the proposed parent
+ * @param {string} tenantId
+ */
+const assertTwoLevelDepth = async (id, parentId, tenantId) => {
+  if (!parentId) return;
+
+  if (id && parentId === id) {
+    throw new HttpError('A category cannot be its own parent.', 400);
+  }
+
+  const parentRows = await executeQuery(QUERIES.CATEGORY.SELECT_BY_ID, [parentId, tenantId]);
+  const parent = parentRows[0];
+  if (!parent) {
+    // Scoped by tenant, so this also covers "exists, but not yours".
+    throw new HttpError('Parent category not found.', 404);
+  }
+  if (parent.ParentId) {
+    throw new HttpError(
+      'A sub-category cannot be nested under another sub-category — the menu tree is two levels deep.',
+      400,
+    );
+  }
+
+  if (id) {
+    const [{ total }] = await executeQuery(QUERIES.CATEGORY.COUNT_CHILDREN, [id, tenantId]);
+    if (Number(total) > 0) {
+      throw new HttpError(
+        'This category already has sub-categories, so it cannot become a sub-category itself.',
+        400,
+      );
+    }
+  }
+};
 
 /**
  * Category Service extending base CRUD functionality
@@ -27,6 +75,8 @@ class CategoryService extends BaseCRUDService {
       id,
       tenantId,
       data.Name,
+      data.ParentId ?? null,
+      data.SortOrder !== undefined ? data.SortOrder : 0,
       data.Active !== undefined ? data.Active : true,
       userPhone,
       userPhone,
@@ -46,8 +96,22 @@ class CategoryService extends BaseCRUDService {
     const updatedName = data.Name !== undefined ? data.Name : existing.Name;
     const updatedActive =
       data.Active !== undefined ? data.Active : existing.Active;
+    // `undefined` means "not sent, keep it"; explicit null means "promote this
+    // back to a top-level category". The two must not collapse into one.
+    const updatedParentId =
+      data.ParentId !== undefined ? data.ParentId : existing.ParentId;
+    const updatedSortOrder =
+      data.SortOrder !== undefined ? data.SortOrder : existing.SortOrder;
 
-    return [updatedName, updatedActive, userPhone, id, tenantId];
+    return [
+      updatedName,
+      updatedParentId ?? null,
+      updatedSortOrder ?? 0,
+      updatedActive,
+      userPhone,
+      id,
+      tenantId,
+    ];
   }
 
   /**
@@ -89,7 +153,17 @@ class CategoryService extends BaseCRUDService {
       tenantId,
       userPhone,
     });
+    await assertTwoLevelDepth(null, categoryData.ParentId, tenantId);
     return await this.create(categoryData, tenantId, userPhone);
+  }
+
+  /**
+   * Categories eligible to BE a parent — top-level, active ones. Feeds the
+   * parent picker, which must never offer a sub-category.
+   * @param {string} tenantId
+   */
+  async getParentCandidates(tenantId) {
+    return await executeQuery(QUERIES.CATEGORY.SELECT_PARENT_CANDIDATES, [tenantId]);
   }
 
   /**
@@ -106,6 +180,11 @@ class CategoryService extends BaseCRUDService {
       tenantId,
       userPhone,
     });
+    // Only when the caller is actually moving it. An update that leaves
+    // ParentId alone must not be refused because of a tree it never touched.
+    if (updateData.ParentId !== undefined) {
+      await assertTwoLevelDepth(id, updateData.ParentId, tenantId);
+    }
     return await this.update(id, updateData, tenantId, userPhone);
   }
 
@@ -117,6 +196,16 @@ class CategoryService extends BaseCRUDService {
    */
   async deleteCategory(id, tenantId) {
     logger.info('CategoryService.deleteCategory called', { id, tenantId });
+    // The FK would refuse this anyway, but as an opaque ER_ROW_IS_REFERENCED
+    // 500 that reads like a server fault. Say what is actually in the way.
+    const [{ total }] = await executeQuery(QUERIES.CATEGORY.COUNT_CHILDREN, [id, tenantId]);
+    if (Number(total) > 0) {
+      throw new HttpError(
+        `This category has ${total} sub-categor${Number(total) === 1 ? 'y' : 'ies'}. ` +
+        'Move or delete them first.',
+        400,
+      );
+    }
     return await this.delete(id, tenantId);
   }
 }
@@ -136,4 +225,7 @@ module.exports = {
     categoryService.updateCategory(id, data, tenantId, userPhone),
   deleteCategory: (id, tenantId) =>
     categoryService.deleteCategory(id, tenantId),
+  getParentCandidates: (tenantId) => categoryService.getParentCandidates(tenantId),
+  // Exported for its unit test — not part of the HTTP surface.
+  assertTwoLevelDepth,
 };

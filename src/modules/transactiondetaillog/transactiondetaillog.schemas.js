@@ -1,11 +1,20 @@
 // src/modules/transactiondetaillog/transactiondetaillog.schemas.js
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
+const { joinedEchoes } = require('../../utils/joinedEchoes');
+const { QUERIES } = require('../../config/constants');
 
 const createSchema = Joi.object({
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.TRANSACTION_DETAIL_LOG),
   TransactionNo: Joi.string().required().max(100).trim(),
-  TransactionTypeConfigId: Joi.string().uuid().required(),
-  TransactionTypeStatusId: Joi.string().uuid().optional().allow(null),
-  BranchId: Joi.string().uuid().optional().allow(null),
+  TransactionTypeConfigId: entityId.required(),
+  TransactionTypeStatusId: entityId.optional().allow(null),
+  BranchId: entityId.optional().allow(null),
   TransactionDate: Joi.alternatives()
     .try(Joi.date().iso(), Joi.string().regex(/^\d{1,2}-\d{1,2}-\d{4}$/))
     .required(),
@@ -14,10 +23,16 @@ const createSchema = Joi.object({
 });
 
 const updateSchema = Joi.object({
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.TRANSACTION_DETAIL_LOG),
   TransactionNo: Joi.string().optional().max(100).trim(),
-  TransactionTypeConfigId: Joi.string().uuid().optional(),
-  TransactionTypeStatusId: Joi.string().uuid().optional().allow(null),
-  BranchId: Joi.string().uuid().optional().allow(null),
+  TransactionTypeConfigId: entityId.optional(),
+  TransactionTypeStatusId: entityId.optional().allow(null),
+  BranchId: entityId.optional().allow(null),
   TransactionDate: Joi.alternatives()
     .try(Joi.date().iso(), Joi.string().regex(/^\d{1,2}-\d{1,2}-\d{4}$/))
     .optional(),
@@ -36,7 +51,7 @@ const getByIdQuerySchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

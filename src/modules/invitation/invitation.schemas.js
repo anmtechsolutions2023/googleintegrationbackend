@@ -2,6 +2,7 @@
 // Joi validation for tenant invitations.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { phoneField } = require('../../utils/phoneSchema');
 
 // The tenancy is NOT accepted here. It comes from req.user.tid so a tenant
@@ -25,7 +26,7 @@ const createInvitationSchema = Joi.object({
   // an audit trail or a tenant switcher — an address at least usually carried a
   // name inside it. Allowing null here would fail at the INSERT instead.
   fullName: Joi.string().max(100).required().trim(),
-  branchDetailId: Joi.string().uuid().allow(null, ''),
+  branchDetailId: entityId.allow(null, ''),
   // NOTE: there is deliberately no second `phone` key here. There used to be —
   // a staff-profile field beside the identity — and when the identity was
   // renamed to `phone` the two collided. Joi keeps the LAST definition, so the
@@ -35,7 +36,7 @@ const createInvitationSchema = Joi.object({
 });
 
 const invitationIdParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = { createInvitationSchema, invitationIdParamSchema };

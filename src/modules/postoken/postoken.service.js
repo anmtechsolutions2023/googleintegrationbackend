@@ -218,12 +218,16 @@ class PosTokenService extends BaseCRUDService {
     if (!POS_TOKEN_STATUSES.includes(status)) {
       throw new HttpError(`Unknown token status '${status}'.`, 400);
     }
+    // Both reads borrow THIS connection — same reasoning as poskot.setStatus:
+    // without the 4th argument, calling the queue forward cost three
+    // acquisitions and held two at once, which deadlocks a pool of four once
+    // enough counter staff advance their queues together.
     return withConnection(async (conn) => {
-      await this.getById(id, tenantId); // 404 if missing (reuses base + HttpError)
+      await this.getById(id, tenantId, false, conn); // 404 if missing
       await conn.execute(this.queries.SET_STATUS, [
         status, status, status, userPhone, id, tenantId,
       ]);
-      return this.getById(id, tenantId);
+      return this.getById(id, tenantId, false, conn);
     });
   }
 

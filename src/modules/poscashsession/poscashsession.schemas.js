@@ -6,10 +6,11 @@
 // would make the variance meaningless.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { phoneField } = require('../../utils/phoneSchema');
 
 const openSchema = Joi.object({
-  BranchDetailId: Joi.string().uuid().required(),
+  BranchDetailId: entityId.required(),
   // Defaults to the caller — a cashier opens their own till.
   CashierPhone: phoneField().optional().allow(null),
   ShiftLabel: Joi.string().max(50).optional().allow(null, '').trim(),
@@ -27,7 +28,7 @@ const paginationSchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = { openSchema, closeSchema, paginationSchema, uuidParamSchema };

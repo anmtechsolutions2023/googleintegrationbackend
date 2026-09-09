@@ -118,8 +118,22 @@ const deleteCategory = asyncHandler(async (req, res) => {
   noContentResponse(res, 'Category deleted successfully');
 });
 
+/**
+ * Categories eligible to BE a parent — top-level, active ones only.
+ *
+ * Unpaginated on purpose: it feeds a picker, and a truncated parent list hides
+ * the category somebody is trying to nest under.
+ */
+const getParentCandidates = asyncHandler(async (req, res) => {
+  const { tid: tenantId } = req.user;
+  logger.info('getParentCandidates called', { tenantId });
+  const rows = await categoryService.getParentCandidates(tenantId);
+  successResponse(res, rows, 'Parent categories retrieved successfully');
+});
+
 module.exports = {
   getAllCategories: [validateQuery(paginationSchema), getAllCategories],
+  getParentCandidates: [getParentCandidates],
   getCategoryById: [validateParams(uuidParamSchema), getCategoryById],
   createCategory: [validateBody(createCategorySchema), createCategory],
   updateCategory: [

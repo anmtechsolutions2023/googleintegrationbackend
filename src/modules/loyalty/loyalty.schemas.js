@@ -2,8 +2,9 @@
 // Joi validation for the loyalty endpoints.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 
-const uuidParamSchema = Joi.object({ id: Joi.string().uuid().required() });
+const uuidParamSchema = Joi.object({ id: entityId.required() });
 
 // A manual movement of points. Signed on purpose: the same gesture covers a
 // goodwill grant and a correction, and forcing a separate "deduct" verb would

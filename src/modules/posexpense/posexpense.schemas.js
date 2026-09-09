@@ -6,31 +6,46 @@
 // by posting a status straight from the client.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
+const { joinedEchoes } = require('../../utils/joinedEchoes');
+const { QUERIES } = require('../../config/constants');
 
 const createSchema = Joi.object({
-  ExpenseCategoryId: Joi.string().uuid().required(),
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.POS_EXPENSE),
+  ExpenseCategoryId: entityId.required(),
   Description: Joi.string().optional().max(500).allow(null, '').trim(),
   // Positive: a negative expense is a refund, which is a reversal, not an entry.
   Amount: Joi.number().positive().required(),
   ExpenseDate: Joi.date().optional().allow(null),
-  PaymentModeId: Joi.string().uuid().optional().allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  PaymentModeId: entityId.optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
-  ExpenseCategoryId: Joi.string().uuid().optional(),
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.POS_EXPENSE),
+  ExpenseCategoryId: entityId.optional(),
   Description: Joi.string().optional().max(500).allow(null, '').trim(),
   Amount: Joi.number().positive().optional(),
   ExpenseDate: Joi.date().optional().allow(null),
-  PaymentModeId: Joi.string().uuid().optional().allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  PaymentModeId: entityId.optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional(),
 }).min(1);
 
 /** Settling may name the mode the money actually left by. */
 const settleSchema = Joi.object({
-  PaymentModeId: Joi.string().uuid().optional().allow(null),
+  PaymentModeId: entityId.optional().allow(null),
 });
 
 const paginationSchema = Joi.object({
@@ -39,7 +54,7 @@ const paginationSchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

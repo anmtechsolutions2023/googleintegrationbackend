@@ -3,6 +3,7 @@
 // Centralized validation rules for better maintainability
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 
 // Schema for creating a new tax type
 const createTaxTypeSchema = Joi.object({
@@ -26,7 +27,7 @@ const paginationSchema = Joi.object({
 
 // Schema for UUID parameter validation
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

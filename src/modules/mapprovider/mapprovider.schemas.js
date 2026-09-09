@@ -1,5 +1,6 @@
 // src/modules/mapprovider/mapprovider.schemas.js
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 
 const createSchema = Joi.object({
   ProviderName: Joi.string().required().max(100).trim(),
@@ -17,7 +18,7 @@ const paginationSchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

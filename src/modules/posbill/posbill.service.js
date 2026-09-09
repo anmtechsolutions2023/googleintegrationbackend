@@ -4,7 +4,7 @@
 const { v4: uuidv4 } = require('uuid');
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES, POS_BILL_STATUS } = require('../../config/constants');
-const { withTransaction } = require('../../utils/dbHelper');
+const { withConnection, withTransaction } = require('../../utils/dbHelper');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const pricingService = require('../pricing/pricing.service');
@@ -169,8 +169,20 @@ class PosBillService extends BaseCRUDService {
    * @param {string} id
    * @param {string} tenantId
    */
-  async assertBillMutable(id, tenantId) {
-    const bill = await this.getById(id, tenantId); // 404 if missing
+  async assertBillMutable(id, tenantId, conn) {
+    // Deliberately the PLAIN row — super.getById, never this class's override.
+    //
+    // The override reads the rounds the bill covers and re-prices them, which
+    // costs a connection of its own. Called from inside settle's transaction,
+    // which is already holding one, that made every settle a TWO-connection
+    // request: at CONNECTION_LIMIT 4, four overlapping settles each held their
+    // transaction and waited for a second connection nobody was left to
+    // release. mysql2 has no acquire timeout, so that wait never ended — the
+    // settle hung and then failed. Callers already inside a transaction pass
+    // theirs; the mutability check needs nothing the plain row lacks.
+    const bill = conn
+      ? await this.getByIdTx(conn, id, tenantId)
+      : await super.getById(id, tenantId); // 404 if missing
     if (bill.TransactionDetailLogId) {
       throw new HttpError(
         MESSAGES.ERROR.LEDGER_IMMUTABLE,
@@ -193,7 +205,7 @@ class PosBillService extends BaseCRUDService {
     return withTransaction(async (connection) => {
       // Refuses a bill that is already posted, before any work is done — a
       // second settle must not be able to issue a second invoice.
-      const existing = await this.assertBillMutable(id, tenantId);
+      const existing = await this.assertBillMutable(id, tenantId, connection);
       const discount = data.Discount !== undefined ? data.Discount : existing.Discount;
       const lineDiscounts = data.LineDiscounts !== undefined
         ? data.LineDiscounts
@@ -397,11 +409,15 @@ class PosBillService extends BaseCRUDService {
    * returned as-is and never overwritten here — bills raised before this shipped
    * simply come back with an empty footer.
    */
-  async getById(id, tenantId, expand) {
-    const bill = await super.getById(id, tenantId, expand);
-    if (!bill) return bill;
+  async getById(id, tenantId, expand, conn) {
+    // ONE connection for the whole read, and withConnection rather than
+    // withTransaction: nothing here writes, so the transaction bought nothing
+    // and cost a second connection — the row was read on one, the rounds and
+    // their re-pricing on another.
+    return withConnection(async (connection) => {
+      const bill = await super.getById(id, tenantId, expand, connection);
+      if (!bill) return bill;
 
-    return withTransaction(async (connection) => {
       const orderIds = await repository.getBillOrderIdsTx(connection, id, tenantId);
       if (orderIds.length === 0) {
         return { ...bill, OrderIds: bill.OrderId ? [bill.OrderId] : [], TaxByComponent: [] };
@@ -414,7 +430,7 @@ class PosBillService extends BaseCRUDService {
         OrderIds: orderIds,
         TaxByComponent: recomputed ? recomputed.TaxByComponent : [],
       };
-    });
+    }, conn);
   }
 
   prepareInsertParams(id, data, tenantId, userPhone) {

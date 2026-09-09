@@ -253,6 +253,11 @@ const ingest = async ({ portal, payload, rawBody, tenantId, userPhone }) => {
       inbound.rider?.phone ?? null,
       null, null,
       mapping.BranchDetailId,
+      // The kitchen's copy of what the customer asked for. Stored as columns,
+      // not left in Payload, because posKotWriter must not have to parse a
+      // portal-specific envelope to print a ticket.
+      inbound.cookingInstructions ?? null,
+      inbound.noCutlery ? 1 : 0,
       1, by, by,
     ]);
 

@@ -475,6 +475,13 @@ CREATE TABLE UOM (
 CREATE TABLE categorydetail (
     Id         VARCHAR(50)  NOT NULL,
     Name       VARCHAR(50)  NOT NULL,
+    -- Sub-categories. Self-referencing and exactly ONE level deep: a portal
+    -- menu is category → sub-category, and Zomato rejects deeper nesting, so
+    -- the depth limit is enforced in Joi rather than left to discover itself.
+    -- NULL means this is a top-level category.
+    ParentId   VARCHAR(50)  NULL,
+    -- Menu display order. Portals honour it; the master-data list ignores it.
+    SortOrder  INT          NOT NULL DEFAULT 0,
     Active     TINYINT(1)   NOT NULL,
     TenantId   VARCHAR(50)  NOT NULL,
     CreatedOn  DATETIME,
@@ -482,7 +489,14 @@ CREATE TABLE categorydetail (
     UpdatedOn  DATETIME,
     UpdatedBy  VARCHAR(50),
     PRIMARY KEY (Id),
-    UNIQUE (Name, TenantId)
+    -- DELIBERATELY (Name, TenantId) and NOT (Name, ParentId, TenantId).
+    -- MySQL treats NULLs as DISTINCT in a unique index, so adding ParentId
+    -- would leave every top-level category (ParentId IS NULL) unconstrained and
+    -- freely duplicable — the opposite of what the wider key looks like it buys.
+    -- The cost is that one name cannot appear under two parents; category names
+    -- are unique per tenant, which is what they already were.
+    UNIQUE (Name, TenantId),
+    FOREIGN KEY (ParentId) REFERENCES categorydetail(Id)
 );
 
 -- 3.4 transactiontypeconfig
@@ -915,6 +929,16 @@ CREATE TABLE itemdetail (
     SKU          VARCHAR(50)    NULL,
     Barcode      VARCHAR(50)    NULL,
     HSNCode      VARCHAR(50)    NULL,
+    -- GST 9(5) bifurcation. Restaurant supply is a SERVICE; a sealed bottle of
+    -- water sold alongside it is GOODS, and the two attract different treatment
+    -- on the SAME bill. Without this the receipt cannot split them and the
+    -- return is filed by hand. GOODS | SERVICE — constrained in Joi, not by an
+    -- ENUM, so the vocabulary can grow without a schema rebuild.
+    SupplyType   VARCHAR(10)    NOT NULL DEFAULT 'GOODS',
+    -- HSN codes goods, SAC codes services. An item carries whichever its
+    -- SupplyType calls for; neither is required, because a tenant not filing
+    -- GST needs neither.
+    SACCode      VARCHAR(50)    NULL,
     TenantId     VARCHAR(50)    NOT NULL,
     Active       TINYINT(1)     NOT NULL,
     CreatedOn    DATETIME,
@@ -1220,7 +1244,14 @@ CREATE TABLE paymentbreakup (
     Id                             VARCHAR(50)   NOT NULL,
     AccountTypeBaseId              VARCHAR(50)   NOT NULL,
     PaymentDetailId                VARCHAR(50)   NOT NULL,
-    PaymentModeTransactionDetailId VARCHAR(100)  NOT NULL,
+    -- 50, matching paymentmodetransactiondetail.Id and every other id in this
+    -- schema. It was VARCHAR(100) against a VARCHAR(50) parent: MySQL accepts
+    -- the constraint, but a value longer than 50 could be written here and
+    -- could never match a parent row, so the FK silently stopped meaning what
+    -- it says. Joi and Swagger both already required a uuid (36 chars), so
+    -- nothing was ever writing anything longer — the width was an oversight,
+    -- not a capability anything used.
+    PaymentModeTransactionDetailId VARCHAR(50)   NOT NULL,
     PaymentReceivedTypeId          VARCHAR(50)   NOT NULL,
     -- Without this a split settlement could not be recorded at all: the table
     -- linked payment modes but had nowhere to store how much went to each, so
@@ -1414,6 +1445,143 @@ CREATE TABLE pos_food_type (
     UNIQUE (Code, TenantId)
 );
 
+-- 4.4c pos_meat_type — what KIND of meat, for portals that filter on it.
+-- ORTHOGONAL to pos_food_type, not an extension of it: a dish is Non-Veg (food
+-- type) AND Chicken (meat type). Collapsing the two loses one of them, and it
+-- is always the one a diner filtering for "no pork" needed.
+CREATE TABLE pos_meat_type (
+    Id              VARCHAR(50)   NOT NULL,
+    Name            VARCHAR(100)  NOT NULL,
+    Code            VARCHAR(50)   NOT NULL,
+    Description     VARCHAR(255)  NULL,
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Code, TenantId)
+);
+
+-- 4.4d pos_addon_group — a block of choices offered against a dish.
+--
+-- An ADD-ON IS NOT A VARIANT. A variant REPLACES the item's price (Half/Full);
+-- an add-on AUGMENTS it (extra cheese) and carries selection rules of its own.
+-- Modelling add-ons as variants is the single most common way a portal
+-- integration goes wrong, because the portal validates quantity against
+-- Min/MaxSelection and a variant has no such pair to validate against.
+CREATE TABLE pos_addon_group (
+    Id              VARCHAR(50)   NOT NULL,
+    Name            VARCHAR(100)  NOT NULL,
+    Code            VARCHAR(50)   NOT NULL,
+    Description     VARCHAR(255)  NULL,
+    -- MinSelection > 0 makes the group mandatory. The PAIR is what an inbound
+    -- order line is checked against, so both are NOT NULL with sane defaults
+    -- rather than nullable "unlimited" sentinels nothing can validate.
+    MinSelection    INT           NOT NULL DEFAULT 0,
+    MaxSelection    INT           NOT NULL DEFAULT 1,
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Code, TenantId)
+);
+
+-- 4.4e pos_addon — one selectable option inside a group.
+CREATE TABLE pos_addon (
+    Id              VARCHAR(50)   NOT NULL,
+    AddonGroupId    VARCHAR(50)   NOT NULL,
+    Name            VARCHAR(100)  NOT NULL,
+    Code            VARCHAR(50)   NOT NULL,
+    Price           DECIMAL(18,4) NOT NULL DEFAULT 0,
+    -- Dietary tag on the ADD-ON ITSELF, reusing the existing food type master
+    -- rather than inventing a second veg flag beside it. A veg pizza with a
+    -- chicken topping is not a veg order, and only this column can say so.
+    FoodTypeId      VARCHAR(50)   NULL,
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Code, TenantId),
+    FOREIGN KEY (AddonGroupId) REFERENCES pos_addon_group(Id) ON DELETE CASCADE,
+    FOREIGN KEY (FoodTypeId)   REFERENCES pos_food_type(Id)
+);
+
+-- 4.4f pos_menu_tag — one taxonomy, three uses.
+-- TagType separates CATEGORY / BEVERAGE / CUISINE tags. A table per tag kind is
+-- how a taxonomy becomes three half-maintained tables that disagree.
+CREATE TABLE pos_menu_tag (
+    Id              VARCHAR(50)   NOT NULL,
+    Name            VARCHAR(100)  NOT NULL,
+    Code            VARCHAR(50)   NOT NULL,
+    TagType         VARCHAR(20)   NOT NULL DEFAULT 'CATEGORY',
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (Code, TenantId)
+);
+
+-- 4.4g pos_category_schedule — when a category is on the menu.
+--
+-- Day and time live in ONE ROW on purpose. A portal sends a timing as a single
+-- rule ("Sat 18:00–23:00"); splitting the day list and the time list into two
+-- tables makes every read a cross-product and every write ambiguous about which
+-- time belongs to which day.
+--
+-- A category with NO rows is available ALWAYS. That is the default and must
+-- stay the default — the alternative is that adding this table silently
+-- removes every existing category from every menu.
+CREATE TABLE pos_category_schedule (
+    Id              VARCHAR(50)   NOT NULL,
+    CategoryId      VARCHAR(50)   NOT NULL,
+    -- 0 = Sunday … 6 = Saturday, matching JS getDay() so no translation layer
+    -- sits between the browser and the row.
+    DayOfWeek       TINYINT       NOT NULL,
+    StartTime       TIME          NOT NULL,
+    EndTime         TIME          NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (CategoryId, DayOfWeek, StartTime, TenantId),
+    FOREIGN KEY (CategoryId) REFERENCES categorydetail(Id) ON DELETE CASCADE
+);
+
+-- 4.4h pos_category_tag — join: tags on a category.
+CREATE TABLE pos_category_tag (
+    Id              VARCHAR(50)   NOT NULL,
+    CategoryId      VARCHAR(50)   NOT NULL,
+    TagId           VARCHAR(50)   NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (CategoryId, TagId, TenantId),
+    FOREIGN KEY (CategoryId) REFERENCES categorydetail(Id) ON DELETE CASCADE,
+    FOREIGN KEY (TagId)      REFERENCES pos_menu_tag(Id)
+);
+
 -- 4.5 pos_item_meta — POS-only extensions for a master itemdetail record.
 -- Channels/Variants live in normalized join tables; price references a costinfo
 -- master row via CostInfoId; FoodType references the pos_food_type master.
@@ -1426,6 +1594,16 @@ CREATE TABLE pos_item_meta (
     Channels        JSON          NULL,
     Prices          JSON          NULL,
     Variants        JSON          NULL,
+    -- What the dish IS, beyond its price. Portals show all three on the card.
+    -- ServesCount is a count of people, PortionSize the free-text measure
+    -- ("350 ml", "12 pieces") — they answer different questions and a single
+    -- column would have to lie about one of them.
+    ServesCount     TINYINT       NULL,
+    PortionSize     VARCHAR(50)   NULL,
+    MeatTypeId      VARCHAR(50)   NULL,
+    -- Kitchen Preparation Time for THIS dish, in minutes. The order-level KPT
+    -- sent to a portal is derived from the slowest line, not stored twice.
+    PrepTimeMinutes INT           NULL,
     BranchDetailId  VARCHAR(50)   NOT NULL,
     TenantId        VARCHAR(50)   NOT NULL,
     Active          TINYINT(1)    NOT NULL,
@@ -1437,6 +1615,7 @@ CREATE TABLE pos_item_meta (
     UNIQUE (ItemDetailId, BranchDetailId, TenantId),
     FOREIGN KEY (ItemDetailId)   REFERENCES itemdetail(Id),
     FOREIGN KEY (FoodTypeId)     REFERENCES pos_food_type(Id),
+    FOREIGN KEY (MeatTypeId)     REFERENCES pos_meat_type(Id),
     FOREIGN KEY (CostInfoId)     REFERENCES costinfo(Id)
 );
 
@@ -1472,6 +1651,77 @@ CREATE TABLE pos_item_meta_variant (
     UNIQUE (ItemMetaId, VariantId, TenantId),
     FOREIGN KEY (ItemMetaId) REFERENCES pos_item_meta(Id) ON DELETE CASCADE,
     FOREIGN KEY (VariantId)  REFERENCES pos_variant(Id)
+);
+
+-- 4.7b pos_item_meta_addon_group — join: which choice blocks apply to a dish.
+CREATE TABLE pos_item_meta_addon_group (
+    Id              VARCHAR(50)   NOT NULL,
+    ItemMetaId      VARCHAR(50)   NOT NULL,
+    AddonGroupId    VARCHAR(50)   NOT NULL,
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (ItemMetaId, AddonGroupId, TenantId),
+    FOREIGN KEY (ItemMetaId)   REFERENCES pos_item_meta(Id) ON DELETE CASCADE,
+    FOREIGN KEY (AddonGroupId) REFERENCES pos_addon_group(Id)
+);
+
+-- 4.7c pos_item_meta_tag — join: tags on a menu item.
+CREATE TABLE pos_item_meta_tag (
+    Id              VARCHAR(50)   NOT NULL,
+    ItemMetaId      VARCHAR(50)   NOT NULL,
+    TagId           VARCHAR(50)   NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (ItemMetaId, TagId, TenantId),
+    FOREIGN KEY (ItemMetaId) REFERENCES pos_item_meta(Id) ON DELETE CASCADE,
+    FOREIGN KEY (TagId)      REFERENCES pos_menu_tag(Id)
+);
+
+-- 4.7d pos_item_nutrition — per-item nutrition, for compliance.
+--
+-- Its OWN TABLE rather than ten more columns on pos_item_meta: the data is
+-- sparse (most tenants will never fill it), pos_item_meta is already the widest
+-- POS table, and a compliance schema only ever grows. One LEFT JOIN in the menu
+-- read path is the whole cost.
+--
+-- 1:1 with the item — UNIQUE (ItemMetaId, TenantId), not a history.
+CREATE TABLE pos_item_nutrition (
+    Id              VARCHAR(50)   NOT NULL,
+    ItemMetaId      VARCHAR(50)   NOT NULL,
+    -- The basis every other figure is measured against. Without it a calorie
+    -- count means nothing, so a portal that shows calories asks for both.
+    ServingSizeG    DECIMAL(10,2) NULL,
+    Calories        DECIMAL(10,2) NULL,
+    ProteinG        DECIMAL(10,2) NULL,
+    CarbohydrateG   DECIMAL(10,2) NULL,
+    SugarG          DECIMAL(10,2) NULL,
+    FatG            DECIMAL(10,2) NULL,
+    SaturatedFatG   DECIMAL(10,2) NULL,
+    FibreG          DECIMAL(10,2) NULL,
+    SodiumMg        DECIMAL(10,2) NULL,
+    -- Free text on purpose. Allergen vocabularies differ by jurisdiction and a
+    -- fixed list here would be wrong somewhere the day it shipped.
+    Allergens       VARCHAR(500)  NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (ItemMetaId, TenantId),
+    FOREIGN KEY (ItemMetaId) REFERENCES pos_item_meta(Id) ON DELETE CASCADE
 );
 
 -- 4.8 pos_customer — walk-in / loyalty customers
@@ -1596,6 +1846,15 @@ CREATE TABLE pos_kot (
     OrderId         VARCHAR(50)   NULL,
     TableId         VARCHAR(50)   NULL,
     Items           JSON          NULL,
+    -- What the customer asked the KITCHEN for, SNAPSHOTTED at fire time for the
+    -- same reason Items is: the ticket records what the kitchen was told, which
+    -- is not the same thing as what the order says an hour later. Reading these
+    -- live would let an edit rewrite a ticket already on the pass.
+    CookingInstructions VARCHAR(500) NULL,
+    -- A flag, not a phrase to grep for. Packers act on it without reading
+    -- prose, and "no cutlery" buried in a sentence is how a fork ends up in
+    -- the bag anyway.
+    NoCutlery       TINYINT(1)    NOT NULL DEFAULT 0,
     Status          VARCHAR(20)   NOT NULL DEFAULT 'pending',
     FiredAt         DATETIME      NULL,
     BranchDetailId  VARCHAR(50)   NULL,
@@ -1798,6 +2057,68 @@ CREATE TABLE pos_portal_listing (
     FOREIGN KEY (PriceOverrideCostInfoId) REFERENCES costinfo(Id)
 );
 
+-- 4.12e-1 pos_portal_listing_variant — one SIZE of one dish, as one portal lists it.
+--
+-- pos_portal_listing.Available is keyed to the ITEM, so "large is sold out,
+-- regular is not" could not be said at all. This is the same table one level
+-- down, and it earns its place twice: ExternalVariantId is also how an inbound
+-- order line resolves which size was ordered.
+CREATE TABLE pos_portal_listing_variant (
+    Id                VARCHAR(50)   NOT NULL,
+    ListingId         VARCHAR(50)   NOT NULL,
+    VariantId         VARCHAR(50)   NOT NULL,
+    ExternalVariantId VARCHAR(100)  NULL,
+    -- NULL inherits pos_variant.Price, exactly as the parent listing's NULL
+    -- inherits the branch price.
+    PriceOverride     DECIMAL(18,4) NULL,
+    Available         TINYINT(1)    NOT NULL DEFAULT 1,
+    SortOrder         INT           NOT NULL DEFAULT 0,
+    LastSyncedOn      DATETIME      NULL,
+    SyncStatus        VARCHAR(20)   NOT NULL DEFAULT 'pending',
+    SyncError         VARCHAR(500)  NULL,
+    TenantId          VARCHAR(50)   NOT NULL,
+    Active            TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn         DATETIME,
+    CreatedBy         VARCHAR(50),
+    UpdatedOn         DATETIME,
+    UpdatedBy         VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (ListingId, VariantId, TenantId),
+    INDEX idx_posportallistingvariant_ext (TenantId, ExternalVariantId),
+    FOREIGN KEY (ListingId) REFERENCES pos_portal_listing(Id) ON DELETE CASCADE,
+    FOREIGN KEY (VariantId) REFERENCES pos_variant(Id)
+);
+
+-- 4.12e-2 pos_portal_category — one category, as one portal lists it.
+--
+-- Two jobs: ExternalCategoryId is how pushMenu() addresses a category by the
+-- portal's own id, and Available is category-level out-of-stock — taking a
+-- whole section off the menu for the evening without touching a single dish.
+CREATE TABLE pos_portal_category (
+    Id                 VARCHAR(50)  NOT NULL,
+    PortalId           VARCHAR(50)  NOT NULL,
+    CategoryId         VARCHAR(50)  NOT NULL,
+    ExternalCategoryId VARCHAR(100) NULL,
+    -- NULL means "as the category is named with us", matching how
+    -- pos_portal_listing.ListedName behaves.
+    ListedName         VARCHAR(255) NULL,
+    Available          TINYINT(1)   NOT NULL DEFAULT 1,
+    SortOrder          INT          NOT NULL DEFAULT 0,
+    LastSyncedOn       DATETIME     NULL,
+    SyncStatus         VARCHAR(20)  NOT NULL DEFAULT 'pending',
+    SyncError          VARCHAR(500) NULL,
+    TenantId           VARCHAR(50)  NOT NULL,
+    Active             TINYINT(1)   NOT NULL DEFAULT 1,
+    CreatedOn          DATETIME,
+    CreatedBy          VARCHAR(50),
+    UpdatedOn          DATETIME,
+    UpdatedBy          VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE (PortalId, CategoryId, TenantId),
+    FOREIGN KEY (PortalId)   REFERENCES pos_portal(Id) ON DELETE CASCADE,
+    FOREIGN KEY (CategoryId) REFERENCES categorydetail(Id) ON DELETE CASCADE
+);
+
 -- 4.12f pos_portal_credential — per-portal secrets.
 --
 -- Its own table rather than pos_setting because these are secrets: the read
@@ -1858,6 +2179,44 @@ CREATE TABLE pos_portal_event (
     PRIMARY KEY (Id),
     UNIQUE (PortalId, ExternalRef, EventType, PayloadHash, TenantId),
     INDEX idx_posportalevent_status (TenantId, ProcessingStatus),
+    FOREIGN KEY (PortalId) REFERENCES pos_portal(Id) ON DELETE CASCADE
+);
+
+-- 4.12h pos_rejection_reason — why an order was refused, in a controlled vocabulary.
+--
+-- CancelReason was free text, so "why did we reject 40 orders last week" could
+-- only be answered by reading 40 sentences. pos_return_reason already proves the
+-- pattern; this is its sibling for portal rejections, which use a DIFFERENT
+-- vocabulary — a return happens after the food was made, a rejection instead of
+-- making it.
+CREATE TABLE pos_rejection_reason (
+    Id              VARCHAR(50)   NOT NULL,
+    Name            VARCHAR(100)  NOT NULL,
+    Code            VARCHAR(50)   NOT NULL,
+    -- The PORTAL's own code for this reason. Zomato will not accept ours, and
+    -- switching on a portal's NAME in the reject path is precisely what the
+    -- adapter pattern exists to prevent. NULL = not mapped to this portal.
+    ExternalCode    VARCHAR(50)   NULL,
+    -- NULL = a house reason available on every portal. Set = portal-specific.
+    PortalId        VARCHAR(50)   NULL,
+    -- An item-out-of-stock rejection MUST name the items. This flag is what the
+    -- UI reads to force an item picker, and what the service enforces before it
+    -- will let the rejection through.
+    RequiresItems   TINYINT(1)    NOT NULL DEFAULT 0,
+    Description     VARCHAR(255)  NULL,
+    SortOrder       INT           NOT NULL DEFAULT 0,
+    TenantId        VARCHAR(50)   NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    -- PortalId participates so the same house code can carry a different
+    -- ExternalCode per portal. NULLs being distinct is harmless here: a
+    -- duplicate house reason is a data-entry annoyance, not a correctness bug,
+    -- and the service checks for it on write.
+    UNIQUE (Code, PortalId, TenantId),
     FOREIGN KEY (PortalId) REFERENCES pos_portal(Id) ON DELETE CASCADE
 );
 
@@ -1925,7 +2284,24 @@ CREATE TABLE pos_online_order (
     DeliveredOn     DATETIME      NULL,
     RiderName       VARCHAR(100)  NULL,
     RiderPhone      VARCHAR(30)   NULL,
+    -- Kitchen Preparation Time as WE committed it, and when we said it.
+    -- Distinct from PromisedOn, which is the PORTAL's delivery SLA: one is our
+    -- promise about the kitchen, the other theirs about the doorstep, and a
+    -- merchant rating is scored on the first.
+    KptMinutes      INT           NULL,
+    KptSetOn        DATETIME      NULL,
+    -- Promoted OUT of the raw Payload so the KOT writer can reach them without
+    -- knowing any portal's payload shape. The data always arrived; nothing
+    -- downstream could read it, so the kitchen never saw it.
+    CookingInstructions VARCHAR(500) NULL,
+    NoCutlery       TINYINT(1)    NOT NULL DEFAULT 0,
     CancelReason    VARCHAR(255)  NULL,
+    -- The coded reason, where CancelReason is the free-text remainder. Both
+    -- kept: the code is what reports group on, the text what a human added.
+    RejectionReasonId VARCHAR(50) NULL,
+    -- Which lines caused it, for a reason whose RequiresItems is set. A JSON
+    -- array of ItemMetaIds — the portal needs the ids, not the names.
+    RejectedItemIds JSON          NULL,
     CancelledBy     VARCHAR(50)   NULL,
     BranchDetailId  VARCHAR(50)   NULL,
     TenantId        VARCHAR(50)   NOT NULL,
@@ -1942,7 +2318,8 @@ CREATE TABLE pos_online_order (
     INDEX idx_posonlineorder_queue (TenantId, Status, BranchDetailId),
     FOREIGN KEY (PortalId)       REFERENCES pos_portal(Id),
     FOREIGN KEY (PortalBranchId) REFERENCES pos_portal_branch(Id),
-    FOREIGN KEY (OrderId)        REFERENCES pos_order(Id)
+    FOREIGN KEY (OrderId)        REFERENCES pos_order(Id),
+    FOREIGN KEY (RejectionReasonId) REFERENCES pos_rejection_reason(Id)
 );
 
 -- 4.14 pos_token — counter-service queue number

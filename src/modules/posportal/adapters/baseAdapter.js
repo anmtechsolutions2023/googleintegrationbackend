@@ -145,6 +145,20 @@ const emptyInboundOrder = () => ({
   prepaid: true,
   status: null,
   customer: { name: null, maskedPhone: null, externalCustomerRef: null },
+  // What the customer asked the KITCHEN for, as opposed to what they ordered.
+  //
+  // Promoted to first-class fields on the contract rather than left inside the
+  // raw payload: the data always arrived, but nothing downstream could reach it
+  // without knowing one portal's payload shape, so the kitchen never saw it —
+  // which is the entire point of a cooking instruction.
+  //
+  // Per-LINE instructions ride on each line's `notes`, already part of the
+  // contract. This pair is the order-level equivalent.
+  cookingInstructions: null,
+  // Its own boolean, not a phrase to grep for in the instructions. Portals send
+  // it as a flag, packers act on it without reading prose, and "no cutlery"
+  // buried in a sentence is how a plastic fork ends up in the bag anyway.
+  noCutlery: false,
   lines: [],
   totals: {
     items: 0, portalDiscount: 0, packing: 0, delivery: 0,

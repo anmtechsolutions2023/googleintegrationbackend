@@ -5,6 +5,7 @@
 // somebody back to a spreadsheet to guess.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { IMPORT } = require('../../config/constants');
 
 const trimmed = (max) => Joi.string().trim().max(max);
@@ -62,10 +63,10 @@ const importItemsSchema = Joi.object({
 // Publishing to a branch. Takes item NAMES rather than ids so the same file
 // drives this pass without a lookup step in the browser.
 const importMenuSchema = Joi.object({
-  branchDetailId: Joi.string().uuid().required(),
+  branchDetailId: entityId.required(),
   defaultFoodType: trimmed(50).default('VEG'),
-  channelIds: Joi.array().items(Joi.string().uuid()).default([]),
-  variantIds: Joi.array().items(Joi.string().uuid()).default([]),
+  channelIds: Joi.array().items(entityId).default([]),
+  variantIds: Joi.array().items(entityId).default([]),
   items: Joi.array().items(Joi.object({
     name: trimmed(200).required(),
     foodType: trimmed(50).allow('', null),

@@ -62,6 +62,12 @@ const poschannelRoutes = require('../modules/poschannel/poschannel.routes');
 const posreturnreasonRoutes = require('../modules/posreturnreason/posreturnreason.routes');
 const posvariantRoutes = require('../modules/posvariant/posvariant.routes');
 const posfoodtypeRoutes = require('../modules/posfoodtype/posfoodtype.routes');
+const posmeattypeRoutes = require('../modules/posmeattype/posmeattype.routes');
+const posmenutagRoutes = require('../modules/posmenutag/posmenutag.routes');
+const posaddongroupRoutes = require('../modules/posaddongroup/posaddongroup.routes');
+const posaddonRoutes = require('../modules/posaddon/posaddon.routes');
+const posrejectionreasonRoutes = require('../modules/posrejectionreason/posrejectionreason.routes');
+const poscategoryscheduleRoutes = require('../modules/poscategoryschedule/poscategoryschedule.routes');
 const poscustomerRoutes = require('../modules/poscustomer/poscustomer.routes');
 const loyaltyRoutes = require('../modules/loyalty/loyalty.routes');
 const posorderRoutes = require('../modules/posorder/posorder.routes');
@@ -264,6 +270,16 @@ const registerRoutes = (app) => {
   app.use('/api/pos/return-reasons', posreturnreasonRoutes);
   app.use('/api/pos/variants', posvariantRoutes);
   app.use('/api/pos/food-types', posfoodtypeRoutes);
+  // Portal menu masters — what a dish IS beyond its price, and why an order
+  // was refused. All POS reference data: read broadly, written by POS_CONFIG.
+  app.use('/api/pos/meat-types', posmeattypeRoutes);
+  app.use('/api/pos/menu-tags', posmenutagRoutes);
+  app.use('/api/pos/addon-groups', posaddongroupRoutes);
+  app.use('/api/pos/addons', posaddonRoutes);
+  app.use('/api/pos/rejection-reasons', posrejectionreasonRoutes);
+  // When a category is on the menu. Day and time in one rule; no rules at all
+  // means always available, which is the default every existing category keeps.
+  app.use('/api/pos/category-schedules', poscategoryscheduleRoutes);
   app.use('/api/pos/customers', poscustomerRoutes);
   app.use('/api/pos/loyalty', loyaltyRoutes);
   app.use('/api/pos/orders', posorderRoutes);

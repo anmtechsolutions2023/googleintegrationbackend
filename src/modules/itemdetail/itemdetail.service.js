@@ -37,6 +37,10 @@ class ItemDetailService extends BaseCRUDService {
       data.SKU || null,
       data.Barcode || null,
       data.HSNCode || null,
+      // GST 9(5): restaurant supply is a SERVICE, a sealed bottle sold beside it
+      // is GOODS, and the two are taxed differently on the same bill.
+      data.SupplyType || 'GOODS',
+      data.SACCode || null,
       data.Active !== undefined ? data.Active : true,
       userPhone,
       userPhone,
@@ -54,6 +58,8 @@ class ItemDetailService extends BaseCRUDService {
       data.SKU !== undefined ? data.SKU : existing.SKU,
       data.Barcode !== undefined ? data.Barcode : existing.Barcode,
       data.HSNCode !== undefined ? data.HSNCode : existing.HSNCode,
+      data.SupplyType !== undefined ? data.SupplyType : existing.SupplyType,
+      data.SACCode !== undefined ? data.SACCode : existing.SACCode,
       data.Active !== undefined ? data.Active : existing.Active,
       userPhone,
       id,

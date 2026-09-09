@@ -2,6 +2,7 @@
 // Joi validation for the portal master, its store mappings and its listings.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const {
   POS_PORTAL_ADAPTERS,
   POS_PORTAL_SYNC_STATUSES,
@@ -27,13 +28,13 @@ const createSchema = Joi.object({
   Name: Joi.string().max(100).trim().required(),
   Code: Joi.string().max(50).trim().uppercase().required(),
   // Defaulted to the tenant's ONLINE channel by the service when omitted.
-  ChannelId: Joi.string().uuid().optional().allow(null),
+  ChannelId: entityId.optional().allow(null),
   Adapter: adapterField.optional().default('manual'),
   ColorHex: colorField.optional().allow(null, ''),
   ShortCode: shortCodeField.optional().allow(null, ''),
   CommissionPct: Joi.number().min(0).max(100).precision(3).optional().default(0),
-  CommissionAccountTypeBaseId: Joi.string().uuid().optional().allow(null),
-  SettlementPaymentModeId: Joi.string().uuid().optional().allow(null),
+  CommissionAccountTypeBaseId: entityId.optional().allow(null),
+  SettlementPaymentModeId: entityId.optional().allow(null),
   SortOrder: Joi.number().integer().optional().default(0),
   Active: Joi.boolean().optional().default(true),
 });
@@ -41,13 +42,13 @@ const createSchema = Joi.object({
 const updateSchema = Joi.object({
   Name: Joi.string().max(100).trim().optional(),
   Code: Joi.string().max(50).trim().uppercase().optional(),
-  ChannelId: Joi.string().uuid().optional().allow(null),
+  ChannelId: entityId.optional().allow(null),
   Adapter: adapterField.optional(),
   ColorHex: colorField.optional().allow(null, ''),
   ShortCode: shortCodeField.optional().allow(null, ''),
   CommissionPct: Joi.number().min(0).max(100).precision(3).optional(),
-  CommissionAccountTypeBaseId: Joi.string().uuid().optional().allow(null),
-  SettlementPaymentModeId: Joi.string().uuid().optional().allow(null),
+  CommissionAccountTypeBaseId: entityId.optional().allow(null),
+  SettlementPaymentModeId: entityId.optional().allow(null),
   SortOrder: Joi.number().integer().optional(),
   Active: Joi.boolean().optional(),
   // Read-only columns the list view joins in. An edit form is seeded from a GET,
@@ -75,8 +76,8 @@ const credentialSchema = Joi.object({
 // ── Store mappings ──────────────────────────────────────────────────────────
 
 const branchCreateSchema = Joi.object({
-  PortalId: Joi.string().uuid().required(),
-  BranchDetailId: Joi.string().uuid().required(),
+  PortalId: entityId.required(),
+  BranchDetailId: entityId.required(),
   ExternalStoreId: Joi.string().max(100).trim().optional().allow(null, ''),
   IsOnline: Joi.boolean().optional().default(true),
   PausedUntil: Joi.date().optional().allow(null),
@@ -85,8 +86,8 @@ const branchCreateSchema = Joi.object({
 });
 
 const branchUpdateSchema = Joi.object({
-  PortalId: Joi.string().uuid().optional(),
-  BranchDetailId: Joi.string().uuid().optional(),
+  PortalId: entityId.optional(),
+  BranchDetailId: entityId.optional(),
   ExternalStoreId: Joi.string().max(100).trim().optional().allow(null, ''),
   IsOnline: Joi.boolean().optional(),
   PausedUntil: Joi.date().optional().allow(null),
@@ -110,13 +111,13 @@ const setOnlineSchema = Joi.object({
 // ── Listings ────────────────────────────────────────────────────────────────
 
 const listingCreateSchema = Joi.object({
-  PortalId: Joi.string().uuid().required(),
-  ItemMetaId: Joi.string().uuid().required(),
+  PortalId: entityId.required(),
+  ItemMetaId: entityId.required(),
   ExternalItemId: Joi.string().max(100).trim().optional().allow(null, ''),
   ListedName: Joi.string().max(255).trim().optional().allow(null, ''),
   ListedDescription: Joi.string().max(1000).trim().optional().allow(null, ''),
   // A costinfo row, never a bare price — see posportal.pricing.js.
-  PriceOverrideCostInfoId: Joi.string().uuid().optional().allow(null),
+  PriceOverrideCostInfoId: entityId.optional().allow(null),
   Available: Joi.boolean().optional().default(true),
   SortOrder: Joi.number().integer().optional().default(0),
   Active: Joi.boolean().optional().default(true),
@@ -126,7 +127,7 @@ const listingUpdateSchema = Joi.object({
   ExternalItemId: Joi.string().max(100).trim().optional().allow(null, ''),
   ListedName: Joi.string().max(255).trim().optional().allow(null, ''),
   ListedDescription: Joi.string().max(1000).trim().optional().allow(null, ''),
-  PriceOverrideCostInfoId: Joi.string().uuid().optional().allow(null),
+  PriceOverrideCostInfoId: entityId.optional().allow(null),
   Available: Joi.boolean().optional(),
   SortOrder: Joi.number().integer().optional(),
   SyncStatus: Joi.string().valid(...POS_PORTAL_SYNC_STATUSES).optional(),
@@ -156,7 +157,7 @@ const listingUpdateSchema = Joi.object({
 // The operation the listings screen exists for: 200 dishes across 3 portals is
 // 600 decisions, and a PUT per row is not a workflow.
 const bulkAvailabilitySchema = Joi.object({
-  ListingIds: Joi.array().items(Joi.string().uuid()).min(1).max(500).required(),
+  ListingIds: Joi.array().items(entityId).min(1).max(500).required(),
   Available: Joi.boolean().required(),
 });
 
@@ -167,7 +168,7 @@ const paginationSchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

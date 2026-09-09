@@ -31,9 +31,15 @@
 --   PART 11 — Accounting ledger masters + document numbering series
 --             (POS_SALE, EXPENSE, POS_ORDER, POS_KOT, POS_BILL, POS_TOKEN)
 --   PART 12 — POS food types (Veg / Vegan / Non-Veg)
+--   PART 13 — Portal menu masters: meat types (7), menu tags (12 across
+--             CATEGORY/BEVERAGE/CUISINE), rejection reasons (6)
 --
--- Verified against an empty database: 39 statements, 29 features, 11 roles,
--- 133 role permissions, 7 numbering series.
+-- Verified against an empty database: 50 statements, 29 features, 12 roles,
+-- 161 role permissions, 7 numbering series.
+--
+-- (Role and permission counts corrected 6 Sep 2026: the previous "11 roles,
+-- 133 role permissions" predated the OWNER_OPERATOR merge from the old
+-- 03-*.sql and had been stale since. Re-measured against a fresh build.)
 --
 -- 133, down from 210: PARTs 8b/8c/8d used to grant every role in the tenancy
 -- READ on all twelve categories plus AUDIT and ASSET, which left a POS_CASHIER
@@ -934,6 +940,55 @@ INSERT IGNORE INTO pos_food_type (Id, Name, Code, Description, SortOrder, IsVeg,
     ('f0000001-ftyp-0000-0000-000000000001', 'Veg',     'VEG',    'Vegetarian',                        1, 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
     ('f0000001-ftyp-0000-0000-000000000002', 'Vegan',   'VEGAN',  'No animal produce of any kind',     2, 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
     ('f0000001-ftyp-0000-0000-000000000003', 'Non-Veg', 'NONVEG', 'Contains meat, fish or egg',        3, 0, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
+-- =============================================================================
+-- PART 13 — Portal menu masters (meat types, menu tags, rejection reasons)
+-- =============================================================================
+-- The three masters an aggregator menu needs beyond the food type above. All
+-- mirrored per-tenant in modules/mastersetup/posMasters.provision.js.
+
+-- 13a) Meat types. ORTHOGONAL to food type: a dish is Non-Veg AND Chicken.
+-- Portals filter on this, and a diner avoiding pork is filtering on nothing
+-- else — 'Non-Veg' alone cannot answer them.
+INSERT IGNORE INTO pos_meat_type (Id, Name, Code, Description, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('h0000001-mtyp-0000-0000-000000000001', 'Chicken',   'CHICKEN', 'Poultry',                    1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('h0000001-mtyp-0000-0000-000000000002', 'Mutton',    'MUTTON',  'Goat or lamb',               2, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('h0000001-mtyp-0000-0000-000000000003', 'Beef',      'BEEF',    'Beef and veal',              3, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('h0000001-mtyp-0000-0000-000000000004', 'Pork',      'PORK',    'Pork and pork products',     4, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('h0000001-mtyp-0000-0000-000000000005', 'Fish',      'FISH',    'Finned fish',                5, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('h0000001-mtyp-0000-0000-000000000006', 'Shellfish', 'SHELLFISH', 'Prawn, crab, squid, clam', 6, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('h0000001-mtyp-0000-0000-000000000007', 'Egg',       'EGG',     'Egg as the primary protein', 7, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
+-- 13b) Menu tags. One master, three TagTypes — CATEGORY, BEVERAGE, CUISINE.
+INSERT IGNORE INTO pos_menu_tag (Id, Name, Code, TagType, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('j0000001-mtag-0000-0000-000000000001', 'Starter',      'STARTER',    'CATEGORY', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000002', 'Main Course',  'MAIN',       'CATEGORY', 2, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000003', 'Dessert',      'DESSERT',    'CATEGORY', 3, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000004', 'Bread',        'BREAD',      'CATEGORY', 4, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000005', 'Soft Drink',   'SOFTDRINK',  'BEVERAGE', 5, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000006', 'Juice',        'JUICE',      'BEVERAGE', 6, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000007', 'Hot Beverage', 'HOTBEV',     'BEVERAGE', 7, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000008', 'Shake',        'SHAKE',      'BEVERAGE', 8, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000009', 'North Indian', 'NORTHIND',   'CUISINE',  9, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000010', 'South Indian', 'SOUTHIND',   'CUISINE', 10, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000011', 'Chinese',      'CHINESE',    'CUISINE', 11, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('j0000001-mtag-0000-0000-000000000012', 'Continental',  'CONTINENTAL','CUISINE', 12, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+
+-- 13c) Rejection reasons — HOUSE reasons, PortalId NULL, available everywhere.
+--
+-- ExternalCode is deliberately NULL on every row. Each portal publishes its own
+-- reason codes and inventing them here would push wrong values to a live API on
+-- the first rejection. They are filled in during certification, per portal.
+--
+-- ITEM_OOS carries RequiresItems = 1: the portal needs to know WHICH dish ran
+-- out, and a rejection that cannot say so is refused by the service.
+INSERT IGNORE INTO pos_rejection_reason (Id, Name, Code, ExternalCode, PortalId, RequiresItems, Description, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('k0000001-rjsn-0000-0000-000000000001', 'Item out of stock',     'ITEM_OOS',          NULL, NULL, 1, 'One or more dishes cannot be made right now', 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('k0000001-rjsn-0000-0000-000000000002', 'Kitchen at capacity',   'KITCHEN_FULL',      NULL, NULL, 0, 'The kitchen cannot take another order right now', 2, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('k0000001-rjsn-0000-0000-000000000003', 'Outlet closed',         'OUTLET_CLOSED',     NULL, NULL, 0, 'Order arrived outside trading hours', 3, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('k0000001-rjsn-0000-0000-000000000004', 'Outside delivery area', 'OUT_OF_AREA',       NULL, NULL, 0, 'Address is beyond the branch delivery radius', 4, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('k0000001-rjsn-0000-0000-000000000005', 'No rider available',    'RIDER_UNAVAILABLE', NULL, NULL, 0, 'No delivery partner could be assigned', 5, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('k0000001-rjsn-0000-0000-000000000006', 'Other',                 'OTHER',             NULL, NULL, 0, 'Use the note to say what happened', 6, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
 
 -- =============================================================================
 -- TENANT SETUP STATE (first-time setup wizard gate)

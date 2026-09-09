@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif; }
+    a { color: #2980b9; } a:hover { color: #0f3460; }
+    .rc { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #000000; }
+    .solid { border-top: 1px dashed #000000; margin: 7px 0; }
+  </style>
+</helmet>
+
+<div style="width: 720px; min-height: 940px; background: #f5f7fa; padding: 28px 32px;">
+
+  <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 4px;">Front Desk › Kitchen ticket</div>
+  <h1 style="margin: 0 0 6px; font-size: 22px; font-weight: 600; color: #2c3e50;">What the kitchen now sees</h1>
+  <p style="margin: 0 0 22px; font-size: 13px; line-height: 1.6; color: #5a6c7d; max-width: 60ch;">
+    The instruction always arrived from Zomato. Nothing carried it to the pass, so the kitchen never saw it. Now it prints.
+  </p>
+
+  <div style="display: flex; gap: 22px; align-items: flex-start;">
+
+    <!-- The ticket -->
+    <div style="flex: none; width: 300px; background: #ffffff; border: 1px solid #d0d4da; border-radius: 4px; padding: 16px 18px; box-shadow: 0 1px 3px rgba(44,62,80,0.08);">
+      <div class="rc" style="text-align: center; font-size: 22px; font-weight: 700; background: #000000; color: #ffffff; padding: 4px 0; letter-spacing: 0.04em;">KOT-0087</div>
+
+      <div class="rc" style="display: flex; justify-content: space-between; font-size: 12px; margin-top: 8px;">
+        <span>ZOMATO</span><span>19:42</span>
+      </div>
+      <div class="rc" style="display: flex; justify-content: space-between; font-size: 12px; margin-top: 3px;">
+        <span>ORD-0142</span><span>18 MIN</span>
+      </div>
+
+      <div class="solid"></div>
+
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div>
+          <div class="rc" style="display: flex; gap: 9px; align-items: baseline;">
+            <span style="font-size: 24px; font-weight: 700; line-height: 1;">2</span>
+            <span style="font-size: 14px; font-weight: 600; letter-spacing: 0.02em;">BUTTER CHICKEN</span>
+          </div>
+          <div class="rc" style="font-size: 11px; padding-left: 12px; margin-top: 3px;">** FULL · EXTRA CHICKEN · NO ONIONS **</div>
+        </div>
+        <div>
+          <div class="rc" style="display: flex; gap: 9px; align-items: baseline;">
+            <span style="font-size: 24px; font-weight: 700; line-height: 1;">1</span>
+            <span style="font-size: 14px; font-weight: 600; letter-spacing: 0.02em;">GARLIC NAAN</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="solid"></div>
+
+      <div class="rc" style="text-align: center; font-size: 13px; font-weight: 700; padding: 4px 2px; line-height: 1.3;">
+        ** RING THE BELL TWICE. PLEASE MAKE IT EXTRA SPICY. **
+      </div>
+      <div class="rc" style="text-align: center; font-size: 13px; font-weight: 700; padding: 4px 2px; border: 2px solid #000000; margin-top: 3px; letter-spacing: 0.06em;">
+        ** NO CUTLERY **
+      </div>
+
+      <div class="rc" style="text-align: center; font-size: 11px; margin-top: 8px;">3 items</div>
+    </div>
+
+    <!-- Annotations -->
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 12px;">
+
+      <div style="background: #ffffff; border: 1px solid #e1e5eb; border-radius: 6px; padding: 15px 17px;">
+        <div style="font-size: 13px; font-weight: 600; color: #2c3e50; margin-bottom: 4px;">Per-dish notes stay with the dish</div>
+        <p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: #5a6c7d;">“No onions” belongs to the Butter Chicken, so it prints under that line — where the cook making it will read it.</p>
+      </div>
+
+      <div style="background: #ffffff; border: 1px solid #e1e5eb; border-radius: 6px; padding: 15px 17px;">
+        <div style="font-size: 13px; font-weight: 600; color: #2c3e50; margin-bottom: 4px;">Order-level instructions print below the items</div>
+        <p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: #5a6c7d;">Deliberately after the dishes: a cook reads <em>what to make</em> first, then how the customer wants the whole order treated.</p>
+      </div>
+
+      <div style="background: #ffffff; border: 1px solid #e1e5eb; border-radius: 6px; padding: 15px 17px;">
+        <div style="font-size: 13px; font-weight: 600; color: #2c3e50; margin-bottom: 4px;">“No cutlery” gets its own box</div>
+        <p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: #5a6c7d;">It is a flag, not a phrase to hunt for in a sentence — and it is acted on by whoever <strong style="color: #2c3e50;">bags</strong> the order, who is not reading the cooking notes above it.</p>
+      </div>
+
+      <div style="background: #f0f4f8; border: 1px solid #d0d4da; border-radius: 6px; padding: 15px 17px;">
+        <div style="font-size: 13px; font-weight: 600; color: #2c3e50; margin-bottom: 4px;">You control what prints</div>
+        <p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: #5a6c7d;">Both lines are switches on <strong style="color: #2c3e50;">Receipt Format → Kitchen ticket</strong>, alongside the ones you already have. Turn either off per branch.</p>
+      </div>
+
+      <div style="background: #fffaf0; border: 1px solid #e8c48a; border-radius: 6px; padding: 15px 17px;">
+        <div style="font-size: 13px; font-weight: 600; color: #a05a12; margin-bottom: 4px;">The ticket is a snapshot</div>
+        <p style="margin: 0; font-size: 12.5px; line-height: 1.55; color: #6b4415;">What prints is copied at the moment the ticket fires, exactly like the item list. If somebody edits the order afterwards, paper already on the pass does not silently change under the cook.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <div style="margin-top: 22px; background: #ffffff; border: 1px solid #e1e5eb; border-radius: 6px; padding: 18px 22px;">
+    <div style="font-size: 15px; font-weight: 600; color: #2c3e50; margin-bottom: 10px;">Rejecting instead — the reason is now a list</div>
+    <div style="display: flex; gap: 18px; align-items: flex-start;">
+      <div style="flex: none; width: 260px; border: 1px solid #d0d4da; border-radius: 6px; overflow: hidden;">
+        <div style="padding: 10px 13px; background: #f8fafc; border-bottom: 1px solid #e1e5eb; font-size: 13px; font-weight: 600; color: #2c3e50;">Why are you rejecting?</div>
+        <div style="display: flex; flex-direction: column;">
+          <div style="padding: 9px 13px; font-size: 13px; color: #2c3e50; background: #eef4fb; border-left: 3px solid #0f3460;">Item out of stock</div>
+          <div style="padding: 9px 13px; font-size: 13px; color: #5a6c7d;">Kitchen at capacity</div>
+          <div style="padding: 9px 13px; font-size: 13px; color: #5a6c7d;">Outlet closed</div>
+          <div style="padding: 9px 13px; font-size: 13px; color: #5a6c7d;">Outside delivery area</div>
+          <div style="padding: 9px 13px; font-size: 13px; color: #5a6c7d;">No rider available</div>
+          <div style="padding: 9px 13px; font-size: 13px; color: #5a6c7d;">Other</div>
+        </div>
+      </div>
+      <div style="flex: 1;">
+        <div style="padding: 12px 14px; background: #fdeeec; border: 1px solid #e08b7f; border-radius: 6px; margin-bottom: 10px;">
+          <div style="font-size: 12.5px; font-weight: 600; color: #8f2c1c; margin-bottom: 5px;">“Item out of stock” asks which dish</div>
+          <div style="font-size: 12.5px; color: #6b2a1e; line-height: 1.55;">Zomato needs to know <em>which</em> one ran out, so this reason won’t send until you tick the items. The other five don’t ask.</div>
+        </div>
+        <p style="margin: 0; font-size: 12.5px; line-height: 1.6; color: #5a6c7d;">
+          These six are yours to edit on <strong style="color: #2c3e50;">Setup → Rejection Reasons</strong>. Each carries a portal code field, filled in during Zomato certification — deliberately blank now, because inventing a code would push a value their API rejects on the first refusal.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

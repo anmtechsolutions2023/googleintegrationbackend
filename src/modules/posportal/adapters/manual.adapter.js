@@ -57,6 +57,9 @@ class ManualAdapter extends BaseAdapter {
         maskedPhone: payload.customer?.maskedPhone ?? payload.customer?.phone ?? null,
         externalCustomerRef: payload.customer?.externalCustomerRef ?? null,
       },
+      // Typed into the queue form by whoever is reading the order off a tablet.
+      cookingInstructions: payload.cookingInstructions ?? null,
+      noCutlery: !!payload.noCutlery,
       lines: lines.map((l) => ({
         externalItemId: l.externalItemId ?? null,
         name: l.name ?? null,

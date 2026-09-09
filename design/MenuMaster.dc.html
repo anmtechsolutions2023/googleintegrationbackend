@@ -1,0 +1,163 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif; }
+    a { color: #2980b9; } a:hover { color: #0f3460; }
+    .lbl { font-size: 12px; font-weight: 600; color: #5a6c7d; margin-bottom: 5px; display: block; }
+    .fld { width: 100%; padding: 8px 10px; border: 1px solid #d0d4da; border-radius: 6px; font-size: 13px; color: #2c3e50; background: #ffffff; }
+    .new { display: inline-block; font-size: 9px; font-weight: 700; color: #1e8449; background: #e8f6ee; padding: 2px 5px; border-radius: 3px; letter-spacing: 0.04em; margin-left: 6px; vertical-align: 1px; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; background: #eef2f7; border: 1px solid #d0d4da; border-radius: 20px; font-size: 12px; color: #2c3e50; }
+  </style>
+</helmet>
+
+<div style="width: 980px; min-height: 1120px; background: #f5f7fa; padding: 28px 32px;">
+
+  <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 4px;">Front Desk › Setup › Menu Master</div>
+  <h1 style="margin: 0 0 4px; font-size: 22px; font-weight: 600; color: #2c3e50;">Edit menu item</h1>
+  <p style="margin: 0 0 20px; font-size: 13px; color: #7f8c8d;">Everything marked <span class="new">NEW</span> was added in this work. The rest of the form is unchanged.</p>
+
+  <div style="background: #ffffff; border: 1px solid #e1e5eb; border-radius: 6px; padding: 24px 26px;">
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px;">
+      <div>
+        <span class="lbl">Item</span>
+        <div class="fld">Butter Chicken</div>
+      </div>
+      <div>
+        <span class="lbl">Branch</span>
+        <div class="fld">Koramangala</div>
+      </div>
+    </div>
+
+    <div style="margin: 18px 0; padding: 14px 16px; background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 6px; display: flex; gap: 34px;">
+      <div>
+        <div style="font-size: 11px; color: #7f8c8d; margin-bottom: 3px;">Price</div>
+        <div style="font-size: 17px; font-weight: 600; color: #2c3e50;">₹ 320.00</div>
+      </div>
+      <div>
+        <div style="font-size: 11px; color: #7f8c8d; margin-bottom: 3px;">Tax group</div>
+        <div style="font-size: 15px; color: #2c3e50; padding-top: 2px;">GST 5%</div>
+      </div>
+      <div>
+        <div style="font-size: 11px; color: #7f8c8d; margin-bottom: 3px;">Tax</div>
+        <div style="font-size: 15px; color: #2c3e50; padding-top: 2px;">Exclusive</div>
+      </div>
+      <div style="margin-left: auto; align-self: center; font-size: 12px; color: #7f8c8d; max-width: 30ch; line-height: 1.45;">
+        Comes from the selected item. Change it in Master Data → Items.
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 20px;">
+      <div>
+        <span class="lbl">Food Type</span>
+        <div class="fld">Non-Veg</div>
+      </div>
+      <div>
+        <span class="lbl">Meat Type <span class="new">NEW</span></span>
+        <div class="fld">Chicken</div>
+      </div>
+      <div>
+        <span class="lbl">Category</span>
+        <div class="fld" style="color: #7f8c8d;">Mains → Curries</div>
+      </div>
+    </div>
+
+    <div style="height: 1px; background: #e1e5eb; margin: 22px 0;"></div>
+
+    <div style="margin-bottom: 18px;">
+      <span class="lbl">Channels</span>
+      <div style="display: flex; gap: 8px;">
+        <span class="chip">Dine In</span>
+        <span class="chip">Takeaway</span>
+        <span class="chip">Online</span>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-bottom: 18px;">
+      <div>
+        <span class="lbl">Variants <span style="font-weight: 400; color: #7f8c8d;">— replace the price</span></span>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <span class="chip">Half · ₹180</span>
+          <span class="chip">Full · ₹320</span>
+        </div>
+      </div>
+      <div>
+        <span class="lbl">Add-on Groups <span class="new">NEW</span> <span style="font-weight: 400; color: #7f8c8d;">— add to it</span></span>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <span class="chip">Extra Toppings</span>
+          <span class="chip">Bread on the side</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <span class="lbl">Menu Tags <span class="new">NEW</span></span>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <span class="chip">Main Course</span>
+        <span class="chip">North Indian</span>
+      </div>
+    </div>
+
+    <div style="height: 1px; background: #e1e5eb; margin: 22px 0;"></div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 20px;">
+      <div>
+        <span class="lbl">Serves <span class="new">NEW</span></span>
+        <div class="fld">2</div>
+      </div>
+      <div>
+        <span class="lbl">Portion Size <span class="new">NEW</span></span>
+        <div class="fld">350 ml</div>
+      </div>
+      <div>
+        <span class="lbl">Prep Time (min) <span class="new">NEW</span></span>
+        <div class="fld">18</div>
+      </div>
+    </div>
+    <div style="margin-top: 7px; font-size: 12px; color: #7f8c8d; line-height: 1.5;">
+      Serves counts people; portion size is the measure — they answer different questions.
+      Prep time feeds the promise a portal is given when you accept an order.
+    </div>
+
+    <div style="margin-top: 20px;">
+      <span class="lbl">Nutrition <span class="new">NEW</span></span>
+      <div style="background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 6px; padding: 14px 16px;">
+        <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 18px;">
+          <div><div style="font-size: 11px; color: #7f8c8d;">Serving</div><div style="font-size: 14px; color: #2c3e50; font-weight: 500;">350 g</div></div>
+          <div><div style="font-size: 11px; color: #7f8c8d;">Calories</div><div style="font-size: 14px; color: #2c3e50; font-weight: 500;">620</div></div>
+          <div><div style="font-size: 11px; color: #7f8c8d;">Protein</div><div style="font-size: 14px; color: #2c3e50; font-weight: 500;">38 g</div></div>
+          <div><div style="font-size: 11px; color: #7f8c8d;">Fat</div><div style="font-size: 14px; color: #2c3e50; font-weight: 500;">41 g</div></div>
+        </div>
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e1e5eb;">
+          <div style="font-size: 11px; color: #7f8c8d;">Allergens</div>
+          <div style="font-size: 14px; color: #2c3e50;">Dairy, nuts</div>
+        </div>
+      </div>
+      <div style="margin-top: 7px; font-size: 12px; color: #7f8c8d;">Entirely optional — leave it empty and no nutrition record is kept at all.</div>
+    </div>
+
+    <div style="display: flex; gap: 10px; margin-top: 26px; padding-top: 20px; border-top: 1px solid #e1e5eb;">
+      <div style="padding: 8px 16px; border-radius: 6px; background: #0f3460; color: #ffffff; font-size: 14px; font-weight: 500;">Save</div>
+      <div style="padding: 8px 16px; border-radius: 6px; background: #ffffff; border: 1px solid #d0d4da; color: #2c3e50; font-size: 14px; font-weight: 500;">Cancel</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 18px; background: #fffaf0; border: 1px solid #e67e22; border-radius: 6px; padding: 15px 18px;">
+    <div style="font-size: 13px; font-weight: 600; color: #a05a12; margin-bottom: 4px;">The distinction that matters most on this form</div>
+    <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #6b4415;">
+      A <strong>Variant</strong> replaces the price — Half is ₹180 <em>instead of</em> ₹320.
+      An <strong>Add-on</strong> adds to it — Extra Chicken is ₹80 <em>on top</em>.
+      Portals check add-on quantities against the group’s min/max; a variant has no such pair, which is why modelling add-ons as variants is where this integration usually goes wrong.
+    </p>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -31,7 +31,10 @@ jest.mock('../../utils/dbHelper', () => ({
   withTransaction: jest.fn((cb) => cb(mockConnection)),
   findOneOrFail:   jest.fn(),
   findAll:         jest.fn(),
-  executeQuery:    jest.fn(),
+  // Returns a countable row by default: deleteCategory asks how many
+  // sub-categories are in the way before it deletes, and an undefined result
+  // cannot be destructured.
+  executeQuery:    jest.fn(async () => [{ total: 0 }]),
 }));
 
 const { name, servicePath, exports: ex, createData, updateData, existingRow } =
@@ -134,8 +137,12 @@ describe('category — field validation', () => {
     it('passes with Name and Active false', () => {
       expect(createCategorySchema.validate({ Name: 'Electronics', Active: false }).error).toBeUndefined();
     });
-    it('accepts Name at exactly 100 characters', () => {
-      expect(createCategorySchema.validate({ Name: 'x'.repeat(100) }).error).toBeUndefined();
+    // 50, not 100: categorydetail.Name is VARCHAR(50). This test asserted the
+    // schema's old, looser rule, which let a 51-character name past validation
+    // and into MySQL — a 500 where a 400 naming the field belonged. The
+    // database is the source of truth, so the test moved to match the column.
+    it('accepts Name at exactly 50 characters — the column width', () => {
+      expect(createCategorySchema.validate({ Name: 'x'.repeat(50) }).error).toBeUndefined();
     });
     it('defaults Active to true when omitted', () => {
       const { value } = createCategorySchema.validate({ Name: 'Electronics' });
@@ -147,8 +154,8 @@ describe('category — field validation', () => {
     it('fails when Name is missing', () => {
       expect(createCategorySchema.validate({}).error).toBeDefined();
     });
-    it('fails when Name exceeds 100 characters', () => {
-      expect(createCategorySchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    it('fails when Name exceeds the 50-character column', () => {
+      expect(createCategorySchema.validate({ Name: 'x'.repeat(51) }).error).toBeDefined();
     });
     it('fails when Name is a number', () => {
       expect(createCategorySchema.validate({ Name: 123 }).error).toBeDefined();
@@ -171,8 +178,8 @@ describe('category — field validation', () => {
     it('fails for an empty body', () => {
       expect(updateCategorySchema.validate({}).error).toBeDefined();
     });
-    it('fails when Name exceeds 100 characters', () => {
-      expect(updateCategorySchema.validate({ Name: 'x'.repeat(101) }).error).toBeDefined();
+    it('fails when Name exceeds the 50-character column', () => {
+      expect(updateCategorySchema.validate({ Name: 'x'.repeat(51) }).error).toBeDefined();
     });
   });
 });

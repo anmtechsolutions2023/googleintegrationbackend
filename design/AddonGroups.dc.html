@@ -1,0 +1,143 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif; }
+    a { color: #2980b9; } a:hover { color: #0f3460; }
+    .th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #7f8c8d; padding: 11px 14px; background: #f8fafc; border-bottom: 1px solid #e1e5eb; }
+    .td { padding: 12px 14px; font-size: 13px; color: #2c3e50; border-bottom: 1px solid #eef2f7; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  </style>
+</helmet>
+
+<div style="width: 900px; min-height: 880px; background: #f5f7fa; padding: 28px 32px;">
+
+  <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 4px;">Front Desk › Setup › Add-on Groups</div>
+  <h1 style="margin: 0 0 4px; font-size: 22px; font-weight: 600; color: #2c3e50;">Add-on Groups</h1>
+  <p style="margin: 0 0 20px; font-size: 13px; color: #7f8c8d; max-width: 66ch; line-height: 1.55;">
+    A group is a <strong style="color: #2c3e50;">question</strong> you ask about a dish. The add-ons under it are the answers.
+  </p>
+
+  <div style="background: #ffffff; border: 1px solid #e1e5eb; border-radius: 6px; overflow: hidden;">
+    <table style="width: 100%; border-collapse: collapse;">
+      <thead>
+        <tr>
+          <th class="th">Name</th>
+          <th class="th">Code</th>
+          <th class="th">Min</th>
+          <th class="th">Max</th>
+          <th class="th">Options</th>
+          <th class="th">Active</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="td" style="font-weight: 500;">Extra Toppings</td>
+          <td class="td mono" style="color: #7f8c8d;">TOPPINGS</td>
+          <td class="td">0</td>
+          <td class="td">3</td>
+          <td class="td">4</td>
+          <td class="td"><span class="pill" style="background: #e8f6ee; color: #1e8449;">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="td" style="font-weight: 500;">Choose your bread</td>
+          <td class="td mono" style="color: #7f8c8d;">BREAD</td>
+          <td class="td" style="font-weight: 600; color: #0f3460;">1</td>
+          <td class="td">1</td>
+          <td class="td">3</td>
+          <td class="td"><span class="pill" style="background: #e8f6ee; color: #1e8449;">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="td" style="font-weight: 500;">Spice level</td>
+          <td class="td mono" style="color: #7f8c8d;">SPICE</td>
+          <td class="td" style="font-weight: 600; color: #0f3460;">1</td>
+          <td class="td">1</td>
+          <td class="td">3</td>
+          <td class="td"><span class="pill" style="background: #e8f6ee; color: #1e8449;">Yes</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display: flex; gap: 12px; margin-top: 14px; align-items: flex-start;">
+    <div style="flex: 1; background: #eef4fb; border: 1px solid #a9c8e8; border-radius: 6px; padding: 13px 16px;">
+      <div style="font-size: 12px; font-weight: 600; color: #1c4f80; margin-bottom: 3px;">Min 0 = optional</div>
+      <div style="font-size: 12.5px; color: #2c4a66; line-height: 1.5;">“Extra Toppings” can be skipped entirely.</div>
+    </div>
+    <div style="flex: 1; background: #eef4fb; border: 1px solid #a9c8e8; border-radius: 6px; padding: 13px 16px;">
+      <div style="font-size: 12px; font-weight: 600; color: #1c4f80; margin-bottom: 3px;">Min 1 = the customer must pick</div>
+      <div style="font-size: 12.5px; color: #2c4a66; line-height: 1.5;">Bread and spice level are required before the dish can be ordered.</div>
+    </div>
+    <div style="flex: 1; background: #fdeeec; border: 1px solid #e08b7f; border-radius: 6px; padding: 13px 16px;">
+      <div style="font-size: 12px; font-weight: 600; color: #8f2c1c; margin-bottom: 3px;">Min above Max is refused</div>
+      <div style="font-size: 12.5px; color: #6b2a1e; line-height: 1.5;">“Pick at least 3, at most 1” can never be satisfied — you get a clear message, not a failed order later.</div>
+    </div>
+  </div>
+
+  <div style="height: 26px;"></div>
+
+  <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 4px;">Front Desk › Setup › Add-ons</div>
+  <h2 style="margin: 0 0 4px; font-size: 19px; font-weight: 600; color: #2c3e50;">Add-ons in “Extra Toppings”</h2>
+  <p style="margin: 0 0 14px; font-size: 13px; color: #7f8c8d;">The options themselves, each with its own price.</p>
+
+  <div style="background: #ffffff; border: 1px solid #e1e5eb; border-radius: 6px; overflow: hidden;">
+    <table style="width: 100%; border-collapse: collapse;">
+      <thead>
+        <tr>
+          <th class="th">Name</th>
+          <th class="th">Group</th>
+          <th class="th">Price</th>
+          <th class="th">Food Type</th>
+          <th class="th">Active</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="td" style="font-weight: 500;">Extra Chicken</td>
+          <td class="td" style="color: #5a6c7d;">Extra Toppings</td>
+          <td class="td">₹ 80.00</td>
+          <td class="td"><span class="pill" style="background: #fdeeec; color: #8f2c1c;">Non-Veg</span></td>
+          <td class="td"><span class="pill" style="background: #e8f6ee; color: #1e8449;">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="td" style="font-weight: 500;">Extra Cheese</td>
+          <td class="td" style="color: #5a6c7d;">Extra Toppings</td>
+          <td class="td">₹ 60.00</td>
+          <td class="td"><span class="pill" style="background: #e8f6ee; color: #1e8449;">Veg</span></td>
+          <td class="td"><span class="pill" style="background: #e8f6ee; color: #1e8449;">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="td" style="font-weight: 500;">Extra Butter</td>
+          <td class="td" style="color: #5a6c7d;">Extra Toppings</td>
+          <td class="td">₹ 30.00</td>
+          <td class="td"><span class="pill" style="background: #e8f6ee; color: #1e8449;">Veg</span></td>
+          <td class="td"><span class="pill" style="background: #e8f6ee; color: #1e8449;">Yes</span></td>
+        </tr>
+        <tr>
+          <td class="td" style="font-weight: 500;">No onions</td>
+          <td class="td" style="color: #5a6c7d;">Extra Toppings</td>
+          <td class="td" style="color: #7f8c8d;">₹ 0.00</td>
+          <td class="td"><span class="pill" style="background: #e8f6ee; color: #1e8449;">Veg</span></td>
+          <td class="td"><span class="pill" style="background: #e8f6ee; color: #1e8449;">Yes</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-top: 14px; background: #fffaf0; border: 1px solid #e67e22; border-radius: 6px; padding: 15px 18px;">
+    <div style="font-size: 13px; font-weight: 600; color: #a05a12; margin-bottom: 4px;">Why an add-on carries its own Food Type</div>
+    <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #6b4415;">
+      A veg pizza with a chicken topping is not a veg order. The dietary badge on the <em>add-on</em> is the only thing that can say so — the dish’s own Veg mark would keep claiming otherwise. “No onions” at ₹0 is a legitimate option: it costs nothing but the kitchen still has to be told.
+    </p>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

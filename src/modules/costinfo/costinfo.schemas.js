@@ -1,18 +1,33 @@
 // src/modules/costinfo/costinfo.schemas.js
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { taxBreakdownEcho } = require('../pricing/pricing.enrich');
+const { joinedEchoes } = require('../../utils/joinedEchoes');
+const { QUERIES } = require('../../config/constants');
 
 const createSchema = Joi.object({
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.COST_INFO),
   Amount: Joi.number().precision(4).required(),
-  TaxGroupId: Joi.string().uuid().optional().allow(null),
+  TaxGroupId: entityId.optional().allow(null),
   IsTaxIncluded: Joi.boolean().optional().default(false),
   Active: Joi.boolean().optional().default(true),
   TaxBreakdown: taxBreakdownEcho(),
 });
 
 const updateSchema = Joi.object({
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.COST_INFO),
   Amount: Joi.number().precision(4).optional(),
-  TaxGroupId: Joi.string().uuid().optional().allow(null),
+  TaxGroupId: entityId.optional().allow(null),
   IsTaxIncluded: Joi.boolean().optional(),
   Active: Joi.boolean().optional(),
   TaxBreakdown: taxBreakdownEcho(),
@@ -29,7 +44,7 @@ const getByIdQuerySchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = {

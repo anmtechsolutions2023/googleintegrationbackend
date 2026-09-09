@@ -259,16 +259,34 @@ const swaggerSpec = {
         type: 'object', required: ['Name'],
         properties: {
           Name:   { type: 'string', maxLength: 50, example: 'Electronics' },
+          ParentId: {
+            type: 'string', format: 'uuid', nullable: true,
+            description: 'Null = a top-level category. A menu tree is EXACTLY two levels, so a parent that already has a parent is refused with 400.',
+          },
+          SortOrder: { type: 'integer', default: 0, description: 'Menu display order. Portals honour it.' },
           Active: { type: 'boolean', default: true },
         },
       },
       CategoryUpdate: {
         type: 'object', minProperties: 1,
-        properties: { Name: { type: 'string', maxLength: 50 }, Active: { type: 'boolean' } },
+        properties: {
+          Name: { type: 'string', maxLength: 50 },
+          ParentId: {
+            type: 'string', format: 'uuid', nullable: true,
+            description: 'Explicit null promotes a sub-category back to top level. Omitting the key leaves it unchanged — the two are different.',
+          },
+          SortOrder: { type: 'integer' },
+          Active: { type: 'boolean' },
+        },
       },
       Category: {
         type: 'object',
-        properties: { ...auditFields, Name: { type: 'string' } },
+        properties: { ...auditFields,
+          Name: { type: 'string' },
+          ParentId: { type: 'string', format: 'uuid', nullable: true },
+          ParentName: { type: 'string', nullable: true, description: 'Joined within the same tenant.' },
+          SortOrder: { type: 'integer' },
+        },
       },
 
       // ─── TransactionTypeConfig ─────────────────────────────────────────────
@@ -1265,6 +1283,26 @@ const swaggerSpec = {
           Active: {"type":"boolean"},
         },
       },
+      // 1:1 with a menu item and entirely optional — most tenants never fill it.
+      // Sending null for the whole object DELETES the row rather than blanking
+      // its columns: a row of nulls claims "recorded as unknown", which is a
+      // different statement from "no nutrition data exists".
+      PosItemNutrition: {
+        type: 'object', nullable: true,
+        properties: {
+          ServingSizeG: { type: 'number', minimum: 0, nullable: true, description: 'The basis every other figure is measured against.' },
+          Calories: { type: 'number', minimum: 0, nullable: true },
+          ProteinG: { type: 'number', minimum: 0, nullable: true },
+          CarbohydrateG: { type: 'number', minimum: 0, nullable: true },
+          SugarG: { type: 'number', minimum: 0, nullable: true },
+          FatG: { type: 'number', minimum: 0, nullable: true },
+          SaturatedFatG: { type: 'number', minimum: 0, nullable: true },
+          FibreG: { type: 'number', minimum: 0, nullable: true },
+          SodiumMg: { type: 'number', minimum: 0, nullable: true },
+          Allergens: { type: 'string', maxLength: 500, nullable: true, description: 'Free text: allergen vocabularies differ by jurisdiction.' },
+        },
+      },
+
       PosItemMetaCreate: {
         type: 'object', required: ["ItemDetailId", "FoodTypeId", "BranchDetailId"],
         description:
@@ -1279,6 +1317,13 @@ const swaggerSpec = {
           },
           ChannelIds: {"type":"array","items":{"type":"string","format":"uuid"}},
           VariantIds: {"type":"array","items":{"type":"string","format":"uuid"}},
+          AddonGroupIds: {"type":"array","items":{"type":"string","format":"uuid"},"description":"Choice blocks offered against this dish. Array order becomes display order. Omit to leave existing links alone; send [] to detach all."},
+          TagIds: {"type":"array","items":{"type":"string","format":"uuid"},"description":"Menu tags (CATEGORY / BEVERAGE / CUISINE). Omit to leave alone; [] to detach all."},
+          ServesCount: {"type":"integer","minimum":0,"maximum":255,"nullable":true,"description":"How many people the dish serves."},
+          PortionSize: {"type":"string","maxLength":50,"nullable":true,"description":"The measure, e.g. 350 ml. Answers a different question from ServesCount."},
+          MeatTypeId: {"type":"string","format":"uuid","nullable":true,"description":"Orthogonal to FoodTypeId: a dish is Non-Veg AND Chicken."},
+          PrepTimeMinutes: {"type":"integer","minimum":0,"nullable":true,"description":"This dish own prep time. An order KPT is derived from its slowest line."},
+          Nutrition: {"$ref":"#/components/schemas/PosItemNutrition"},
           Channels: {"type":"object"},
           Prices: {"type":"object"},
           Variants: {"type":"object"},
@@ -1300,6 +1345,13 @@ const swaggerSpec = {
           },
           ChannelIds: {"type":"array","items":{"type":"string","format":"uuid"}},
           VariantIds: {"type":"array","items":{"type":"string","format":"uuid"}},
+          AddonGroupIds: {"type":"array","items":{"type":"string","format":"uuid"},"description":"Choice blocks offered against this dish. Array order becomes display order. Omit to leave existing links alone; send [] to detach all."},
+          TagIds: {"type":"array","items":{"type":"string","format":"uuid"},"description":"Menu tags (CATEGORY / BEVERAGE / CUISINE). Omit to leave alone; [] to detach all."},
+          ServesCount: {"type":"integer","minimum":0,"maximum":255,"nullable":true,"description":"How many people the dish serves."},
+          PortionSize: {"type":"string","maxLength":50,"nullable":true,"description":"The measure, e.g. 350 ml. Answers a different question from ServesCount."},
+          MeatTypeId: {"type":"string","format":"uuid","nullable":true,"description":"Orthogonal to FoodTypeId: a dish is Non-Veg AND Chicken."},
+          PrepTimeMinutes: {"type":"integer","minimum":0,"nullable":true,"description":"This dish own prep time. An order KPT is derived from its slowest line."},
+          Nutrition: {"$ref":"#/components/schemas/PosItemNutrition"},
           Channels: {"type":"object"},
           Prices: {"type":"object"},
           Variants: {"type":"object"},
@@ -1333,6 +1385,14 @@ const swaggerSpec = {
           TaxBreakdown: { $ref: '#/components/schemas/TaxBreakdown' },
           ChannelIds: {"type":"array","items":{"type":"string","format":"uuid"}},
           VariantIds: {"type":"array","items":{"type":"string","format":"uuid"}},
+          AddonGroupIds: {"type":"array","items":{"type":"string","format":"uuid"},"description":"Choice blocks offered against this dish. Array order becomes display order. Omit to leave existing links alone; send [] to detach all."},
+          TagIds: {"type":"array","items":{"type":"string","format":"uuid"},"description":"Menu tags (CATEGORY / BEVERAGE / CUISINE). Omit to leave alone; [] to detach all."},
+          ServesCount: {"type":"integer","minimum":0,"maximum":255,"nullable":true,"description":"How many people the dish serves."},
+          PortionSize: {"type":"string","maxLength":50,"nullable":true,"description":"The measure, e.g. 350 ml. Answers a different question from ServesCount."},
+          MeatTypeId: {"type":"string","format":"uuid","nullable":true,"description":"Orthogonal to FoodTypeId: a dish is Non-Veg AND Chicken."},
+          PrepTimeMinutes: {"type":"integer","minimum":0,"nullable":true,"description":"This dish own prep time. An order KPT is derived from its slowest line."},
+          Nutrition: {"$ref":"#/components/schemas/PosItemNutrition"},
+          MeatTypeName: {"type":"string","nullable":true,"description":"Joined from pos_meat_type."},
           Channels: {"type":"object"},
           Prices: {"type":"object"},
           Variants: {"type":"object"},
@@ -1733,6 +1793,236 @@ const swaggerSpec = {
           Description: {"type":"string"},
           SortOrder: {"type":"integer"},
           Price: {"type":"number","nullable":true},
+          Active: {"type":"boolean"},
+        },
+      },
+
+      // ── Portal menu masters ────────────────────────────────────────────────
+      // What a dish IS beyond its price, and why an order was refused.
+
+      // One availability rule. Day and time live TOGETHER because a portal
+      // sends a timing as a single rule ("Sat 18:00–23:00"); splitting the day
+      // list from the time list makes every read a cross-product with no way to
+      // say which time belongs to which day.
+      PosCategoryScheduleRule: {
+        type: 'object', required: ['DayOfWeek', 'StartTime', 'EndTime'],
+        properties: {
+          DayOfWeek: {
+            type: 'integer', minimum: 0, maximum: 6,
+            description: '0 = Sunday … 6 = Saturday, matching JS getDay() so no translation sits between the browser and the row.',
+          },
+          StartTime: { type: 'string', example: '18:00', description: 'HH:MM or HH:MM:SS.' },
+          EndTime: {
+            type: 'string', example: '23:00',
+            description: 'HH:MM or HH:MM:SS. 24:00 is valid — it is what the first half of a split overnight window ends at.',
+          },
+        },
+      },
+      PosCategoryScheduleReplace: {
+        type: 'object', required: ['Rules'],
+        properties: {
+          Rules: {
+            type: 'array', maxItems: 50,
+            items: { $ref: '#/components/schemas/PosCategoryScheduleRule' },
+            description: 'The category whole week. An EMPTY array clears the schedule and returns the category to always-available.',
+          },
+        },
+      },
+      PosCategorySchedule: {
+        type: 'object',
+        description: 'A stored rule. An overnight window submitted as one rule comes back as TWO rows, split at midnight.',
+        properties: { ...auditFields,
+          CategoryId: { type: 'string', format: 'uuid' },
+          CategoryName: { type: 'string', nullable: true, description: 'Present on the tenant-wide listing only.' },
+          DayOfWeek: { type: 'integer', minimum: 0, maximum: 6 },
+          StartTime: { type: 'string', example: '18:00:00' },
+          EndTime: { type: 'string', example: '23:00:00' },
+        },
+      },
+
+      PosMeatTypeCreate: {
+        type: 'object', required: ["Name","Code"],
+        properties: {
+          Name: {"type":"string","maxLength":100},
+          Code: {"type":"string","maxLength":50},
+          Description: {"type":"string","maxLength":255,"nullable":true},
+          SortOrder: {"type":"integer","default":0},
+          Active: {"type":"boolean","default":true},
+        },
+      },
+      PosMeatTypeUpdate: {
+        type: 'object', minProperties: 1,
+        properties: {
+          Name: {"type":"string","maxLength":100},
+          Code: {"type":"string","maxLength":50},
+          Description: {"type":"string","maxLength":255,"nullable":true},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosMeatType: {
+        type: 'object',
+        description: 'Orthogonal to food type — a dish is Non-Veg (food type) AND Chicken (meat type).',
+        properties: { ...auditFields,
+          Name: {"type":"string"},
+          Code: {"type":"string"},
+          Description: {"type":"string","nullable":true},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+
+      PosMenuTagCreate: {
+        type: 'object', required: ["Name","Code"],
+        properties: {
+          Name: {"type":"string","maxLength":100},
+          Code: {"type":"string","maxLength":50},
+          TagType: {"type":"string","enum":["CATEGORY","BEVERAGE","CUISINE"],"default":"CATEGORY"},
+          SortOrder: {"type":"integer","default":0},
+          Active: {"type":"boolean","default":true},
+        },
+      },
+      PosMenuTagUpdate: {
+        type: 'object', minProperties: 1,
+        properties: {
+          Name: {"type":"string","maxLength":100},
+          Code: {"type":"string","maxLength":50},
+          TagType: {"type":"string","enum":["CATEGORY","BEVERAGE","CUISINE"]},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosMenuTag: {
+        type: 'object',
+        description: 'One tag master separated by TagType, rather than a table per tag kind.',
+        properties: { ...auditFields,
+          Name: {"type":"string"},
+          Code: {"type":"string"},
+          TagType: {"type":"string","enum":["CATEGORY","BEVERAGE","CUISINE"]},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+
+      PosAddonGroupCreate: {
+        type: 'object', required: ["Name","Code"],
+        properties: {
+          Name: {"type":"string","maxLength":100},
+          Code: {"type":"string","maxLength":50},
+          Description: {"type":"string","maxLength":255,"nullable":true},
+          MinSelection: {"type":"integer","minimum":0,"default":0,"description":"Above 0 makes the group mandatory."},
+          MaxSelection: {"type":"integer","minimum":1,"default":1},
+          SortOrder: {"type":"integer","default":0},
+          Active: {"type":"boolean","default":true},
+        },
+      },
+      PosAddonGroupUpdate: {
+        type: 'object', minProperties: 1,
+        properties: {
+          Name: {"type":"string","maxLength":100},
+          Code: {"type":"string","maxLength":50},
+          Description: {"type":"string","maxLength":255,"nullable":true},
+          MinSelection: {"type":"integer","minimum":0},
+          MaxSelection: {"type":"integer","minimum":1},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosAddonGroup: {
+        type: 'object',
+        description:
+          'A block of choices offered against a dish. NOT a variant: a variant replaces the item price, ' +
+          'a group augments it and validates a selection count. MinSelection greater than MaxSelection is rejected with 400.',
+        properties: { ...auditFields,
+          Name: {"type":"string"},
+          Code: {"type":"string"},
+          Description: {"type":"string","nullable":true},
+          MinSelection: {"type":"integer"},
+          MaxSelection: {"type":"integer"},
+          SortOrder: {"type":"integer"},
+          AddonCount: {"type":"integer","description":"Active options in this group."},
+          Active: {"type":"boolean"},
+        },
+      },
+
+      PosAddonCreate: {
+        type: 'object', required: ["AddonGroupId","Name","Code"],
+        properties: {
+          AddonGroupId: {"type":"string","format":"uuid"},
+          Name: {"type":"string","maxLength":100},
+          Code: {"type":"string","maxLength":50},
+          Price: {"type":"number","minimum":0,"default":0},
+          FoodTypeId: {"type":"string","format":"uuid","nullable":true,"description":"Dietary tag on the add-on itself — a veg dish with a chicken topping is not a veg order."},
+          SortOrder: {"type":"integer","default":0},
+          Active: {"type":"boolean","default":true},
+        },
+      },
+      PosAddonUpdate: {
+        type: 'object', minProperties: 1,
+        properties: {
+          AddonGroupId: {"type":"string","format":"uuid"},
+          Name: {"type":"string","maxLength":100},
+          Code: {"type":"string","maxLength":50},
+          Price: {"type":"number","minimum":0},
+          FoodTypeId: {"type":"string","format":"uuid","nullable":true},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosAddon: {
+        type: 'object',
+        properties: { ...auditFields,
+          AddonGroupId: {"type":"string","format":"uuid"},
+          AddonGroupName: {"type":"string"},
+          Name: {"type":"string"},
+          Code: {"type":"string"},
+          Price: {"type":"number"},
+          FoodTypeId: {"type":"string","format":"uuid","nullable":true},
+          FoodTypeName: {"type":"string","nullable":true},
+          FoodTypeIsVeg: {"type":"boolean","nullable":true},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+
+      PosRejectionReasonCreate: {
+        type: 'object', required: ["Name","Code"],
+        properties: {
+          Name: {"type":"string","maxLength":100},
+          Code: {"type":"string","maxLength":50},
+          ExternalCode: {"type":"string","maxLength":50,"nullable":true,"description":"The portal own code. Left null until certification maps it."},
+          PortalId: {"type":"string","format":"uuid","nullable":true,"description":"Null means a house reason, offered on every portal."},
+          RequiresItems: {"type":"boolean","default":false,"description":"Set on an out-of-stock reason: the rejection must name the offending items."},
+          Description: {"type":"string","maxLength":255,"nullable":true},
+          SortOrder: {"type":"integer","default":0},
+          Active: {"type":"boolean","default":true},
+        },
+      },
+      PosRejectionReasonUpdate: {
+        type: 'object', minProperties: 1,
+        properties: {
+          Name: {"type":"string","maxLength":100},
+          Code: {"type":"string","maxLength":50},
+          ExternalCode: {"type":"string","maxLength":50,"nullable":true},
+          PortalId: {"type":"string","format":"uuid","nullable":true},
+          RequiresItems: {"type":"boolean"},
+          Description: {"type":"string","maxLength":255,"nullable":true},
+          SortOrder: {"type":"integer"},
+          Active: {"type":"boolean"},
+        },
+      },
+      PosRejectionReason: {
+        type: 'object',
+        description: 'Why an order was refused, in a controlled vocabulary. Distinct from PosReturnReason, which covers goods coming back after the food was made.',
+        properties: { ...auditFields,
+          Name: {"type":"string"},
+          Code: {"type":"string"},
+          ExternalCode: {"type":"string","nullable":true},
+          PortalId: {"type":"string","format":"uuid","nullable":true},
+          PortalName: {"type":"string","nullable":true},
+          RequiresItems: {"type":"boolean"},
+          Description: {"type":"string","nullable":true},
+          SortOrder: {"type":"integer"},
           Active: {"type":"boolean"},
         },
       },
@@ -2734,6 +3024,16 @@ const swaggerSpec = {
         type: 'object',
         properties: {
           FireKot: {"type":"boolean","default":true,"description":"Send to the kitchen at the same time. Defaults true — an accepted order nobody is cooking is the failure this endpoint exists to remove."},
+          KptMinutes: {
+            type: 'integer', minimum: 1, maximum: 120, nullable: true,
+            description:
+              'Kitchen Preparation Time, in minutes — what the portal is promised. OPTIONAL, and omitting it is the normal case: '
+              + 'the server derives one from the SLOWEST dish on the order (the kitchen is not finished until its last item is), '
+              + 'falling back to the branch pos_setting kpt.default_minutes, then to the platform default of 20. '
+              + 'Send a value to override — the person at the pass can see the kitchen and the server cannot. '
+              + 'NOT the same as PromisedOn, which is the PORTAL delivery SLA: one is our promise about the pass, the other theirs about the doorstep. '
+              + 'Out-of-range values are CLAMPED rather than rejected, so a mistyped 200 does not fail an accept when 120 is obviously meant.',
+          },
         },
       },
       PosOnlineOrderReject: {
@@ -2758,6 +3058,16 @@ const swaggerSpec = {
           OrderNo: {"type":"string"},
           Status: {"type":"string"},
           Kot: {"type":"object"},
+          CookingInstructions: {"type":"string","nullable":true,"description":"Order-level instruction, promoted out of the raw payload at ingest so the KOT writer can reach it without knowing a portal payload shape."},
+          NoCutlery: {"type":"boolean","description":"A flag rather than a phrase inside the instructions — the person bagging the order acts on it without reading prose."},
+          KptMinutes: {"type":"integer","description":"The preparation time committed to and pushed to the portal."},
+          KptSource: {
+            type: 'string',
+            enum: ['explicit', 'slowest-line', 'branch-default', 'platform-default'],
+            description:
+              'How the number was arrived at. Surfaced so a manager can see whether the kitchen own per-dish timings are being used '
+              + 'or a fallback is quietly standing in for them.',
+          },
           PortalPush: {"type":"object","description":"Whether the portal was told. A failure here never undoes the accept."},
           Settlement: {"type":"object","description":"Present on delivered. A failure here never undoes the delivery."},
         },
@@ -3389,6 +3699,16 @@ const swaggerSpec = {
     ...crudPaths('TaxTypes',                       '/api/taxtypes',                        'TaxTypeCreate',                       'TaxTypeUpdate',                       'TaxType',                       false),
     ...crudPaths('UOM',                            '/api/uom',                             'UOMCreate',                           'UOMUpdate',                           'UOM',                           false),
     ...crudPaths('Categories',                     '/api/categories',                      'CategoryCreate',                      'CategoryUpdate',                      'Category',                      false),
+    '/api/categories/parent-candidates': {
+      get: {
+        tags: ['Categories'], security,
+        summary: 'Categories eligible to be a parent',
+        description:
+          'Top-level, active categories only — offering a sub-category as a parent is how a user builds an illegal third level ' +
+          'and only finds out on save. Unpaginated: a truncated parent list hides the category being nested under.',
+        responses: { ...singleResponse('Category'), ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
     ...crudPaths('TransactionTypeConfig',          '/api/transactiontypeconfigs',          'TransactionTypeConfigCreate',         'TransactionTypeConfigUpdate',         'TransactionTypeConfig',         true),
     ...crudPaths('Organizations',                  '/api/organizations',                   'OrganizationCreate',                  'OrganizationUpdate',                  'Organization',                  false),
     '/api/master-data/bootstrap': {
@@ -3808,6 +4128,79 @@ const swaggerSpec = {
     ...crudPaths('PosChannels', '/api/pos/channels', 'PosChannelCreate', 'PosChannelUpdate', 'PosChannel', false),
     ...crudPaths('PosReturnReasons', '/api/pos/return-reasons', 'PosReturnReasonCreate', 'PosReturnReasonUpdate', 'PosReturnReason', false),
     ...crudPaths('PosVariants', '/api/pos/variants', 'PosVariantCreate', 'PosVariantUpdate', 'PosVariant', false),
+    // Portal menu masters. Reads take SCOPE_SETS.POS_REFERENCE_READ (a read
+    // follows the capability that needs it); writes take POS_CONFIG:WRITE.
+    ...crudPaths('PosMeatTypes', '/api/pos/meat-types', 'PosMeatTypeCreate', 'PosMeatTypeUpdate', 'PosMeatType', false),
+    ...crudPaths('PosMenuTags', '/api/pos/menu-tags', 'PosMenuTagCreate', 'PosMenuTagUpdate', 'PosMenuTag', false),
+    ...crudPaths('PosAddonGroups', '/api/pos/addon-groups', 'PosAddonGroupCreate', 'PosAddonGroupUpdate', 'PosAddonGroup', false),
+    ...crudPaths('PosAddons', '/api/pos/addons', 'PosAddonCreate', 'PosAddonUpdate', 'PosAddon', false),
+    ...crudPaths('PosRejectionReasons', '/api/pos/rejection-reasons', 'PosRejectionReasonCreate', 'PosRejectionReasonUpdate', 'PosRejectionReason', false),
+    '/api/pos/category-schedules': {
+      get: {
+        tags: ['PosCategorySchedules'], security,
+        summary: 'Every availability rule in the tenancy',
+        description: 'One read for a menu push, rather than one call per category.',
+        responses: { ...singleResponse('PosCategorySchedule'), ...responses.unauthorized },
+      },
+    },
+    '/api/pos/category-schedules/{categoryId}': {
+      get: {
+        tags: ['PosCategorySchedules'], security,
+        summary: 'One category availability week',
+        description: 'An EMPTY result means the category has no rules and is therefore ALWAYS available — that is the default, not an error.',
+        parameters: [{ name: 'categoryId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { ...singleResponse('PosCategorySchedule'), ...responses.validation, ...responses.unauthorized },
+      },
+      put: {
+        tags: ['PosCategorySchedules'], security,
+        summary: 'Replace a category whole week',
+        description:
+          'Bulk replace, not row CRUD: a week is edited as one grid, and row-by-row writes would let a portal read a half-saved menu. ' +
+          'Sending an empty Rules array CLEARS the schedule, returning the category to always-available — the only route back to the default. ' +
+          'A window that crosses midnight (22:00–02:00) is stored as TWO rows split at midnight, because every lookup compares StartTime <= now AND EndTime > now, ' +
+          'which an end-before-start row can never satisfy.',
+        parameters: [{ name: 'categoryId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/PosCategoryScheduleReplace' } } },
+        },
+        responses: { ...singleResponse('PosCategorySchedule'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+      delete: {
+        tags: ['PosCategorySchedules'], security,
+        summary: 'Clear a category schedule',
+        description: 'The category becomes always available.',
+        parameters: [{ name: 'categoryId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { ...singleResponse('PosCategorySchedule'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/menu-tags/type/{tagType}': {
+      get: {
+        tags: ['PosMenuTags'], security,
+        summary: 'List active tags of one type',
+        description: 'Unpaginated on purpose — a picker needs every tag of its type, and a dropdown that silently stops at 10 hides options.',
+        parameters: [{ name: 'tagType', in: 'path', required: true, schema: { type: 'string', enum: ['CATEGORY', 'BEVERAGE', 'CUISINE'] } }],
+        responses: { ...singleResponse('PosMenuTag'), ...responses.validation, ...responses.unauthorized },
+      },
+    },
+    '/api/pos/addons/group/{addonGroupId}': {
+      get: {
+        tags: ['PosAddons'], security,
+        summary: 'List every option in one add-on group',
+        description: 'Unpaginated on purpose — a group is drawn as one block, and a truncated choice list hides options a customer can order.',
+        parameters: [{ name: 'addonGroupId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { ...singleResponse('PosAddon'), ...responses.validation, ...responses.unauthorized },
+      },
+    },
+    '/api/pos/rejection-reasons/portal/{portalId}': {
+      get: {
+        tags: ['PosRejectionReasons'], security,
+        summary: 'Reasons a reject dialog may offer for one portal',
+        description: 'That portal own reasons PLUS every house reason (PortalId null). Unpaginated — the dialog needs all of them at once.',
+        parameters: [{ name: 'portalId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { ...singleResponse('PosRejectionReason'), ...responses.validation, ...responses.unauthorized },
+      },
+    },
     ...crudPaths('PosCustomers', '/api/pos/customers', 'PosCustomerCreate', 'PosCustomerUpdate', 'PosCustomer', false),
     ...crudPaths('PosOrders', '/api/pos/orders', 'PosOrderCreate', 'PosOrderUpdate', 'PosOrder', false),
     ...crudPaths('PosKots', '/api/pos/kots', 'PosKotCreate', 'PosKotUpdate', 'PosKot', false),
@@ -4308,25 +4701,6 @@ const swaggerSpec = {
         },
       },
     },
-    '/api/admin/users/{phone}': {
-      delete: {
-        tags: ['AdminUsers'],
-        summary: 'Remove a user from THIS tenancy',
-        description: 'Membership-scoped, never a global delete. There is no users table — identity '
-          + 'is the Google account — so this ends the membership and its role grants for the '
-          + 'caller\'s tenancy only. A person who belongs to other tenancies keeps those; a person '
-          + 'left with none becomes an unprovisioned email and starts fresh on their next sign-in '
-          + '(a new onboarding request, or a new tenancy if auto-approval is on). '
-          + 'Use PUT /users/{email}/status to suspend reversibly instead.',
-        security,
-        parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
-        responses: {
-          200: { description: 'Removed from this tenancy' },
-          403: { description: 'You cannot remove your own account' },
-          ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
-        },
-      },
-    },
     '/api/admin/invitations': {
       get: {
         tags: ['Invitations'],
@@ -4757,11 +5131,27 @@ const swaggerSpec = {
       },
       delete: {
         tags: ['Admin — Users'],
-        summary: 'Remove user from tenant',
-        description: '**Protected operation.** Rejected with 403 when the target email matches the authenticated caller — you cannot remove your own account. Email matching is case-insensitive.',
+        summary: 'Remove a user from THIS tenancy',
+        // Merged from a second, DUPLICATE '/api/admin/users/{phone}' key that
+        // sat earlier in this same object. A later duplicate key overwrites an
+        // earlier one, so that block was dead — every word of it was silently
+        // dropped from the published docs, including the membership-scoping
+        // explanation below, which is the part a caller most needs.
+        description: 'Membership-scoped, never a global delete. Identity is the mobile number, so this '
+          + 'ends the membership and its role grants for the caller\'s tenancy ONLY. A person who '
+          + 'belongs to other tenancies keeps those; a person left with none becomes unprovisioned '
+          + 'and starts fresh on their next sign-in (a new onboarding request, or a new tenancy if '
+          + 'auto-approval is on). '
+          + '**Protected operation:** rejected with 403 when the target matches the authenticated '
+          + 'caller — you cannot remove your own account. '
+          + 'Use PUT /users/{phone}/status to suspend reversibly instead.',
         security,
         parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
-        responses: { 200: { description: 'Removed' }, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+        responses: {
+          200: { description: 'Removed from this tenancy' },
+          403: { description: 'You cannot remove your own account' },
+          ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
+        },
       },
     },
     '/api/admin/users/{email}/roles': {

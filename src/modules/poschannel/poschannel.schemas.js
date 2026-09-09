@@ -2,6 +2,7 @@
 // Joi validation schemas for POS Channel master operations.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 
 const createSchema = Joi.object({
   Name: Joi.string().max(100).trim().required(),
@@ -25,7 +26,7 @@ const paginationSchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 module.exports = { createSchema, updateSchema, paginationSchema, uuidParamSchema };

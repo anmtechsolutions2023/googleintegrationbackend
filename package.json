@@ -11,6 +11,8 @@
     "test:report": "jest --coverage --coverageReporters=html && echo 'Coverage report at coverage/index.html'",
     "test:watch": "jest --watch",
     "admin:token": "node scripts/admin-token.js",
+    "db:reset": "node scripts/reset-db.js",
+    "mock:graph": "node scripts/mock-graph.js",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix"
   },

@@ -177,6 +177,30 @@ const findAndGetPermissions = async (req, userData) => {
             [phone, newTenantId]
           );
 
+          // Read everything that needs THIS connection before giving it back.
+          // A freshly auto-provisioned tenant has no tenant_setup row, so this
+          // resolves to false and the new tenant admin lands in the wizard.
+          const setupCompleted = await setupRepository.isSetupComplete(
+            newTenantId,
+            connection
+          );
+
+          // Hand the connection back BEFORE writing the audit row.
+          //
+          // captureAudit goes through the POOL (db.execute), so calling it while
+          // still holding a connection makes this request cost TWO — the exact
+          // shape config.js warns about. It deadlocked in practice: one page
+          // load fires six parallel calls against a pool of four, and this path
+          // is slow enough (a whole tenant is provisioned first) to still be
+          // holding its connection when they land. Every one of them then waits
+          // for a connection nobody is left to release, and mysql2 has no
+          // acquire timeout to break the tie — sign-up hung forever while the
+          // tenancy sat committed in the database.
+          //
+          // Nulled so the outer finally does not release it a second time.
+          connection.release();
+          connection = null;
+
           await captureAudit(
             req, newTenantId, phone,
             AUDIT_ACTIONS.ONBOARDING_AUTO_APPROVED, STATUSES.SUCCESS,
@@ -191,12 +215,7 @@ const findAndGetPermissions = async (req, userData) => {
             permissions,
             roles: roleRows.map((r) => r.role_name),
             associatedTenants: newTenantRows,
-            // A freshly auto-provisioned tenant has no tenant_setup row, so this
-            // resolves to false and the new tenant admin lands in the wizard.
-            setupCompleted: await setupRepository.isSetupComplete(
-              newTenantId,
-              connection
-            ),
+            setupCompleted,
           };
         } catch (autoErr) {
           logger.error(
@@ -215,6 +234,13 @@ const findAndGetPermissions = async (req, userData) => {
       ]);
       onboardingStatus = 'PENDING';
     }
+
+    // Same reason as the auto-approval path above: captureAudit takes its own
+    // connection from the pool, so holding one here would make this request
+    // cost two and starve a pool that a single page load already saturates.
+    // Everything that needed the connection is done by this point.
+    connection.release();
+    connection = null;
 
     await captureAudit(
       req, null, phone,

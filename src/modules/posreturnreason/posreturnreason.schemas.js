@@ -2,6 +2,7 @@
 // Joi validation for the return-reason master.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 
 const createSchema = Joi.object({
   Name: Joi.string().max(100).trim().required(),
@@ -28,6 +29,6 @@ const paginationSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).optional().default(10),
 });
 
-const uuidParamSchema = Joi.object({ id: Joi.string().uuid().required() });
+const uuidParamSchema = Joi.object({ id: entityId.required() });
 
 module.exports = { createSchema, updateSchema, paginationSchema, uuidParamSchema };

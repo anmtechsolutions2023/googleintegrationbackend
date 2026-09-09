@@ -62,6 +62,11 @@ const COMMON_FIELDS = {
   lineUnitPrice: 'unit_price',
   lineAddOns: 'addons',
   lineNotes: 'instructions',
+  // Order-level, as opposed to lineNotes which is per dish. Both exist because
+  // portals send both, and "no onions on the paneer" is a different instruction
+  // from "please ring the bell twice".
+  cookingInstructions: 'order.instructions',
+  noCutlery: 'order.no_cutlery',
   totalItems: 'order.totals.subtotal',
   totalDiscount: 'order.totals.discount',
   totalPacking: 'order.totals.packing_charge',

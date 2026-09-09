@@ -60,6 +60,9 @@ class PosOnlineOrderService extends BaseCRUDService {
       data.CancelReason ?? null,
       data.CancelledBy ?? null,
       data.BranchDetailId ?? null,
+      // Promoted out of the raw payload so the KOT writer can reach them.
+      data.CookingInstructions ?? null,
+      data.NoCutlery ? 1 : 0,
       data.Active !== undefined ? data.Active : true,
       userPhone,
       userPhone,
@@ -101,6 +104,8 @@ class PosOnlineOrderService extends BaseCRUDService {
       keep('CancelReason'),
       keep('CancelledBy'),
       keep('BranchDetailId'),
+      keep('CookingInstructions'),
+      keep('NoCutlery'),
       keep('Active'),
       userPhone,
       id,

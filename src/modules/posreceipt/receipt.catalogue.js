@@ -295,6 +295,15 @@ const DOCUMENTS = {
           'Quantity first at double height. A "2" hidden after a long dish name gets read as a 1.'),
         conditional('itemNotes', 'Modifiers & notes', VISIBILITY.ALWAYS,
           '"Jain, no onion". The single most important line on this ticket.'),
+        // Order-level, as opposed to itemNotes which is per dish. Portals send
+        // both, and "extra spicy overall" is a different instruction from
+        // "no onions on the paneer".
+        conditional('orderInstructions', 'Order instructions', VISIBILITY.ALWAYS,
+          'What the customer asked of the whole order, not of one dish. Arrives on portal orders and used to be lost inside the raw payload.'),
+        // Its own line because it is acted on by the person BAGGING the order,
+        // who is not reading the dish notes.
+        conditional('noCutlery', 'No cutlery', VISIBILITY.ALWAYS,
+          'Prints only when the customer asked for none. A flag rather than a phrase, so it cannot be missed inside a sentence.'),
         vis('foodTypeMark', 'Veg / non-veg mark', VISIBILITY.NEVER),
       ] },
       { key: 'paper', label: 'Paper & hardware', fields: [

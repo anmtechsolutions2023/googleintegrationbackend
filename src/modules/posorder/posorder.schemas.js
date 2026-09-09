@@ -2,6 +2,7 @@
 // Joi validation schemas for POS Order operations.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { POS_ORDER_STATUSES, POS_ORDER_TYPES } = require('../../config/constants');
 
 // Canonical lowercase enums, normalized on write. Status and OrderType were both
@@ -15,8 +16,8 @@ const orderTypeField = Joi.string().lowercase().valid(...POS_ORDER_TYPES);
 // ~16m40s and collided with UNIQUE (OrderNo, TenantId). Any value sent is ignored.
 const createSchema = Joi.object({
   OrderNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  TableId: Joi.string().uuid().optional().allow(null),
-  CustomerId: Joi.string().uuid().optional().allow(null),
+  TableId: entityId.optional().allow(null),
+  CustomerId: entityId.optional().allow(null),
   OrderType: orderTypeField.optional().allow(null, '').default('dinein'),
   // A round is born open — the client does not choose this. Both columns are
   // NOT NULL, so an omitted Status has to resolve to a value before it reaches
@@ -26,21 +27,21 @@ const createSchema = Joi.object({
   SubTotal: Joi.number().optional().default(0).allow(null),
   TaxAmount: Joi.number().optional().default(0).allow(null),
   Total: Joi.number().optional().default(0).allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   OrderNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  TableId: Joi.string().uuid().optional().allow(null),
-  CustomerId: Joi.string().uuid().optional().allow(null),
+  TableId: entityId.optional().allow(null),
+  CustomerId: entityId.optional().allow(null),
   OrderType: orderTypeField.optional().allow(null, ''),
   Status: statusField.optional().allow(null, ''),
   Items: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   SubTotal: Joi.number().optional().allow(null),
   TaxAmount: Joi.number().optional().allow(null),
   Total: Joi.number().optional().allow(null),
-  BranchDetailId: Joi.string().uuid().optional().allow(null),
+  BranchDetailId: entityId.optional().allow(null),
   Active: Joi.boolean().optional(),
 }).min(1);
 
@@ -51,14 +52,14 @@ const paginationSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).optional().default(10),
   // One table's rounds. Lets Billing resume an occupied table's session without
   // pulling and locally filtering the whole (page-capped) order list.
-  tableId: Joi.string().uuid().optional(),
+  tableId: entityId.optional(),
   // Only rounds still part of a live session — a settled table must not look
   // occupied just because it traded earlier today.
   openOnly: Joi.boolean().optional().default(false),
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 // Table transfer — one of three shapes keyed by `scope`:
@@ -72,16 +73,16 @@ const transferItemSchema = Joi.object({
 
 const transferSchema = Joi.object({
   scope: Joi.string().valid('orders', 'items', 'merge').required(),
-  toTableId: Joi.string().uuid().when('scope', {
+  toTableId: entityId.when('scope', {
     is: 'merge', then: Joi.optional().allow(null), otherwise: Joi.required(),
   }),
-  orderIds: Joi.array().items(Joi.string().uuid()).min(1).when('scope', {
+  orderIds: Joi.array().items(entityId).min(1).when('scope', {
     is: 'orders', then: Joi.required(), otherwise: Joi.forbidden(),
   }),
-  sourceOrderId: Joi.string().uuid().when('scope', {
+  sourceOrderId: entityId.when('scope', {
     is: Joi.valid('items', 'merge'), then: Joi.required(), otherwise: Joi.forbidden(),
   }),
-  targetOrderId: Joi.string().uuid().when('scope', {
+  targetOrderId: entityId.when('scope', {
     is: 'merge', then: Joi.required(), otherwise: Joi.forbidden(),
   }),
   items: Joi.array().items(transferItemSchema).min(1).when('scope', {

@@ -127,6 +127,11 @@ class HttpAggregatorAdapter extends BaseAdapter {
         maskedPhone: at(payload, f.customerPhone) ?? null,
         externalCustomerRef: at(payload, f.customerRef) ?? null,
       },
+      // Read through the same configurable path map as everything else, so a
+      // portal that names the field differently is a config change rather than
+      // a code change — which is what the adapter pattern is for.
+      cookingInstructions: f.cookingInstructions ? at(payload, f.cookingInstructions) ?? null : null,
+      noCutlery: f.noCutlery ? !!at(payload, f.noCutlery) : false,
       lines: lines.map((l) => ({
         externalItemId: at(l, f.lineItemId) ?? null,
         name: at(l, f.lineName) ?? null,

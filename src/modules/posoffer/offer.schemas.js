@@ -6,9 +6,10 @@
 // needs the whole object at once and belongs beside the rule engine it protects.
 
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
 const { TRIGGER, REWARD, APPLY_TO } = require('./offer.evaluator');
 
-const idParamSchema = Joi.object({ id: Joi.string().uuid().required() });
+const idParamSchema = Joi.object({ id: entityId.required() });
 
 const campaignSchema = Joi.object({
   Name: Joi.string().max(150).trim().required(),
@@ -26,7 +27,7 @@ const campaignSchema = Joi.object({
   BudgetAmount: Joi.number().min(0).allow(null),
   Status: Joi.string().valid('DRAFT', 'ACTIVE', 'PAUSED'),
   // Empty means EVERY branch.
-  branchIds: Joi.array().items(Joi.string().uuid()).max(200),
+  branchIds: Joi.array().items(entityId).max(200),
 });
 
 const campaignUpdateSchema = campaignSchema.fork(
@@ -42,13 +43,13 @@ const offerSchema = Joi.object({
   SortOrder: Joi.number().integer().min(0).max(9999),
 
   TriggerKind: Joi.string().valid(...Object.values(TRIGGER)).required(),
-  TriggerItemId: Joi.string().uuid().allow(null),
-  TriggerCategoryId: Joi.string().uuid().allow(null),
+  TriggerItemId: entityId.allow(null),
+  TriggerCategoryId: entityId.allow(null),
   TriggerMinQty: Joi.number().min(0).max(9999).allow(null),
   TriggerMinAmount: Joi.number().min(0).allow(null),
 
   RewardKind: Joi.string().valid(...Object.values(REWARD)).required(),
-  RewardItemId: Joi.string().uuid().allow(null),
+  RewardItemId: entityId.allow(null),
   RewardQuantity: Joi.number().min(0).max(9999),
   RewardPercent: Joi.number().min(0).max(100),
   ApplyTo: Joi.string().valid(...Object.values(APPLY_TO)),
@@ -65,14 +66,14 @@ const offerUpdateSchema = offerSchema.fork(
 // The till's preview. Lines are sent as the cart stands, so the answer is about
 // THIS bill rather than a saved one.
 const previewSchema = Joi.object({
-  branchId: Joi.string().uuid().allow(null),
+  branchId: entityId.allow(null),
   // Whose bill it is. A per-customer daily cap cannot apply to a walk-in, so
   // this being absent is a valid answer rather than a missing field.
-  posCustomerId: Joi.string().uuid().allow(null),
+  posCustomerId: entityId.allow(null),
   lines: Joi.array().items(Joi.object({
     ref: Joi.string().max(120).required(),
-    itemId: Joi.string().uuid().allow(null),
-    categoryId: Joi.string().uuid().allow(null),
+    itemId: entityId.allow(null),
+    categoryId: entityId.allow(null),
     name: Joi.string().max(200).allow('', null),
     unitAmount: Joi.number().min(0).required(),
     quantity: Joi.number().min(0).required(),

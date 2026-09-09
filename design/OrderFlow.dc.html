@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif; }
+    a { color: #2980b9; } a:hover { color: #0f3460; }
+    .lbl { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #7f8c8d; margin-bottom: 4px; display: block; }
+    .step { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #0f3460; }
+    .card { background: #ffffff; border: 1px solid #e1e5eb; border-radius: 6px; }
+  </style>
+</helmet>
+
+<div style="width: 1040px; min-height: 980px; background: #f5f7fa; padding: 28px 32px;">
+
+  <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 4px;">Front Desk › Operations › Online Orders</div>
+  <h1 style="margin: 0 0 6px; font-size: 22px; font-weight: 600; color: #2c3e50;">Accepting a Zomato order</h1>
+  <p style="margin: 0 0 22px; font-size: 13px; line-height: 1.6; color: #5a6c7d; max-width: 70ch;">
+    Two things changed on this screen: you now commit to a <strong style="color: #2c3e50;">prep time</strong>, and the customer’s <strong style="color: #2c3e50;">cooking instructions</strong> finally reach the kitchen.
+  </p>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 18px;">
+
+    <!-- The order as it arrives -->
+    <div class="card" style="padding: 0; overflow: hidden;">
+      <div style="padding: 12px 16px; background: #f8fafc; border-bottom: 1px solid #e1e5eb; display: flex; align-items: center; gap: 10px;">
+        <span style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; background: #E23744; color: #ffffff; font-size: 11px; font-weight: 700;">ZO</span>
+        <span style="font-size: 14px; font-weight: 600; color: #2c3e50;">ZOM-48213</span>
+        <span style="margin-left: auto; font-size: 11px; font-weight: 600; color: #a05a12; background: #fdf3e3; padding: 3px 9px; border-radius: 20px;">Accept within 4:12</span>
+      </div>
+
+      <div style="padding: 16px;">
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eef2f7;">
+          <div style="font-size: 13px; color: #2c3e50;"><strong>2 ×</strong> Butter Chicken <span style="color: #7f8c8d;">· Full</span></div>
+          <div style="font-size: 13px; color: #2c3e50;">₹ 640</div>
+        </div>
+        <div style="padding: 4px 0 8px 14px; font-size: 12px; color: #5a6c7d; border-bottom: 1px solid #eef2f7;">
+          + Extra Chicken · No onions
+        </div>
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eef2f7;">
+          <div style="font-size: 13px; color: #2c3e50;"><strong>1 ×</strong> Garlic Naan</div>
+          <div style="font-size: 13px; color: #2c3e50;">₹ 70</div>
+        </div>
+
+        <div style="margin-top: 14px; padding: 12px 14px; background: #fffaf0; border: 1px solid #e8c48a; border-radius: 6px;">
+          <div class="lbl" style="color: #a05a12;">Customer instructions</div>
+          <div style="font-size: 13px; color: #6b4415; line-height: 1.5;">“Ring the bell twice. Please make it extra spicy.”</div>
+          <div style="margin-top: 8px; display: inline-block; padding: 3px 9px; background: #6b4415; color: #ffffff; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;">NO CUTLERY</div>
+        </div>
+
+        <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #e1e5eb; display: flex; flex-direction: column; gap: 5px;">
+          <div style="display: flex; justify-content: space-between; font-size: 12.5px; color: #5a6c7d;"><span>Packing</span><span>₹ 20</span></div>
+          <div style="display: flex; justify-content: space-between; font-size: 12.5px; color: #5a6c7d;"><span>Commission (18%)</span><span>− ₹ 131</span></div>
+          <div style="display: flex; justify-content: space-between; font-size: 14px; color: #2c3e50; font-weight: 600; padding-top: 5px;"><span>Net payout</span><span>₹ 599</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- The accept action -->
+    <div class="card" style="padding: 18px 20px; align-self: start;">
+      <div class="step" style="margin-bottom: 10px;">The accept action</div>
+
+      <div style="display: flex; gap: 10px; align-items: end; margin-bottom: 14px;">
+        <div style="flex: 0 0 92px;">
+          <span class="lbl">Prep mins</span>
+          <div style="padding: 9px 10px; border: 1px solid #d0d4da; border-radius: 6px; background: #ffffff; font-size: 14px; color: #95a5a6; text-align: center; font-style: italic;">auto</div>
+        </div>
+        <div style="flex: 1; padding: 12px 14px; border-radius: 6px; background: #27ae60; color: #ffffff; font-size: 15px; font-weight: 600; text-align: center;">Accept &amp; fire KOT</div>
+        <div style="padding: 12px 14px; border-radius: 6px; border: 1px solid #d0d4da; background: #ffffff; color: #2c3e50; font-size: 14px; font-weight: 500;">Reject</div>
+      </div>
+
+      <p style="margin: 0 0 16px; font-size: 12.5px; line-height: 1.55; color: #7f8c8d;">
+        Leave it on <em>auto</em> and one tap accepts — the busy path. Type a number only when you can see the kitchen and the system can’t.
+      </p>
+
+      <div style="background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 6px; padding: 14px 16px;">
+        <div style="font-size: 13px; font-weight: 600; color: #2c3e50; margin-bottom: 9px;">How “auto” picks the number</div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: #5a6c7d;">
+            <span style="flex: none; width: 17px; height: 17px; border-radius: 50%; background: #d0d4da; color: #ffffff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">1</span>
+            <span>What you typed <span style="color: #95a5a6;">— nothing this time</span></span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: #2c3e50; font-weight: 600;">
+            <span style="flex: none; width: 17px; height: 17px; border-radius: 50%; background: #27ae60; color: #ffffff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">2</span>
+            <span>The slowest dish on the order → <strong>18 min</strong></span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: #95a5a6;">
+            <span style="flex: none; width: 17px; height: 17px; border-radius: 50%; background: #d0d4da; color: #ffffff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">3</span>
+            <span>This branch’s default</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: #95a5a6;">
+            <span style="flex: none; width: 17px; height: 17px; border-radius: 50%; background: #d0d4da; color: #ffffff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">4</span>
+            <span>20 min, so it is never blank</span>
+          </div>
+        </div>
+        <p style="margin: 11px 0 0; font-size: 12px; line-height: 1.5; color: #7f8c8d;">
+          Butter Chicken is 18 min, Garlic Naan 6. The kitchen isn’t finished until its <em>slowest</em> dish is, so the promise is 18 — not the average, not the total.
+        </p>
+      </div>
+
+      <div style="margin-top: 14px; padding: 12px 14px; background: #e8f6ee; border: 1px solid #7fc99b; border-radius: 6px;">
+        <div style="font-size: 13px; font-weight: 600; color: #1e8449; margin-bottom: 3px;">Accepted — ORD-0142 sent to the kitchen as KOT-0087 · 18 min prep</div>
+        <div style="font-size: 12.5px; color: #2f6b47; line-height: 1.5;">Zomato is told 18 minutes, and the same number is stored against the order with the moment you promised it.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top: 20px; background: #ffffff; border: 1px solid #e1e5eb; border-radius: 6px; padding: 18px 22px;">
+    <div style="font-size: 15px; font-weight: 600; color: #2c3e50; margin-bottom: 12px;">Where each new piece does its work</div>
+    <div style="display: flex; align-items: stretch; gap: 10px;">
+      <div style="flex: 1; padding: 12px 14px; background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 6px;">
+        <div class="step">1 · Arrives</div>
+        <div style="font-size: 12.5px; color: #5a6c7d; line-height: 1.5; margin-top: 5px;">Instructions and the cutlery flag are lifted out of Zomato’s raw payload into real fields.</div>
+      </div>
+      <div style="align-self: center; color: #95a5a6;">→</div>
+      <div style="flex: 1; padding: 12px 14px; background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 6px;">
+        <div class="step">2 · Accept</div>
+        <div style="font-size: 12.5px; color: #5a6c7d; line-height: 1.5; margin-top: 5px;">Prep time is decided from the menu’s own timings and pushed back to Zomato.</div>
+      </div>
+      <div style="align-self: center; color: #95a5a6;">→</div>
+      <div style="flex: 1; padding: 12px 14px; background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 6px;">
+        <div class="step">3 · Kitchen</div>
+        <div style="font-size: 12.5px; color: #5a6c7d; line-height: 1.5; margin-top: 5px;">The ticket carries the instructions — copied at the moment it fired, so a later edit can’t rewrite paper on the pass.</div>
+      </div>
+      <div style="align-self: center; color: #95a5a6;">→</div>
+      <div style="flex: 1; padding: 12px 14px; background: #f8fafc; border: 1px solid #e1e5eb; border-radius: 6px;">
+        <div class="step">4 · Bill</div>
+        <div style="font-size: 12.5px; color: #5a6c7d; line-height: 1.5; margin-top: 5px;">Unchanged — the order reaches the ledger by the road every other sale already travels.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -39,15 +39,23 @@ class PosKotService extends BaseCRUDService {
    * @returns {Promise<Object>} Updated KOT
    */
   async setStatus(id, tenantId, userPhone, status = 'ready') {
+    // Both reads borrow THIS connection. Without the 4th argument each took a
+    // second one from the pool while the outer withConnection still held the
+    // first, so one "Mark Ready" cost three acquisitions and held two at once.
+    // At CONNECTION_LIMIT 4 that is four cooks tapping Ready between them:
+    // every one holds a connection and waits for another nobody is left to
+    // release, and mysql2 has no acquire timeout, so the wait never ends. The
+    // KDS saw it as a request that hung until the client gave up at 30s —
+    // "Failed to mark KOT ready" — and the wedged pool then hung the whole app.
     return withConnection(async (connection) => {
-      await this.getById(id, tenantId); // 404 if missing (reuses base + HttpError)
+      await this.getById(id, tenantId, false, connection); // 404 if missing
       await connection.execute(this.queries.SET_STATUS, [
         status,
         userPhone,
         id,
         tenantId,
       ]);
-      return this.getById(id, tenantId);
+      return this.getById(id, tenantId, false, connection);
     });
   }
 

@@ -27,7 +27,9 @@ module.exports = {
     // waits for another that nobody is left to release, and mysql2 has no
     // acquire timeout to break the tie. withConnection takes an existing
     // connection for exactly this reason — pass yours down rather than nesting.
-    CONNECTION_LIMIT: 4, // Maximum number of connections in the pool
+    // Env-overridable so a live connection squeeze can be fixed from the
+    // Vercel dashboard rather than a redeploy.
+    CONNECTION_LIMIT: parseInt(process.env.DB_CONNECTION_LIMIT, 10) || 4,
     // How many of those may sit IDLE, and for how long.
     //
     // MAX_IDLE is not a nicety, it is what makes IDLE_TIMEOUT_MS run at all.
@@ -51,18 +53,18 @@ module.exports = {
     // state per instance is therefore MAX_IDLE, not CONNECTION_LIMIT — that is
     // the number to multiply by warm instances when checking it against
     // max_connections.
-    MAX_IDLE: 1,
+    MAX_IDLE: parseInt(process.env.DB_MAX_IDLE, 10) || 1,
     // Long enough that someone clicking between screens keeps reusing the same
     // connection — a new one costs a TCP and TLS handshake to a managed host —
     // and short enough that an instance the platform has finished with hands
     // its last connection back instead of parking it until the process dies.
     // The sweeper ticks once a second, so this value is the resolution that
     // matters rather than the poll interval.
-    IDLE_TIMEOUT_MS: 30000,
+    IDLE_TIMEOUT_MS: parseInt(process.env.DB_IDLE_TIMEOUT_MS, 10) || 30000,
     // Bounded so an overloaded instance fails fast instead of queueing without
     // limit. Unlimited queueing turns a busy minute into requests that hang until
     // the caller times out, which reads as an outage; a refusal reads as load.
-    QUEUE_LIMIT: 20, // Maximum number of connection requests to queue
+    QUEUE_LIMIT: parseInt(process.env.DB_QUEUE_LIMIT, 10) || 20,
     CONNECT_TIMEOUT_MS: 5000, // Give up on an unreachable host well before the platform does
 
     // Cache configuration
@@ -96,13 +98,13 @@ module.exports = {
   // so there is one place to tune throttles; this exists only so a consumer
   // written against the old shape does not silently read undefined.
   get RATE_LIMIT() {
-    const rl = require('./rateLimits');
+    const rl = require('./rateLimits')
     return {
       AUTH_WINDOW_MS: rl.HTTP.WINDOW_MS,
       AUTH_MAX_REQUESTS: rl.HTTP.MAX_REQUESTS,
       STANDARD_HEADERS: rl.HTTP.STANDARD_HEADERS,
       LEGACY_HEADERS: rl.HTTP.LEGACY_HEADERS,
-    };
+    }
   },
 
   // ============================================
@@ -131,13 +133,26 @@ module.exports = {
     // Pinned, not floating: Meta deprecates Graph versions on a published
     // clock, and a silent bump changes payload shapes under us.
     GRAPH_VERSION: process.env.WA_GRAPH_VERSION || 'v21.0',
-    GRAPH_BASE_URL: 'https://graph.facebook.com',
+    // Overridable ONLY outside production, so local development can point at a
+    // stand-in Graph API and sign in with no internet (scripts/mock-graph.js).
+    //
+    // Production ignores the variable entirely rather than trusting it to be
+    // unset. This is a redirect of the channel that carries every login code:
+    // if it were ever set on the deployed environment — a copied .env, a shared
+    // Vercel variable, a typo — every OTP would be posted to somewhere else and
+    // sign-in would fail for everybody, or worse, succeed against a host we do
+    // not control. A fallback is not enough protection for that; being
+    // unreachable in production is.
+    GRAPH_BASE_URL:
+      process.env.NODE_ENV === 'production'
+        ? 'https://graph.facebook.com'
+        : process.env.WA_GRAPH_BASE_URL || 'https://graph.facebook.com',
 
     PHONE_NUMBER_ID: process.env.WA_PHONE_NUMBER_ID,
     BUSINESS_ACCOUNT_ID: process.env.WA_BUSINESS_ACCOUNT_ID,
 
-    ACCESS_TOKEN: process.env.WA_ACCESS_TOKEN,           // secret
-    APP_SECRET: process.env.WA_APP_SECRET,               // secret
+    ACCESS_TOKEN: process.env.WA_ACCESS_TOKEN, // secret
+    APP_SECRET: process.env.WA_APP_SECRET, // secret
     WEBHOOK_VERIFY_TOKEN: process.env.WA_WEBHOOK_VERIFY_TOKEN,
 
     // Must match the approved template EXACTLY. 'en' is not 'en_US', and the

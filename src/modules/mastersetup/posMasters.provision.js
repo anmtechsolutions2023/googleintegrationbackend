@@ -81,6 +81,57 @@ const FOOD_TYPES = [
   ['Non-Veg', 'NONVEG', 0, 3],
 ];
 
+// What KIND of meat — ORTHOGONAL to food type, not a refinement of it. A dish
+// is Non-Veg (food type) AND Chicken (meat type); aggregators filter on the
+// second, and a diner avoiding pork is filtering on nothing else.
+// [Name, Code, Description, SortOrder]
+const MEAT_TYPES = [
+  ['Chicken', 'CHICKEN', 'Poultry', 1],
+  ['Mutton', 'MUTTON', 'Goat or lamb', 2],
+  ['Beef', 'BEEF', 'Beef and veal', 3],
+  ['Pork', 'PORK', 'Pork and pork products', 4],
+  ['Fish', 'FISH', 'Finned fish', 5],
+  ['Shellfish', 'SHELLFISH', 'Prawn, crab, squid, clam', 6],
+  ['Egg', 'EGG', 'Egg as the primary protein', 7],
+];
+
+// One tag master, three TagTypes. A separate table per tag kind is how a
+// taxonomy becomes three half-maintained tables that disagree with each other.
+// [Name, Code, TagType, SortOrder]
+const MENU_TAGS = [
+  ['Starter', 'STARTER', 'CATEGORY', 1],
+  ['Main Course', 'MAIN', 'CATEGORY', 2],
+  ['Dessert', 'DESSERT', 'CATEGORY', 3],
+  ['Bread', 'BREAD', 'CATEGORY', 4],
+  ['Soft Drink', 'SOFTDRINK', 'BEVERAGE', 5],
+  ['Juice', 'JUICE', 'BEVERAGE', 6],
+  ['Hot Beverage', 'HOTBEV', 'BEVERAGE', 7],
+  ['Shake', 'SHAKE', 'BEVERAGE', 8],
+  ['North Indian', 'NORTHIND', 'CUISINE', 9],
+  ['South Indian', 'SOUTHIND', 'CUISINE', 10],
+  ['Chinese', 'CHINESE', 'CUISINE', 11],
+  ['Continental', 'CONTINENTAL', 'CUISINE', 12],
+];
+
+// Why an order was refused, in a controlled vocabulary — free text cannot
+// answer "why did we reject 40 orders last week".
+//
+// ExternalCode is deliberately absent: each portal publishes its own codes, and
+// inventing them here would push a wrong value to a live API on the first
+// rejection. They are mapped per portal during certification.
+//
+// RequiresItems on ITEM_OOS is load-bearing — the portal has to be told WHICH
+// dish ran out, and the reject path refuses a rejection that cannot say.
+// [Name, Code, RequiresItems, Description, SortOrder]
+const REJECTION_REASONS = [
+  ['Item out of stock', 'ITEM_OOS', 1, 'One or more dishes cannot be made right now', 1],
+  ['Kitchen at capacity', 'KITCHEN_FULL', 0, 'The kitchen cannot take another order right now', 2],
+  ['Outlet closed', 'OUTLET_CLOSED', 0, 'Order arrived outside trading hours', 3],
+  ['Outside delivery area', 'OUT_OF_AREA', 0, 'Address is beyond the branch delivery radius', 4],
+  ['No rider available', 'RIDER_UNAVAILABLE', 0, 'No delivery partner could be assigned', 5],
+  ['Other', 'OTHER', 0, 'Use the note to say what happened', 6],
+];
+
 // A tax group with NO tax types mapped into it — which is exactly how the
 // pricing chain already expresses "no tax on this item".
 //
@@ -273,6 +324,36 @@ const provisionPosMasters = async (conn, { tenantId }, userPhone) => {
     );
   }
 
+  // Meat types. Optional on an item, unlike food type — a vegetarian kitchen
+  // never sets one — so nothing breaks without them, but a portal filter has
+  // nothing to filter on.
+  for (const [Name, Code, Description, SortOrder] of MEAT_TYPES) {
+    await ensureByName(
+      conn, 'pos_meat_type', 'Code', Code, tenantId,
+      'INSERT INTO pos_meat_type (Id, Name, Code, Description, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)',
+      (id) => [id, Name, Code, Description, SortOrder, tenantId, by, by],
+    );
+  }
+
+  // Menu tags — category, beverage and cuisine, in one master.
+  for (const [Name, Code, TagType, SortOrder] of MENU_TAGS) {
+    await ensureByName(
+      conn, 'pos_menu_tag', 'Code', Code, tenantId,
+      'INSERT INTO pos_menu_tag (Id, Name, Code, TagType, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)',
+      (id) => [id, Name, Code, TagType, SortOrder, tenantId, by, by],
+    );
+  }
+
+  // Rejection reasons. House reasons, PortalId NULL, so they apply on every
+  // portal until certification maps an ExternalCode for a specific one.
+  for (const [Name, Code, RequiresItems, Description, SortOrder] of REJECTION_REASONS) {
+    await ensureByName(
+      conn, 'pos_rejection_reason', 'Code', Code, tenantId,
+      'INSERT INTO pos_rejection_reason (Id, Name, Code, ExternalCode, PortalId, RequiresItems, Description, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, 1, NOW(), ?, ?)',
+      (id) => [id, Name, Code, RequiresItems, Description, SortOrder, tenantId, by, by],
+    );
+  }
+
   // Sales channels. Nothing seeded these before, which is why
   // pos_item_meta_channel had nothing to point at and Billing's channel filter
   // had no data to filter on.
@@ -390,6 +471,9 @@ module.exports = {
   EXPENSE_CATEGORIES,
   ASSET_CATEGORIES,
   FOOD_TYPES,
+  MEAT_TYPES,
+  MENU_TAGS,
+  REJECTION_REASONS,
   EXEMPT_TAX_GROUP,
   CHANNELS,
   PORTALS,

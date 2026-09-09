@@ -1,8 +1,17 @@
 // src/modules/paymentmodetransactiondetail/paymentmodetransactiondetail.schemas.js
 const Joi = require('joi');
+const { entityId } = require('../../utils/idSchema');
+const { joinedEchoes } = require('../../utils/joinedEchoes');
+const { QUERIES } = require('../../config/constants');
 
 const createSchema = Joi.object({
-  PaymentModeId: Joi.string().uuid().required(),
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.PAYMENT_MODE_TRANSACTION_DETAIL),
+  PaymentModeId: entityId.required(),
   RefNo: Joi.string().optional().max(50).trim().allow(null, ''),
   Comment: Joi.string().optional().max(100).trim().allow(null, ''),
   CF1: Joi.string().optional().max(50).trim().allow(null, ''),
@@ -13,7 +22,13 @@ const createSchema = Joi.object({
 });
 
 const updateSchema = Joi.object({
-  PaymentModeId: Joi.string().uuid().optional(),
+  // Every alias this module's SELECT joins in, accepted and dropped. An edit
+  // form is seeded from a GET and sends the whole row back, so a joined column
+  // would otherwise be rejected as an unknown key and refuse the whole save.
+  // First in the literal, so the real rules below override any alias that is
+  // also a genuine input.
+  ...joinedEchoes(QUERIES.PAYMENT_MODE_TRANSACTION_DETAIL),
+  PaymentModeId: entityId.optional(),
   RefNo: Joi.string().optional().max(50).trim().allow(null, ''),
   Comment: Joi.string().optional().max(100).trim().allow(null, ''),
   CF1: Joi.string().optional().max(50).trim().allow(null, ''),
@@ -30,7 +45,7 @@ const paginationSchema = Joi.object({
 });
 
 const uuidParamSchema = Joi.object({
-  id: Joi.string().uuid().required(),
+  id: entityId.required(),
 });
 
 const getByIdQuerySchema = Joi.object({

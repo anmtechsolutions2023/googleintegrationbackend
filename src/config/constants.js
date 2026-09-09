@@ -184,15 +184,31 @@ module.exports = {
       // one — 56 rows naming 'Tea' must produce a single category.
       SELECT_BY_NAME:
         'SELECT * FROM categorydetail WHERE Name = ? AND TenantId = ? LIMIT 1',
-      SELECT_ALL:
-        'SELECT * FROM categorydetail WHERE TenantId = ? ORDER BY CreatedOn DESC',
+      // ParentName is joined so a list can show "Starters → Soups" without a
+      // second call. Self-join on the SAME tenant: a parent from another
+      // tenancy is not a hierarchy, it is a leak.
+      SELECT_ALL: `SELECT c.*, p.Name AS ParentName
+        FROM categorydetail c
+        LEFT JOIN categorydetail p ON p.Id = c.ParentId AND p.TenantId = c.TenantId
+        WHERE c.TenantId = ? ORDER BY c.SortOrder ASC, c.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM categorydetail WHERE TenantId = ?',
-      SELECT_BY_ID:
-        'SELECT * FROM categorydetail WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_ID: `SELECT c.*, p.Name AS ParentName
+        FROM categorydetail c
+        LEFT JOIN categorydetail p ON p.Id = c.ParentId AND p.TenantId = c.TenantId
+        WHERE c.Id = ? AND c.TenantId = ?`,
+      // Only categories that may BE a parent: top-level ones. A menu tree is
+      // two levels deep, so anything already holding a ParentId is a leaf.
+      SELECT_PARENT_CANDIDATES: `SELECT Id, Name FROM categorydetail
+        WHERE TenantId = ? AND ParentId IS NULL AND Active = 1
+        ORDER BY SortOrder ASC, Name ASC`,
+      // Does this category have children? Asked before it is given a parent of
+      // its own, and before it is deleted.
+      COUNT_CHILDREN:
+        'SELECT COUNT(*) AS total FROM categorydetail WHERE ParentId = ? AND TenantId = ?',
       INSERT:
-        'INSERT INTO categorydetail (Id, TenantId, Name, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO categorydetail (Id, TenantId, Name, ParentId, SortOrder, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE categorydetail SET Name = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE categorydetail SET Name = ?, ParentId = ?, SortOrder = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM categorydetail WHERE Id = ? AND TenantId = ?',
     },
 
@@ -601,9 +617,9 @@ module.exports = {
         LEFT JOIN taxgroup tg ON ci.TaxGroupId = tg.Id AND tg.TenantId = i.TenantId
         WHERE i.Id = ? AND i.TenantId = ?`,
       INSERT:
-        'INSERT INTO itemdetail (Id, TenantId, Name, Code, Description, CategoryId, UOMId, CostInfoId, SKU, Barcode, HSNCode, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO itemdetail (Id, TenantId, Name, Code, Description, CategoryId, UOMId, CostInfoId, SKU, Barcode, HSNCode, SupplyType, SACCode, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE itemdetail SET Name = ?, Code = ?, Description = ?, CategoryId = ?, UOMId = ?, CostInfoId = ?, SKU = ?, Barcode = ?, HSNCode = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE itemdetail SET Name = ?, Code = ?, Description = ?, CategoryId = ?, UOMId = ?, CostInfoId = ?, SKU = ?, Barcode = ?, HSNCode = ?, SupplyType = ?, SACCode = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM itemdetail WHERE Id = ? AND TenantId = ?',
     },
 
@@ -966,6 +982,136 @@ module.exports = {
       DELETE: 'DELETE FROM pos_food_type WHERE Id = ? AND TenantId = ?',
     },
 
+    // When a category is on the menu. Day and time live in ONE row: a portal
+    // sends a timing as a single rule, and splitting them makes every read a
+    // cross-product with no way to say which time belongs to which day.
+    POS_CATEGORY_SCHEDULE: {
+      SELECT_BY_CATEGORY: `SELECT * FROM pos_category_schedule
+        WHERE CategoryId = ? AND TenantId = ?
+        ORDER BY DayOfWeek ASC, StartTime ASC`,
+      DELETE_BY_CATEGORY:
+        'DELETE FROM pos_category_schedule WHERE CategoryId = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_category_schedule (Id, CategoryId, DayOfWeek, StartTime, EndTime, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)',
+      // Every rule in the tenancy, for the menu push — one read rather than one
+      // per category.
+      SELECT_ALL_FOR_TENANT: `SELECT s.*, c.Name AS CategoryName
+        FROM pos_category_schedule s
+        JOIN categorydetail c ON c.Id = s.CategoryId AND c.TenantId = s.TenantId
+        WHERE s.TenantId = ? AND s.Active = 1
+        ORDER BY c.SortOrder ASC, s.DayOfWeek ASC, s.StartTime ASC`,
+      // Is this category on the menu right now? Counts the rules it HAS, and
+      // the rules that currently MATCH. Zero rules means always available, so
+      // the caller needs both numbers to tell "no rules" from "no match".
+      COUNT_ACTIVE_NOW: `SELECT
+          (SELECT COUNT(*) FROM pos_category_schedule
+            WHERE CategoryId = ? AND TenantId = ? AND Active = 1) AS RuleCount,
+          (SELECT COUNT(*) FROM pos_category_schedule
+            WHERE CategoryId = ? AND TenantId = ? AND Active = 1
+              AND DayOfWeek = ? AND StartTime <= ? AND EndTime > ?) AS MatchCount`,
+    },
+
+    // What KIND of meat, for portals that filter on it. Orthogonal to food
+    // type: a dish is Non-Veg AND Chicken.
+    POS_MEAT_TYPE: {
+      SELECT_ALL: 'SELECT * FROM pos_meat_type WHERE TenantId = ? ORDER BY SortOrder ASC, CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_meat_type WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_meat_type WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_CODE: 'SELECT * FROM pos_meat_type WHERE Code = ? AND TenantId = ? LIMIT 1',
+      INSERT: 'INSERT INTO pos_meat_type (Id, TenantId, Name, Code, Description, SortOrder, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_meat_type SET Name = ?, Code = ?, Description = ?, SortOrder = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_meat_type WHERE Id = ? AND TenantId = ?',
+    },
+
+    // One tag taxonomy, three TagTypes (CATEGORY / BEVERAGE / CUISINE).
+    POS_MENU_TAG: {
+      SELECT_ALL: 'SELECT * FROM pos_menu_tag WHERE TenantId = ? ORDER BY TagType ASC, SortOrder ASC, CreatedOn DESC',
+      COUNT: 'SELECT COUNT(*) as total FROM pos_menu_tag WHERE TenantId = ?',
+      SELECT_BY_ID: 'SELECT * FROM pos_menu_tag WHERE Id = ? AND TenantId = ?',
+      SELECT_BY_CODE: 'SELECT * FROM pos_menu_tag WHERE Code = ? AND TenantId = ? LIMIT 1',
+      // The menu editor offers tags one type at a time; a single list of all
+      // three would make the beverage picker show cuisines.
+      SELECT_BY_TYPE: 'SELECT * FROM pos_menu_tag WHERE TagType = ? AND TenantId = ? AND Active = 1 ORDER BY SortOrder ASC',
+      INSERT: 'INSERT INTO pos_menu_tag (Id, TenantId, Name, Code, TagType, SortOrder, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_menu_tag SET Name = ?, Code = ?, TagType = ?, SortOrder = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_menu_tag WHERE Id = ? AND TenantId = ?',
+    },
+
+    // A block of choices offered against a dish. NOT a variant — a variant
+    // replaces the price, a group augments it and validates a selection count.
+    POS_ADDON_GROUP: {
+      // Aggregates its options so the menu editor draws a group and its
+      // choices in one read rather than N+1.
+      SELECT_ALL: `SELECT g.*,
+          (SELECT COUNT(*) FROM pos_addon a WHERE a.AddonGroupId = g.Id AND a.Active = 1) AS AddonCount
+        FROM pos_addon_group g
+        WHERE g.TenantId = ? ORDER BY g.SortOrder ASC, g.CreatedOn DESC`,
+      COUNT: 'SELECT COUNT(*) as total FROM pos_addon_group WHERE TenantId = ?',
+      SELECT_BY_ID: `SELECT g.*,
+          (SELECT COUNT(*) FROM pos_addon a WHERE a.AddonGroupId = g.Id AND a.Active = 1) AS AddonCount
+        FROM pos_addon_group g
+        WHERE g.Id = ? AND g.TenantId = ?`,
+      SELECT_BY_CODE: 'SELECT * FROM pos_addon_group WHERE Code = ? AND TenantId = ? LIMIT 1',
+      INSERT: 'INSERT INTO pos_addon_group (Id, TenantId, Name, Code, Description, MinSelection, MaxSelection, SortOrder, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_addon_group SET Name = ?, Code = ?, Description = ?, MinSelection = ?, MaxSelection = ?, SortOrder = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_addon_group WHERE Id = ? AND TenantId = ?',
+    },
+
+    // One selectable option inside a group.
+    POS_ADDON: {
+      // Joins the food type so a dietary badge renders without a second call —
+      // a veg pizza with a chicken topping is not a veg order, and the badge is
+      // the only thing that says so.
+      SELECT_ALL: `SELECT a.*, g.Name AS AddonGroupName,
+          ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg
+        FROM pos_addon a
+        LEFT JOIN pos_addon_group g ON g.Id = a.AddonGroupId
+        LEFT JOIN pos_food_type ft ON ft.Id = a.FoodTypeId
+        WHERE a.TenantId = ? ORDER BY a.SortOrder ASC, a.CreatedOn DESC`,
+      COUNT: 'SELECT COUNT(*) as total FROM pos_addon WHERE TenantId = ?',
+      SELECT_BY_ID: `SELECT a.*, g.Name AS AddonGroupName,
+          ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg
+        FROM pos_addon a
+        LEFT JOIN pos_addon_group g ON g.Id = a.AddonGroupId
+        LEFT JOIN pos_food_type ft ON ft.Id = a.FoodTypeId
+        WHERE a.Id = ? AND a.TenantId = ?`,
+      SELECT_BY_CODE: 'SELECT * FROM pos_addon WHERE Code = ? AND TenantId = ? LIMIT 1',
+      // Joins the group as well as the food type, so every read of an add-on
+      // returns the SAME shape. Without it this endpoint alone answered with an
+      // undefined AddonGroupName, and a list bound to that column rendered a
+      // blank cell only on this one screen.
+      SELECT_BY_GROUP: `SELECT a.*, g.Name AS AddonGroupName,
+          ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg
+        FROM pos_addon a
+        LEFT JOIN pos_addon_group g ON g.Id = a.AddonGroupId
+        LEFT JOIN pos_food_type ft ON ft.Id = a.FoodTypeId
+        WHERE a.AddonGroupId = ? AND a.TenantId = ? ORDER BY a.SortOrder ASC`,
+      INSERT: 'INSERT INTO pos_addon (Id, TenantId, AddonGroupId, Name, Code, Price, FoodTypeId, SortOrder, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_addon SET AddonGroupId = ?, Name = ?, Code = ?, Price = ?, FoodTypeId = ?, SortOrder = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_addon WHERE Id = ? AND TenantId = ?',
+    },
+
+    // Why an order was refused, in a controlled vocabulary.
+    POS_REJECTION_REASON: {
+      SELECT_ALL: `SELECT r.*, p.Name AS PortalName
+        FROM pos_rejection_reason r
+        LEFT JOIN pos_portal p ON p.Id = r.PortalId
+        WHERE r.TenantId = ? ORDER BY r.SortOrder ASC, r.CreatedOn DESC`,
+      COUNT: 'SELECT COUNT(*) as total FROM pos_rejection_reason WHERE TenantId = ?',
+      SELECT_BY_ID: `SELECT r.*, p.Name AS PortalName
+        FROM pos_rejection_reason r
+        LEFT JOIN pos_portal p ON p.Id = r.PortalId
+        WHERE r.Id = ? AND r.TenantId = ?`,
+      // The reject dialog offers house reasons plus this portal's own. NULL
+      // PortalId is the house set, so it must be admitted explicitly — a plain
+      // equality on PortalId would silently return nothing for every portal.
+      SELECT_FOR_PORTAL: `SELECT * FROM pos_rejection_reason
+        WHERE TenantId = ? AND Active = 1 AND (PortalId IS NULL OR PortalId = ?)
+        ORDER BY SortOrder ASC`,
+      INSERT: 'INSERT INTO pos_rejection_reason (Id, TenantId, Name, Code, ExternalCode, PortalId, RequiresItems, Description, SortOrder, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_rejection_reason SET Name = ?, Code = ?, ExternalCode = ?, PortalId = ?, RequiresItems = ?, Description = ?, SortOrder = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      DELETE: 'DELETE FROM pos_rejection_reason WHERE Id = ? AND TenantId = ?',
+    },
+
     POS_ITEM_META: {
       // UNIQUE (ItemDetailId, BranchDetailId, TenantId) — the publish pass
       // checks this so a re-run reports 'already on the menu' rather than
@@ -986,16 +1132,28 @@ module.exports = {
       SELECT_ALL: `SELECT im.*,
           (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c WHERE c.ItemMetaId = im.Id) AS ChannelIds,
           (SELECT JSON_ARRAYAGG(v.VariantId) FROM pos_item_meta_variant v WHERE v.ItemMetaId = im.Id) AS VariantIds,
+          (SELECT JSON_ARRAYAGG(ag.AddonGroupId) FROM pos_item_meta_addon_group ag WHERE ag.ItemMetaId = im.Id) AS AddonGroupIds,
+          (SELECT JSON_ARRAYAGG(tg.TagId) FROM pos_item_meta_tag tg WHERE tg.ItemMetaId = im.Id) AS TagIds,
           ci.Amount AS CostInfoAmount,
           ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg,
+          -- The meat taxonomy is orthogonal to food type: a dish is Non-Veg AND
+          -- Chicken, and a portal filter needs the second name, not the id.
+          mt.Name AS MeatTypeName,
           -- The till groups its menu by these. A dish's category lives on
           -- itemdetail, not on the POS extension row, so it takes two joins to
           -- reach — which is why the menu payload carried no category at all
           -- and the grid had nothing to group by.
-          cat.Id AS CategoryId, cat.Name AS CategoryName
+          cat.Id AS CategoryId, cat.Name AS CategoryName,
+          -- The dish's NAME, from the catalogue row this menu entry extends.
+          -- The till used to resolve it with one GET /api/itemdetails/:id PER
+          -- DISH — 51 extra requests on every Billing load, each taking a pool
+          -- connection, for a column two joins away in the query that was
+          -- already running.
+          idt.Name AS ItemName
         FROM pos_item_meta im
         LEFT JOIN costinfo ci ON ci.Id = im.CostInfoId
         LEFT JOIN pos_food_type ft ON ft.Id = im.FoodTypeId
+        LEFT JOIN pos_meat_type mt ON mt.Id = im.MeatTypeId
         LEFT JOIN itemdetail idt ON idt.Id = im.ItemDetailId AND idt.TenantId = im.TenantId
         LEFT JOIN categorydetail cat ON cat.Id = idt.CategoryId AND cat.TenantId = im.TenantId
         WHERE im.TenantId = ? ORDER BY im.CreatedOn DESC`,
@@ -1003,21 +1161,33 @@ module.exports = {
       SELECT_BY_ID: `SELECT im.*,
           (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c WHERE c.ItemMetaId = im.Id) AS ChannelIds,
           (SELECT JSON_ARRAYAGG(v.VariantId) FROM pos_item_meta_variant v WHERE v.ItemMetaId = im.Id) AS VariantIds,
+          (SELECT JSON_ARRAYAGG(ag.AddonGroupId) FROM pos_item_meta_addon_group ag WHERE ag.ItemMetaId = im.Id) AS AddonGroupIds,
+          (SELECT JSON_ARRAYAGG(tg.TagId) FROM pos_item_meta_tag tg WHERE tg.ItemMetaId = im.Id) AS TagIds,
           ci.Amount AS CostInfoAmount,
           ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg,
+          -- The meat taxonomy is orthogonal to food type: a dish is Non-Veg AND
+          -- Chicken, and a portal filter needs the second name, not the id.
+          mt.Name AS MeatTypeName,
           -- The till groups its menu by these. A dish's category lives on
           -- itemdetail, not on the POS extension row, so it takes two joins to
           -- reach — which is why the menu payload carried no category at all
           -- and the grid had nothing to group by.
-          cat.Id AS CategoryId, cat.Name AS CategoryName
+          cat.Id AS CategoryId, cat.Name AS CategoryName,
+          -- The dish's NAME, from the catalogue row this menu entry extends.
+          -- The till used to resolve it with one GET /api/itemdetails/:id PER
+          -- DISH — 51 extra requests on every Billing load, each taking a pool
+          -- connection, for a column two joins away in the query that was
+          -- already running.
+          idt.Name AS ItemName
         FROM pos_item_meta im
         LEFT JOIN costinfo ci ON ci.Id = im.CostInfoId
         LEFT JOIN pos_food_type ft ON ft.Id = im.FoodTypeId
+        LEFT JOIN pos_meat_type mt ON mt.Id = im.MeatTypeId
         LEFT JOIN itemdetail idt ON idt.Id = im.ItemDetailId AND idt.TenantId = im.TenantId
         LEFT JOIN categorydetail cat ON cat.Id = idt.CategoryId AND cat.TenantId = im.TenantId
         WHERE im.Id = ? AND im.TenantId = ?`,
-      INSERT: 'INSERT INTO pos_item_meta (Id, TenantId, ItemDetailId, FoodTypeId, CostInfoId, Channels, Prices, Variants, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_item_meta SET ItemDetailId = ?, FoodTypeId = ?, CostInfoId = ?, Channels = ?, Prices = ?, Variants = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_item_meta (Id, TenantId, ItemDetailId, FoodTypeId, CostInfoId, Channels, Prices, Variants, ServesCount, PortionSize, MeatTypeId, PrepTimeMinutes, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_item_meta SET ItemDetailId = ?, FoodTypeId = ?, CostInfoId = ?, Channels = ?, Prices = ?, Variants = ?, ServesCount = ?, PortionSize = ?, MeatTypeId = ?, PrepTimeMinutes = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_item_meta WHERE Id = ? AND TenantId = ?',
       // Order lines reference a menu row; pricing needs the cost record it
       // points at. Batched so an order costs one lookup, not one per line.
@@ -1027,11 +1197,41 @@ module.exports = {
       // server-side so a client cannot dictate what a variant costs.
       SELECT_VARIANT_PRICES_BY_IDS:
         'SELECT Id, Name, Code, Price FROM pos_variant WHERE TenantId = ? AND Active = 1 AND Id IN (:ids)',
-      // Join-table sync helpers (channels + variants)
+      // Join-table sync helpers (channels + variants + add-on groups + tags).
+      // All four follow the same replace-the-set shape: delete this item's rows,
+      // then insert the supplied ones, inside the caller's transaction.
       DELETE_CHANNEL_LINKS: 'DELETE FROM pos_item_meta_channel WHERE ItemMetaId = ? AND TenantId = ?',
       INSERT_CHANNEL_LINK: 'INSERT INTO pos_item_meta_channel (Id, ItemMetaId, ChannelId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
       DELETE_VARIANT_LINKS: 'DELETE FROM pos_item_meta_variant WHERE ItemMetaId = ? AND TenantId = ?',
       INSERT_VARIANT_LINK: 'INSERT INTO pos_item_meta_variant (Id, ItemMetaId, VariantId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
+      DELETE_ADDON_GROUP_LINKS: 'DELETE FROM pos_item_meta_addon_group WHERE ItemMetaId = ? AND TenantId = ?',
+      INSERT_ADDON_GROUP_LINK: 'INSERT INTO pos_item_meta_addon_group (Id, ItemMetaId, AddonGroupId, SortOrder, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, ?, 1, NOW(), ?)',
+      DELETE_TAG_LINKS: 'DELETE FROM pos_item_meta_tag WHERE ItemMetaId = ? AND TenantId = ?',
+      INSERT_TAG_LINK: 'INSERT INTO pos_item_meta_tag (Id, ItemMetaId, TagId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
+
+      // Nutrition is 1:1 and OPTIONAL, so it is written as an upsert rather than
+      // created alongside every item — most tenants will never fill it in, and a
+      // blank row per dish is noise the compliance report has to filter out.
+      //
+      // ON DUPLICATE KEY on UNIQUE (ItemMetaId, TenantId): one statement covers
+      // both "first time" and "editing", so no read-then-branch is needed.
+      UPSERT_NUTRITION: `INSERT INTO pos_item_nutrition
+          (Id, ItemMetaId, ServingSizeG, Calories, ProteinG, CarbohydrateG, SugarG, FatG, SaturatedFatG, FibreG, SodiumMg, Allergens, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)
+        ON DUPLICATE KEY UPDATE
+          ServingSizeG = VALUES(ServingSizeG), Calories = VALUES(Calories),
+          ProteinG = VALUES(ProteinG), CarbohydrateG = VALUES(CarbohydrateG),
+          SugarG = VALUES(SugarG), FatG = VALUES(FatG),
+          SaturatedFatG = VALUES(SaturatedFatG), FibreG = VALUES(FibreG),
+          SodiumMg = VALUES(SodiumMg), Allergens = VALUES(Allergens),
+          UpdatedOn = NOW(), UpdatedBy = VALUES(UpdatedBy)`,
+      SELECT_NUTRITION:
+        'SELECT * FROM pos_item_nutrition WHERE ItemMetaId = ? AND TenantId = ?',
+      // Clearing nutrition is deleting the row, not blanking ten columns — a row
+      // of nulls says "somebody filled this in as unknown", which is a different
+      // claim from "no nutrition data exists".
+      DELETE_NUTRITION:
+        'DELETE FROM pos_item_nutrition WHERE ItemMetaId = ? AND TenantId = ?',
     },
 
     // Which orders (rounds) a bill covers. pos_bill.OrderId only ever held the
@@ -1152,7 +1352,7 @@ module.exports = {
       SELECT_ALL: 'SELECT * FROM pos_kot WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM pos_kot WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM pos_kot WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_kot (Id, TenantId, KotNo, OrderId, TableId, Items, Status, FiredAt, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      INSERT: 'INSERT INTO pos_kot (Id, TenantId, KotNo, OrderId, TableId, Items, CookingInstructions, NoCutlery, Status, FiredAt, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE: 'UPDATE pos_kot SET KotNo = ?, OrderId = ?, TableId = ?, Items = ?, Status = ?, FiredAt = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_kot WHERE Id = ? AND TenantId = ?',
       // Domain action: mark a KOT ready (KDS)
@@ -1395,8 +1595,11 @@ module.exports = {
         'ExternalCustomerRef, ItemsTotal, PortalDiscount, PackingCharge, DeliveryCharge, TaxAmount, ' +
         'GrossAmount, CommissionAmount, NetPayout, IsPrepaid, PlacedOn, PromisedOn, AcceptedOn, ReadyOn, ' +
         'PickedUpOn, DeliveredOn, RiderName, RiderPhone, CancelReason, CancelledBy, BranchDetailId, ' +
+        // Promoted out of the raw Payload at ingest so the KOT writer can
+        // reach them without knowing any portal's payload shape.
+        'CookingInstructions, NoCutlery, ' +
         'Active, CreatedOn, CreatedBy, UpdatedBy) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE pos_online_order SET PortalId = ?, Platform = ?, OrderId = ?, PortalBranchId = ?, ' +
         'ExternalRef = ?, Status = ?, Payload = ?, OrderLines = ?, HasUnmappedLines = ?, CustomerName = ?, ' +
@@ -1404,12 +1607,24 @@ module.exports = {
         'DeliveryCharge = ?, TaxAmount = ?, GrossAmount = ?, CommissionAmount = ?, NetPayout = ?, ' +
         'IsPrepaid = ?, PlacedOn = ?, PromisedOn = ?, AcceptedOn = ?, ReadyOn = ?, PickedUpOn = ?, ' +
         'DeliveredOn = ?, RiderName = ?, RiderPhone = ?, CancelReason = ?, CancelledBy = ?, ' +
-        'BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'BranchDetailId = ?, CookingInstructions = ?, NoCutlery = ?, ' +
+        'Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       // Lifecycle moves, as their own statements. A status change must not have
       // to send 30 other columns back and risk overwriting one of them.
+      // KptMinutes and KptSetOn are written HERE, in the same statement that
+      // marks the order accepted. They are two halves of one promise — the
+      // number, and the moment it was given — and a second statement could
+      // commit one without the other.
       SET_ACCEPTED:
         "UPDATE pos_online_order SET Status = 'accepted', OrderId = ?, AcceptedOn = NOW(), " +
+        'KptMinutes = ?, KptSetOn = NOW(), ' +
         'UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      // The slowest dish on the order decides the KPT: the kitchen is not done
+      // until its last item is, so MAX is the honest aggregate, not AVG or SUM.
+      // Lines that carry no prep time contribute nothing rather than a zero.
+      SELECT_MAX_PREP_TIME: `SELECT MAX(PrepTimeMinutes) AS MaxPrep
+        FROM pos_item_meta
+        WHERE TenantId = ? AND PrepTimeMinutes IS NOT NULL AND Id IN (:ids)`,
       SET_STATUS:
         'UPDATE pos_online_order SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? ' +
         'WHERE Id = ? AND TenantId = ?',
@@ -2283,16 +2498,26 @@ module.exports = {
         'DELETE FROM pos_bill_order WHERE TenantId = ?',
         'DELETE FROM pos_campaign_branch WHERE TenantId = ?',
         'DELETE FROM pos_cash_session WHERE TenantId = ?',
+        'DELETE FROM pos_category_schedule WHERE TenantId = ?',
+        'DELETE FROM pos_category_tag WHERE TenantId = ?',
         'DELETE FROM pos_expense WHERE TenantId = ?',
         'DELETE FROM pos_feedback WHERE TenantId = ?',
+        'DELETE FROM pos_item_meta_addon_group WHERE TenantId = ?',
         'DELETE FROM pos_item_meta_channel WHERE TenantId = ?',
+        'DELETE FROM pos_item_meta_tag WHERE TenantId = ?',
         'DELETE FROM pos_item_meta_variant WHERE TenantId = ?',
+        'DELETE FROM pos_item_nutrition WHERE TenantId = ?',
         'DELETE FROM pos_kot WHERE TenantId = ?',
         'DELETE FROM pos_loyalty_ledger WHERE TenantId = ?',
         'DELETE FROM pos_offer_redemption WHERE TenantId = ?',
         'DELETE FROM pos_online_order WHERE TenantId = ?',
+        'DELETE FROM pos_portal_category WHERE TenantId = ?',
         'DELETE FROM pos_portal_credential WHERE TenantId = ?',
         'DELETE FROM pos_portal_event WHERE TenantId = ?',
+        // OUT OF ALPHABETICAL ORDER ON PURPOSE. The variant rows hang off
+        // pos_portal_listing, so sorting this line after its parent — where the
+        // name would otherwise put it — makes the parent delete fail on the FK.
+        'DELETE FROM pos_portal_listing_variant WHERE TenantId = ?',
         'DELETE FROM pos_portal_listing WHERE TenantId = ?',
         'DELETE FROM pos_setting WHERE TenantId = ?',
         'DELETE FROM pos_token WHERE TenantId = ?',
@@ -2309,6 +2534,14 @@ module.exports = {
         'DELETE FROM asset_category WHERE TenantId = ?',
         'DELETE FROM expense_category WHERE TenantId = ?',
         'DELETE FROM paymentdetail WHERE TenantId = ?',
+        // pos_addon before its group; the group after the item links in Wave 1.
+        'DELETE FROM pos_addon WHERE TenantId = ?',
+        'DELETE FROM pos_addon_group WHERE TenantId = ?',
+        // Tags after both join tables (pos_item_meta_tag, pos_category_tag).
+        'DELETE FROM pos_menu_tag WHERE TenantId = ?',
+        // After pos_online_order (Wave 1), which points at it, and before
+        // pos_portal (Wave 3), which it points at.
+        'DELETE FROM pos_rejection_reason WHERE TenantId = ?',
         'DELETE FROM paymentmodetransactiondetail WHERE TenantId = ?',
         'DELETE FROM paymentreceivedtype WHERE TenantId = ?',
         'DELETE FROM pos_bill WHERE TenantId = ?',
@@ -2324,6 +2557,9 @@ module.exports = {
         'DELETE FROM itemdetail WHERE TenantId = ?',
         'DELETE FROM pos_campaign WHERE TenantId = ?',
         'DELETE FROM pos_food_type WHERE TenantId = ?',
+        // Same wave and same reason as pos_food_type: pos_item_meta (Wave 2)
+        // points at both, so neither can go before it.
+        'DELETE FROM pos_meat_type WHERE TenantId = ?',
         'DELETE FROM pos_order WHERE TenantId = ?',
         'DELETE FROM pos_portal WHERE TenantId = ?',
         'DELETE FROM transactiondetaillog WHERE TenantId = ?',
@@ -3405,6 +3641,21 @@ module.exports = {
     // receipt format (Receipt Format → Kitchen ticket → Copies), and a second
     // control for the same thing would let the two disagree.
     KOT_AUTO_PRINT: 'kot.auto_print',
+    // Fallback Kitchen Preparation Time, in minutes, for a branch. Used when no
+    // line on an order carries its own PrepTimeMinutes — a KPT of zero would
+    // promise a portal the food is already made.
+    KPT_DEFAULT_MINUTES: 'kpt.default_minutes',
+  },
+
+  // Minutes. The number a portal is told the kitchen needs, and the number a
+  // merchant rating is scored against, so the fallback has to be a plausible
+  // real answer rather than a neutral-looking zero.
+  KPT: {
+    DEFAULT_MINUTES: 20,
+    MIN_MINUTES: 1,
+    // Two hours. Anything beyond this is a typo (200 for 20), and a portal that
+    // accepts it shows the customer an absurd promise.
+    MAX_MINUTES: 120,
   },
 
   // Values for POS_SETTING_KEYS.KOT_AUTO_PRINT.
@@ -3620,6 +3871,24 @@ module.exports = {
     ['Customer changed mind', 'CHANGED_MIND', 0, 6],
     ['Other',                'OTHER',        0, 7],
   ],
+
+  // The three kinds of menu tag, kept in ONE master (pos_menu_tag) separated by
+  // TagType. Named here rather than left as inline strings for the same reason
+  // as the bill statuses below: a picker filtering on 'Beverage' against a
+  // service writing 'BEVERAGE' silently offers an empty list.
+  POS_MENU_TAG_TYPES: {
+    CATEGORY: 'CATEGORY',
+    BEVERAGE: 'BEVERAGE',
+    CUISINE: 'CUISINE',
+  },
+
+  // GST 9(5) bifurcation on itemdetail.SupplyType. Restaurant supply is a
+  // SERVICE; a sealed bottle sold alongside it is GOODS, and the two attract
+  // different treatment on the same bill.
+  SUPPLY_TYPES: {
+    GOODS: 'GOODS',
+    SERVICE: 'SERVICE',
+  },
 
   // POS bill lifecycle. These strings are written by settle and read by every
   // report; they were previously inline literals, and a report filtering on
