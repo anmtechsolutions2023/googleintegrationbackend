@@ -6,7 +6,7 @@
 
 const Joi = require('joi');
 const { entityId } = require('../../utils/idSchema');
-const { IMPORT } = require('../../config/constants');
+const { IMPORT, TAX_GROUP_DEFAULTS } = require('../../config/constants');
 
 const trimmed = (max) => Joi.string().trim().max(max);
 
@@ -28,9 +28,8 @@ const itemRowSchema = Joi.object({
     'number.base': 'price must be a number',
     'number.min': 'price cannot be negative',
   }),
-  taxGroup: trimmed(50).required().messages({
-    'any.required': 'tax_group is required',
-  }),
+  // Optional. Blank is the tenant's Exempt (0%) group: the item is sold tax-free.
+  taxGroup: trimmed(50).allow('', null).empty(['', null]).default(TAX_GROUP_DEFAULTS.EXEMPT_NAME),
   // Defaults true: a board price is what the customer hands over.
   taxIncluded: Joi.boolean().default(true),
   code: trimmed(50).allow('', null),

@@ -11,7 +11,7 @@
 // atomically with the rest of the bootstrap.
 
 const { v4: uuidv4 } = require('uuid');
-const { POS_RETURN_REASONS } = require('../../config/constants');
+const { POS_RETURN_REASONS, TAX_GROUP_DEFAULTS } = require('../../config/constants');
 
 // Tender → the account the money LANDS IN. Without this mapping every tender
 // books to 'Sales' and no account means anything: cash sales and card sales
@@ -145,7 +145,7 @@ const REJECTION_REASONS = [
 //
 // Nothing else needed changing: the pricing repository already treats a group
 // with no components as a valid 0%, and says so in a comment of its own.
-const EXEMPT_TAX_GROUP = 'Exempt (0%)';
+const EXEMPT_TAX_GROUP = TAX_GROUP_DEFAULTS.EXEMPT_NAME;
 
 // One numbering series PER DOCUMENT TYPE. Sales and expenses must not share a
 // counter: each series has to be gap-free in its own right.

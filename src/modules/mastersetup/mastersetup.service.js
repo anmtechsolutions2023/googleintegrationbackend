@@ -11,6 +11,7 @@ const { withTransaction } = require('../../utils/dbHelper');
 const { logger } = require('../../utils/logger');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
+const { QUERIES, TAX_GROUP_DEFAULTS } = require('../../config/constants');
 const setupRepository = require('./mastersetup.repository');
 
 const organization = require('../organization/organization.service');
@@ -153,14 +154,43 @@ const bootstrap = async (payload, tenantId, userPhone) => {
       // A payload that states no rates gets the same standard split the bulk
       // import applies, for the same reason: a menu priced at 0% is the worse
       // failure. The wizard announces it before sending.
-      const { taxTypes, ...taxGroupRow } = it.costInfo.taxGroup;
-      const tax = await taxGroup.createTx(conn, taxGroupRow, tenantId, userPhone);
-      const rates = (taxTypes && taxTypes.length > 0)
-        ? taxTypes.map((t) => ({ name: t.Name, value: t.Value }))
-        : taxComponents.defaultComponents();
-      await taxComponents.attachComponentsTx(conn, {
-        taxGroupId: tax.id, components: rates, tenantId, userPhone,
-      });
+      //
+      // OPTIONAL. No tax group, a blank name, or the tenant's own "Exempt (0%)"
+      // all mean the same thing: sold tax-free, under the Exempt group
+      // provisioned a few lines above in this very transaction. It is REUSED,
+      // never created — a second row with that name would break
+      // UNIQUE (Name, TenantId) and roll the whole setup back.
+      const { taxTypes, ...taxGroupRow } = it.costInfo.taxGroup || {};
+      const groupName = String(taxGroupRow.Name || '').trim();
+      const exempt = !groupName
+        || groupName.toLowerCase() === TAX_GROUP_DEFAULTS.EXEMPT_NAME.toLowerCase();
+
+      let tax;
+      if (exempt) {
+        // An empty group IS the exemption. Rates sent with it are a
+        // contradiction, and quietly dropping them would bill a price someone
+        // meant to tax at 0%.
+        if (taxTypes && taxTypes.length > 0) {
+          throw new HttpError(
+            `“${TAX_GROUP_DEFAULTS.EXEMPT_NAME}” carries no rates. Give the tax group its own name to charge tax.`,
+            MESSAGES.HTTP_STATUS.BAD_REQUEST,
+          );
+        }
+        const [rows] = await conn.execute(
+          QUERIES.TAX_GROUP.SELECT_BY_NAME, [TAX_GROUP_DEFAULTS.EXEMPT_NAME, tenantId],
+        );
+        tax = rows[0]
+          ? { id: rows[0].Id }
+          : await taxGroup.createTx(conn, { Name: TAX_GROUP_DEFAULTS.EXEMPT_NAME, Active: true }, tenantId, userPhone);
+      } else {
+        tax = await taxGroup.createTx(conn, { ...taxGroupRow, Name: groupName }, tenantId, userPhone);
+        const rates = (taxTypes && taxTypes.length > 0)
+          ? taxTypes.map((t) => ({ name: t.Name, value: t.Value }))
+          : taxComponents.defaultComponents();
+        await taxComponents.attachComponentsTx(conn, {
+          taxGroupId: tax.id, components: rates, tenantId, userPhone,
+        });
+      }
 
       const cost = await costInfo.createTx(conn, { ...it.costInfo, TaxGroupId: tax.id }, tenantId, userPhone);
       const item = await itemDetail.createTx(

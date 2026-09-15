@@ -505,3 +505,38 @@ describe('a file that contradicts itself', () => {
     expect(res.summary).toMatchObject({ created: 2, failed: 0 });
   });
 });
+
+
+// ── A blank tax_group is the Exempt group ───────────────────────────────────
+describe('the Exempt (0%) group in an import', () => {
+  it('never gives the Exempt group rates — not even the 5% default', async () => {
+    await service.importItems([row({ taxGroup: 'Exempt (0%)' })], {}, TENANT, USER);
+    expect(created.taxTypes).toEqual([]);
+    expect(created.taxMaps).toEqual([]);
+    expect(itemDetail.createTx).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a row that gives the Exempt group rates', async () => {
+    const res = await service.importItems(
+      [row({ taxGroup: 'Exempt (0%)', taxComponents: [{ name: 'CGST', value: 2.5 }] })], {}, TENANT, USER,
+    );
+    expect(itemDetail.createTx).not.toHaveBeenCalled();
+    expect(JSON.stringify(res)).toContain('carries no rates');
+  });
+
+  it('does not warn that the Exempt group is empty — being empty is the point', async () => {
+    state.existingTaxGroup = { Id: 'tax-exempt' };
+    state.taxTypeCount = 0;
+    await expect(service.findEmptyTaxGroups(['Exempt (0%)', 'GST 5%'], TENANT)).resolves.toEqual(['GST 5%']);
+  });
+
+  it('reads a blank tax_group as Exempt (0%)', () => {
+    const schemas = require('../../modules/import/import.schemas');
+    const schema = schemas.importItemsSchema;
+    const { value, error } = schema.validate({
+      rows: [{ name: 'Plain Water', category: 'Drinks', unit: 'Glass', price: 20, taxGroup: '' }],
+    });
+    expect(error).toBeUndefined();
+    expect(value.rows[0].taxGroup).toBe('Exempt (0%)');
+  });
+});

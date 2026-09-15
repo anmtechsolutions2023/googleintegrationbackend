@@ -346,3 +346,49 @@ describe('mastersetup.service — bootstrap orchestrator', () => {
     });
   });
 });
+
+
+// ── The tax group is optional ───────────────────────────────────────────────
+// Blank, absent, or the tenant's own "Exempt (0%)" all mean sold tax-free, under
+// the Exempt group provisionPosMasters has just created in this transaction.
+describe('an item with no tax group', () => {
+  const EXEMPT_ID = 'exempt-group-id';
+  // Answers the Exempt lookup with the provisioned row; everything else empty.
+  const connWithExempt = {
+    execute: async (sql, params) => (/FROM taxgroup WHERE Name/.test(sql) && params[0] === 'Exempt (0%)'
+      ? [[{ Id: EXEMPT_ID, Name: 'Exempt (0%)' }]]
+      : [[]]),
+  };
+  const run = (mutate) => {
+    const p = payload();
+    mutate(p);
+    dbHelper.withTransaction.mockImplementationOnce((fn) => fn(connWithExempt));
+    return service.bootstrap(p, TENANT, USER);
+  };
+
+  it.each([
+    ['absent', (p) => { delete p.item.costInfo.taxGroup; }],
+    ['blank', (p) => { p.item.costInfo.taxGroup = { Name: '' }; }],
+    ['named Exempt (0%)', (p) => { p.item.costInfo.taxGroup = { Name: 'Exempt (0%)' }; }],
+  ])('reuses the provisioned Exempt group when the tax group is %s', async (_label, mutate) => {
+    await run(mutate);
+    expect(taxGroup.createTx).not.toHaveBeenCalled();
+    expect(taxType.createTx).not.toHaveBeenCalled();
+    expect(taxMapper.createTx).not.toHaveBeenCalled();
+    expect(costInfo.createTx.mock.calls[0][1]).toMatchObject({ TaxGroupId: EXEMPT_ID });
+  });
+
+  it('refuses rates on the Exempt group rather than dropping them', async () => {
+    await expect(run((p) => {
+      p.item.costInfo.taxGroup = { Name: 'Exempt (0%)', taxTypes: [{ Name: 'CGST', Value: '2.5' }] };
+    })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('carries no rates') });
+    expect(costInfo.createTx).not.toHaveBeenCalled();
+  });
+
+  it('accepts an item payload with no tax group at all', () => {
+    const { bootstrapSchema } = require('../../modules/mastersetup/mastersetup.schemas');
+    const p = payload();
+    delete p.item.costInfo.taxGroup;
+    expect(bootstrapSchema.validate(p).error).toBeUndefined();
+  });
+});

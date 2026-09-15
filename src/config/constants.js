@@ -4280,6 +4280,14 @@ module.exports = {
   // Bulk import limits. 500 bounds one request without a paging protocol; a
   // menu larger than that is a data migration, not a menu, and should not be
   // arriving through a form in somebody's browser.
+  // The tenant's zero-rate tax group, provisioned at first-time setup. An item
+  // whose tax group is left blank is sold under it — in the setup wizard and in
+  // the CSV import alike. It never carries rates: an empty group IS the
+  // exemption.
+  TAX_GROUP_DEFAULTS: {
+    EXEMPT_NAME: 'Exempt (0%)',
+  },
+
   IMPORT: {
     MAX_ROWS: 500,
     ON_DUPLICATE: { SKIP: 'skip', UPDATE: 'update' },

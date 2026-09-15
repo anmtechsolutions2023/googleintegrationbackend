@@ -87,9 +87,12 @@ const taxTypeSchema = Joi.object({
     .required(),
 }).unknown(true);
 
+// Optional as a whole. Absent, blank, or the tenant's own "Exempt (0%)" means the
+// starter item is sold tax-free under the Exempt group provisioned earlier in
+// the same transaction. A group with any other name still carries rates.
 const taxGroupSchema = Joi.object({
-  Name: Joi.string().max(100).trim().required(),
-  taxTypes: Joi.array().items(taxTypeSchema).min(1).max(10).optional(),
+  Name: Joi.string().max(100).trim().allow('', null).optional(),
+  taxTypes: Joi.array().items(taxTypeSchema).max(10).optional(),
 }).unknown(true);
 
 const categorySchema = Joi.object({
@@ -137,7 +140,7 @@ const branchSchema = Joi.object({
 
 const costInfoSchema = Joi.object({
   Amount: Joi.number().required(),
-  taxGroup: taxGroupSchema.required(),
+  taxGroup: taxGroupSchema.optional(),
 }).unknown(true);
 
 const itemSchema = Joi.object({

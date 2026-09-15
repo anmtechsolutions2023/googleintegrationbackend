@@ -21,7 +21,7 @@
 // subtree is atomic, so a failure can never leave orphan cost info behind.
 
 const { withConnection, withTransaction } = require('../../utils/dbHelper');
-const { QUERIES, IMPORT } = require('../../config/constants');
+const { QUERIES, IMPORT, TAX_GROUP_DEFAULTS } = require('../../config/constants');
 const { logger } = require('../../utils/logger');
 const { HttpError } = require('../../middleware/errorHandler');
 
@@ -157,71 +157,86 @@ const importItems = async (rows, options, tenantId, userPhone) => {
           (c) => taxGroup.createTx(c, { Name: row.taxGroup, Active: true }, tenantId, userPhone),
         );
 
-        // The group alone prices at 0%, so give it the rates it is named for —
-        // but only when it has none. Two rules, and both are about the same
-        // failure: wrong tax is worse than no tax, because no tax is visibly
-        // zero and wrong tax is plausible.
-        //
-        //   1. A group that ALREADY held rates before this import is never
-        //      touched. Stacking a 5% default onto a group carrying IGST 5%
-        //      would price it at 10%.
-        //   2. Within one file, a group cannot be asked for two different
-        //      treatments. Row 1 taking the default and row 2 stating IGST
-        //      would stack for the same reason — and which one the operator
-        //      meant is not something to guess at.
-        //
-        // The snapshot is taken once per group and reused, so later rows see
-        // what the group looked like BEFORE this run, not what earlier rows in
-        // the same run just wrote.
-        const wanted = row.taxComponents?.length
-          ? row.taxComponents
-          : IMPORT.DEFAULT_TAX_COMPONENTS;
-        const signature = taxSignature(wanted);
-
-        const asked = ctx.taxAsk.get(taxGroupId);
-        if (asked && asked !== signature) {
+        // The Exempt group is 0% BECAUSE it is empty. A blank tax_group lands here
+        // (the schema defaults it), and neither a stated rate nor the standard
+        // default may ever be attached to it.
+        const exemptGroup = String(row.taxGroup || '').trim().toLowerCase()
+          === TAX_GROUP_DEFAULTS.EXEMPT_NAME.toLowerCase();
+        if (exemptGroup && row.taxComponents?.length) {
           throw new HttpError(
-            `Tax group “${row.taxGroup}” is given two different sets of rates in this file. `
-            + 'Use the same rates everywhere the group appears, or give it its own group.',
+            `“${TAX_GROUP_DEFAULTS.EXEMPT_NAME}” carries no rates. `
+            + 'Give these tax_components a tax_group name of their own.',
             400,
           );
         }
-        ctx.taxAsk.set(taxGroupId, signature);
 
-        if (!ctx.groupHadRates.has(taxGroupId)) {
-          const [before] = await conn.execute(
-            QUERIES.TAX_GROUP_TAX_TYPE_MAPPER.SELECT_COMPONENTS_OF_GROUP,
-            [taxGroupId, tenantId],
-          );
-          ctx.groupHadRates.set(
-            taxGroupId,
-            before.length > 0
-              ? taxSignature(before.map((c) => ({ name: c.Name, value: c.Value })))
-              : null,
-          );
-        }
-        const already = ctx.groupHadRates.get(taxGroupId);
+        if (!exemptGroup) {
+          // The group alone prices at 0%, so give it the rates it is named for —
+          // but only when it has none. Two rules, and both are about the same
+          // failure: wrong tax is worse than no tax, because no tax is visibly
+          // zero and wrong tax is plausible.
+          //
+          //   1. A group that ALREADY held rates before this import is never
+          //      touched. Stacking a 5% default onto a group carrying IGST 5%
+          //      would price it at 10%.
+          //   2. Within one file, a group cannot be asked for two different
+          //      treatments. Row 1 taking the default and row 2 stating IGST
+          //      would stack for the same reason — and which one the operator
+          //      meant is not something to guess at.
+          //
+          // The snapshot is taken once per group and reused, so later rows see
+          // what the group looked like BEFORE this run, not what earlier rows in
+          // the same run just wrote.
+          const wanted = row.taxComponents?.length
+            ? row.taxComponents
+            : IMPORT.DEFAULT_TAX_COMPONENTS;
+          const signature = taxSignature(wanted);
 
-        if (already === null) {
-          // Empty group: fill it, whether from the file or from the default.
-          const added = await taxComponents.attachComponentsTx(conn, {
-            taxGroupId, components: wanted, tenantId, userPhone, cache: ctx.cache,
-          });
-          ctx.created.taxTypes = (ctx.created.taxTypes || 0) + added.taxTypes;
-          ctx.created.taxMappings = (ctx.created.taxMappings || 0) + added.mappings;
-        } else if (already !== signature && row.taxComponents?.length) {
-          // The group is configured and the file explicitly asks for something
-          // else. Adding would stack; ignoring would make the column a lie.
-          // Neither — say so, and let a person decide.
-          throw new HttpError(
-            `Tax group “${row.taxGroup}” already carries different rates. `
-            + 'Change them in Master Data → Tax Groups, or name a different group here.',
-            400,
-          );
+          const asked = ctx.taxAsk.get(taxGroupId);
+          if (asked && asked !== signature) {
+            throw new HttpError(
+              `Tax group “${row.taxGroup}” is given two different sets of rates in this file. `
+              + 'Use the same rates everywhere the group appears, or give it its own group.',
+              400,
+            );
+          }
+          ctx.taxAsk.set(taxGroupId, signature);
+
+          if (!ctx.groupHadRates.has(taxGroupId)) {
+            const [before] = await conn.execute(
+              QUERIES.TAX_GROUP_TAX_TYPE_MAPPER.SELECT_COMPONENTS_OF_GROUP,
+              [taxGroupId, tenantId],
+            );
+            ctx.groupHadRates.set(
+              taxGroupId,
+              before.length > 0
+                ? taxSignature(before.map((c) => ({ name: c.Name, value: c.Value })))
+                : null,
+            );
+          }
+          const already = ctx.groupHadRates.get(taxGroupId);
+
+          if (already === null) {
+            // Empty group: fill it, whether from the file or from the default.
+            const added = await taxComponents.attachComponentsTx(conn, {
+              taxGroupId, components: wanted, tenantId, userPhone, cache: ctx.cache,
+            });
+            ctx.created.taxTypes = (ctx.created.taxTypes || 0) + added.taxTypes;
+            ctx.created.taxMappings = (ctx.created.taxMappings || 0) + added.mappings;
+          } else if (already !== signature && row.taxComponents?.length) {
+            // The group is configured and the file explicitly asks for something
+            // else. Adding would stack; ignoring would make the column a lie.
+            // Neither — say so, and let a person decide.
+            throw new HttpError(
+              `Tax group “${row.taxGroup}” already carries different rates. `
+              + 'Change them in Master Data → Tax Groups, or name a different group here.',
+              400,
+            );
+          }
+          // Configured and matching, or configured and the row stated nothing:
+          // nothing to do. A re-run of the same file lands here, which is why it
+          // is a no-op rather than a failure.
         }
-        // Configured and matching, or configured and the row stated nothing:
-        // nothing to do. A re-run of the same file lands here, which is why it
-        // is a no-op rather than a failure.
 
         const cost = await costInfo.createTx(conn, {
           Amount: String(row.price),
@@ -298,7 +313,10 @@ const importItems = async (rows, options, tenantId, userPhone) => {
 const findEmptyTaxGroups = (names, tenantId) =>
   withConnection(async (conn) => {
     const empty = [];
-    for (const name of [...new Set(names.filter(Boolean))]) {
+    // The Exempt group is empty on purpose — that is what makes it 0% — so it is
+    // never reported as a group someone forgot to fill in.
+    const exempt = TAX_GROUP_DEFAULTS.EXEMPT_NAME.toLowerCase();
+    for (const name of [...new Set(names.filter((n) => n && n.toLowerCase() !== exempt))]) {
       // eslint-disable-next-line no-await-in-loop
       const [groups] = await conn.execute(QUERIES.TAX_GROUP.SELECT_BY_NAME, [name, tenantId]);
       if (groups.length === 0) { empty.push(name); continue; }   // not created yet → will be empty
