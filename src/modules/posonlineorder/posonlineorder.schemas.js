@@ -2,7 +2,7 @@
 // Joi validation schemas for POS Online Order operations.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
 const {
@@ -24,9 +24,9 @@ const money = Joi.number().min(0).precision(2);
 const lineSchema = Joi.object({
   unmapped: Joi.boolean().optional(),
   externalItemId: Joi.string().max(100).optional().allow(null, ''),
-  ItemMetaId: entityId.optional().allow(null),
-  ItemDetailId: entityId.optional().allow(null),
-  CostInfoId: entityId.optional().allow(null),
+  ItemMetaId: optionalEntityId,
+  ItemDetailId: optionalEntityId,
+  CostInfoId: optionalEntityId,
   PriceSource: Joi.string().max(20).optional().allow(null, ''),
   name: Joi.string().max(255).optional().allow(null, ''),
   qty: Joi.number().min(0).optional(),
@@ -40,9 +40,9 @@ const lineSchema = Joi.object({
 
 // Fields shared by create and update. Written once so the two cannot drift.
 const commonFields = {
-  PortalId: entityId.optional().allow(null),
-  OrderId: entityId.optional().allow(null),
-  PortalBranchId: entityId.optional().allow(null),
+  PortalId: optionalEntityId,
+  OrderId: optionalEntityId,
+  PortalBranchId: optionalEntityId,
   ExternalRef: Joi.string().optional().max(100).allow(null, '').trim(),
   Payload: jsonCol.optional(),
   OrderLines: Joi.array().items(lineSchema).optional().allow(null),
@@ -69,7 +69,7 @@ const commonFields = {
   RiderPhone: Joi.string().max(30).optional().allow(null, '').trim(),
   CancelReason: Joi.string().max(255).optional().allow(null, '').trim(),
   CancelledBy: Joi.string().max(50).optional().allow(null, '').trim(),
-  BranchDetailId: entityId.optional().allow(null),
+  BranchDetailId: optionalEntityId,
   // What the customer asked the KITCHEN for, as opposed to what they ordered.
   // Order-level; per-dish instructions ride on each line's `notes`.
   // 500 matches the column — a Joi rule looser than its column turns a clear

@@ -187,12 +187,30 @@ module.exports = {
       // ParentName is joined so a list can show "Starters → Soups" without a
       // second call. Self-join on the SAME tenant: a parent from another
       // tenancy is not a hierarchy, it is a leak.
-      SELECT_ALL: `SELECT c.*, p.Name AS ParentName
+      SELECT_ALL: `SELECT c.*, p.Name AS ParentName,
+          -- Tags set on the SECTION (pos_category_tag). Every dish filed here
+          -- inherits them, which is what makes tagging a menu tractable: one
+          -- assignment covers a section instead of one per dish.
+          (SELECT JSON_ARRAYAGG(ct.TagId) FROM pos_category_tag ct WHERE ct.CategoryId = c.Id) AS TagIds,
+          -- How many dishes this section holds. Tagging a category is a BULK
+          -- edit — it reaches every dish filed here — and a form that does not
+          -- say so is hiding the interesting part of the action.
+          (SELECT COUNT(*) FROM itemdetail i
+            WHERE i.CategoryId = c.Id AND i.TenantId = c.TenantId) AS ItemCount
         FROM categorydetail c
         LEFT JOIN categorydetail p ON p.Id = c.ParentId AND p.TenantId = c.TenantId
         WHERE c.TenantId = ? ORDER BY c.SortOrder ASC, c.CreatedOn DESC`,
       COUNT: 'SELECT COUNT(*) as total FROM categorydetail WHERE TenantId = ?',
-      SELECT_BY_ID: `SELECT c.*, p.Name AS ParentName
+      SELECT_BY_ID: `SELECT c.*, p.Name AS ParentName,
+          -- Tags set on the SECTION (pos_category_tag). Every dish filed here
+          -- inherits them, which is what makes tagging a menu tractable: one
+          -- assignment covers a section instead of one per dish.
+          (SELECT JSON_ARRAYAGG(ct.TagId) FROM pos_category_tag ct WHERE ct.CategoryId = c.Id) AS TagIds,
+          -- How many dishes this section holds. Tagging a category is a BULK
+          -- edit — it reaches every dish filed here — and a form that does not
+          -- say so is hiding the interesting part of the action.
+          (SELECT COUNT(*) FROM itemdetail i
+            WHERE i.CategoryId = c.Id AND i.TenantId = c.TenantId) AS ItemCount
         FROM categorydetail c
         LEFT JOIN categorydetail p ON p.Id = c.ParentId AND p.TenantId = c.TenantId
         WHERE c.Id = ? AND c.TenantId = ?`,
@@ -210,6 +228,12 @@ module.exports = {
       UPDATE:
         'UPDATE categorydetail SET Name = ?, ParentId = ?, SortOrder = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM categorydetail WHERE Id = ? AND TenantId = ?',
+      // Replace-in-place, the same shape positemmeta.syncLinks uses for
+      // channels and variants: delete the set, insert the new one, inside the
+      // caller's transaction.
+      DELETE_TAG_LINKS: 'DELETE FROM pos_category_tag WHERE CategoryId = ? AND TenantId = ?',
+      INSERT_TAG_LINK:
+        'INSERT INTO pos_category_tag (Id, CategoryId, TagId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
     },
 
     // Transaction Type Config Queries
@@ -1149,7 +1173,19 @@ module.exports = {
           -- DISH — 51 extra requests on every Billing load, each taking a pool
           -- connection, for a column two joins away in the query that was
           -- already running.
-          idt.Name AS ItemName
+          idt.Name AS ItemName,
+          -- ── Tags, from BOTH levels, kept apart ─────────────────────────────
+          -- Not merged in SQL: the till draws a tag set on the dish differently
+          -- from one inherited from its section, so it has to know which is
+          -- which. The union happens where it is displayed and filtered.
+          (SELECT JSON_ARRAYAGG(JSON_OBJECT('id', t.Id, 'name', t.Name, 'type', t.TagType))
+             FROM pos_item_meta_tag mt
+             JOIN pos_menu_tag t ON t.Id = mt.TagId
+            WHERE mt.ItemMetaId = im.Id) AS OwnTags,
+          (SELECT JSON_ARRAYAGG(JSON_OBJECT('id', t.Id, 'name', t.Name, 'type', t.TagType))
+             FROM pos_category_tag ct
+             JOIN pos_menu_tag t ON t.Id = ct.TagId
+            WHERE ct.CategoryId = idt.CategoryId AND ct.TenantId = im.TenantId) AS CategoryTags
         FROM pos_item_meta im
         LEFT JOIN costinfo ci ON ci.Id = im.CostInfoId
         LEFT JOIN pos_food_type ft ON ft.Id = im.FoodTypeId
@@ -1178,7 +1214,19 @@ module.exports = {
           -- DISH — 51 extra requests on every Billing load, each taking a pool
           -- connection, for a column two joins away in the query that was
           -- already running.
-          idt.Name AS ItemName
+          idt.Name AS ItemName,
+          -- ── Tags, from BOTH levels, kept apart ─────────────────────────────
+          -- Not merged in SQL: the till draws a tag set on the dish differently
+          -- from one inherited from its section, so it has to know which is
+          -- which. The union happens where it is displayed and filtered.
+          (SELECT JSON_ARRAYAGG(JSON_OBJECT('id', t.Id, 'name', t.Name, 'type', t.TagType))
+             FROM pos_item_meta_tag mt
+             JOIN pos_menu_tag t ON t.Id = mt.TagId
+            WHERE mt.ItemMetaId = im.Id) AS OwnTags,
+          (SELECT JSON_ARRAYAGG(JSON_OBJECT('id', t.Id, 'name', t.Name, 'type', t.TagType))
+             FROM pos_category_tag ct
+             JOIN pos_menu_tag t ON t.Id = ct.TagId
+            WHERE ct.CategoryId = idt.CategoryId AND ct.TenantId = im.TenantId) AS CategoryTags
         FROM pos_item_meta im
         LEFT JOIN costinfo ci ON ci.Id = im.CostInfoId
         LEFT JOIN pos_food_type ft ON ft.Id = im.FoodTypeId
@@ -1197,6 +1245,29 @@ module.exports = {
       // server-side so a client cannot dictate what a variant costs.
       SELECT_VARIANT_PRICES_BY_IDS:
         'SELECT Id, Name, Code, Price FROM pos_variant WHERE TenantId = ? AND Active = 1 AND Id IN (:ids)',
+      // Selected add-ons, priced the same way and for the same reason. The
+      // group is joined in because a line cannot be validated without the
+      // Min/Max pair that owns the add-on, and fetching it separately would
+      // mean a second round trip to answer one question.
+      SELECT_ADDON_PRICES_BY_IDS:
+        `SELECT a.Id, a.Name, a.Code, a.Price, a.AddonGroupId,
+                g.Name AS GroupName, g.MinSelection, g.MaxSelection
+           FROM pos_addon a
+           JOIN pos_addon_group g
+             ON g.Id = a.AddonGroupId AND g.TenantId = a.TenantId AND g.Active = 1
+          WHERE a.TenantId = ? AND a.Active = 1 AND a.Id IN (:ids)`,
+      // Which choice blocks a dish offers, and the rules each one carries.
+      // Needed on its own because a MISSING required selection can only be
+      // caught by reading the groups the dish HAS — the ids on the line say
+      // nothing about the group nobody answered.
+      SELECT_ADDON_RULES_BY_ITEM_IDS:
+        `SELECT l.ItemMetaId, g.Id AS GroupId, g.Name AS GroupName,
+                g.MinSelection, g.MaxSelection
+           FROM pos_item_meta_addon_group l
+           JOIN pos_addon_group g
+             ON g.Id = l.AddonGroupId AND g.TenantId = l.TenantId AND g.Active = 1
+          WHERE l.TenantId = ? AND l.Active = 1 AND l.ItemMetaId IN (:ids)
+          ORDER BY l.SortOrder, g.SortOrder`,
       // Join-table sync helpers (channels + variants + add-on groups + tags).
       // All four follow the same replace-the-set shape: delete this item's rows,
       // then insert the supplied ones, inside the caller's transaction.
@@ -1208,6 +1279,22 @@ module.exports = {
       INSERT_ADDON_GROUP_LINK: 'INSERT INTO pos_item_meta_addon_group (Id, ItemMetaId, AddonGroupId, SortOrder, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, ?, 1, NOW(), ?)',
       DELETE_TAG_LINKS: 'DELETE FROM pos_item_meta_tag WHERE ItemMetaId = ? AND TenantId = ?',
       INSERT_TAG_LINK: 'INSERT INTO pos_item_meta_tag (Id, ItemMetaId, TagId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
+      // ── Bulk update (Menu Master) ─────────────────────────────────────────
+      // The rows a bulk change targets, with a name for the audit log. Counted
+      // against the ids sent, so a change to a dish deleted meanwhile is
+      // refused rather than applied to the rest in silence.
+      SELECT_BULK_TARGETS: `
+        SELECT im.Id, im.Active, idt.Name AS ItemName
+          FROM pos_item_meta im
+          LEFT JOIN itemdetail idt ON idt.Id = im.ItemDetailId AND idt.TenantId = im.TenantId
+         WHERE im.TenantId = ? AND im.Id IN (:ids)`,
+      // Each dish's current links, so "add Chinese" can keep what is there.
+      SELECT_CHANNEL_LINKS_FOR: 'SELECT ItemMetaId, ChannelId AS LinkId FROM pos_item_meta_channel WHERE TenantId = ? AND ItemMetaId IN (:ids) ORDER BY CreatedOn',
+      SELECT_VARIANT_LINKS_FOR: 'SELECT ItemMetaId, VariantId AS LinkId FROM pos_item_meta_variant WHERE TenantId = ? AND ItemMetaId IN (:ids) ORDER BY CreatedOn',
+      SELECT_ADDON_GROUP_LINKS_FOR: 'SELECT ItemMetaId, AddonGroupId AS LinkId FROM pos_item_meta_addon_group WHERE TenantId = ? AND ItemMetaId IN (:ids) ORDER BY SortOrder',
+      SELECT_TAG_LINKS_FOR: 'SELECT ItemMetaId, TagId AS LinkId FROM pos_item_meta_tag WHERE TenantId = ? AND ItemMetaId IN (:ids) ORDER BY CreatedOn',
+      // Dishes turned off in Menu Master. An order line naming one is refused.
+      SELECT_INACTIVE_BY_IDS: 'SELECT Id FROM pos_item_meta WHERE TenantId = ? AND Active = 0 AND Id IN (:ids)',
 
       // Nutrition is 1:1 and OPTIONAL, so it is written as an upsert rather than
       // created alongside every item — most tenants will never fill it in, and a
@@ -1251,8 +1338,10 @@ module.exports = {
       SELECT_ALL: 'SELECT * FROM pos_customer WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM pos_customer WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM pos_customer WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_customer (Id, TenantId, Name, Phone, Email, Visits, TotalSpent, LoyaltyPoints, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_customer SET Name = ?, Phone = ?, Email = ?, Visits = ?, TotalSpent = ?, LoyaltyPoints = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_customer (Id, TenantId, Name, Phone, Email, Visits, TotalSpent, LoyaltyPoints, BranchDetailId, GSTIN, LegalName, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_customer SET Name = ?, Phone = ?, Email = ?, Visits = ?, TotalSpent = ?, LoyaltyPoints = ?, BranchDetailId = ?, GSTIN = ?, LegalName = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      // The GST identity snapshotted onto an invoice at settle.
+      SELECT_TAX_IDENTITY: 'SELECT Name, GSTIN, LegalName FROM pos_customer WHERE Id = ? AND TenantId = ? LIMIT 1',
       DELETE: 'DELETE FROM pos_customer WHERE Id = ? AND TenantId = ?',
 
       // The till's lookup: find a regular by the number they give at the
@@ -1341,8 +1430,8 @@ module.exports = {
       SELECT_ALL: 'SELECT * FROM pos_order WHERE TenantId = ? ORDER BY CreatedOn DESC',
       COUNT: 'SELECT COUNT(*) as total FROM pos_order WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM pos_order WHERE Id = ? AND TenantId = ?',
-      INSERT: 'INSERT INTO pos_order (Id, TenantId, OrderNo, TableId, CustomerId, OrderType, ChannelId, Status, Items, SubTotal, TaxAmount, Total, BranchDetailId, TableName, FloorId, FloorName, TableCapacity, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_order SET OrderNo = ?, TableId = ?, CustomerId = ?, OrderType = ?, ChannelId = ?, Status = ?, Items = ?, SubTotal = ?, TaxAmount = ?, Total = ?, BranchDetailId = ?, TableName = ?, FloorId = ?, FloorName = ?, TableCapacity = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_order (Id, TenantId, OrderNo, TableId, CustomerId, OrderType, ChannelId, Status, Items, SubTotal, TaxAmount, Total, BranchDetailId, TableName, FloorId, FloorName, TableCapacity, CookingInstructions, NoCutlery, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_order SET OrderNo = ?, TableId = ?, CustomerId = ?, OrderType = ?, ChannelId = ?, Status = ?, Items = ?, SubTotal = ?, TaxAmount = ?, Total = ?, BranchDetailId = ?, TableName = ?, FloorId = ?, FloorName = ?, TableCapacity = ?, CookingInstructions = ?, NoCutlery = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_order WHERE Id = ? AND TenantId = ?',
       // Domain action helper: update order status (e.g. after firing a KOT)
       SET_STATUS: 'UPDATE pos_order SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
@@ -1431,12 +1520,12 @@ module.exports = {
       SELECT_ALL_BY_CODE: 'SELECT * FROM pos_portal WHERE Code = ? AND Active = 1',
       INSERT:
         'INSERT INTO pos_portal (Id, TenantId, Name, Code, ChannelId, Adapter, ColorHex, ShortCode, ' +
-        'CommissionPct, CommissionAccountTypeBaseId, SettlementPaymentModeId, SortOrder, Active, ' +
-        'CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'CommissionPct, CommissionAccountTypeBaseId, SettlementPaymentModeId, SortOrder, GSTIN, Active, ' +
+        'CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
         'UPDATE pos_portal SET Name = ?, Code = ?, ChannelId = ?, Adapter = ?, ColorHex = ?, ShortCode = ?, ' +
         'CommissionPct = ?, CommissionAccountTypeBaseId = ?, SettlementPaymentModeId = ?, SortOrder = ?, ' +
-        'Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'GSTIN = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_portal WHERE Id = ? AND TenantId = ?',
     },
 
@@ -1916,6 +2005,164 @@ module.exports = {
          WHERE r.TenantId = ? AND r.CampaignId = ? AND r.Active = 1
          GROUP BY HOUR(r.RedeemedOn)
          ORDER BY Hour ASC`,
+    },
+
+    // Whether this tenant charges GST — see pos_tax_setting in the schema.
+    TAX_SETTING: {
+      SELECT: 'SELECT GstCharging, OffReason, UpdatedOn, UpdatedBy FROM pos_tax_setting WHERE TenantId = ? LIMIT 1',
+      // Locks the row (or the gap where it will go) so two admins flipping the
+      // switch at once serialise instead of writing two history rows that
+      // disagree about what the value was "from".
+      SELECT_FOR_UPDATE: 'SELECT GstCharging, OffReason FROM pos_tax_setting WHERE TenantId = ? LIMIT 1 FOR UPDATE',
+      // Each branch's GSTIN, for the settings card. The GST switch is one value
+      // for the business, but the registration it files under is per branch.
+      SELECT_BRANCHES:
+        'SELECT Id, BranchName, GSTIN FROM branchdetail WHERE TenantId = ? AND COALESCE(Active, 1) = 1 ORDER BY BranchName ASC, Id ASC',
+      UPDATE_BRANCH_GSTIN:
+        'UPDATE branchdetail SET GSTIN = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      UPSERT: `
+        INSERT INTO pos_tax_setting (TenantId, GstCharging, OffReason, CreatedOn, CreatedBy, UpdatedOn, UpdatedBy)
+        VALUES (?, ?, ?, NOW(), ?, NOW(), ?)
+        ON DUPLICATE KEY UPDATE GstCharging = VALUES(GstCharging), OffReason = VALUES(OffReason),
+                                UpdatedOn = NOW(), UpdatedBy = VALUES(UpdatedBy)`,
+      INSERT_HISTORY:
+        'INSERT INTO pos_tax_mode_history (Id, TenantId, FromCharging, ToCharging, OffReason, ChangedBy, ChangedOn) VALUES (?, ?, ?, ?, ?, ?, NOW())',
+      SELECT_HISTORY:
+        'SELECT Id, FromCharging, ToCharging, OffReason, ChangedBy, ChangedOn FROM pos_tax_mode_history WHERE TenantId = ? ORDER BY ChangedOn DESC, Id DESC LIMIT 50',
+      // Every change up to the end of a report range, oldest first — enough to
+      // replay which state each day of the range was in.
+      SELECT_HISTORY_UNTIL:
+        'SELECT FromCharging, ToCharging, OffReason, ChangedBy, ChangedOn FROM pos_tax_mode_history WHERE TenantId = ? AND ChangedOn <= ? ORDER BY ChangedOn ASC, Id ASC',
+      // What blocks the switch: any round still open anywhere. A bill that is
+      // half tax invoice and half bill of supply cannot be printed honestly.
+      SELECT_OPEN_ORDERS: `
+        SELECT o.Id, o.OrderNo, o.OrderType, o.TableName, o.Total, o.CreatedOn
+          FROM pos_order o
+         WHERE o.TenantId = ? AND o.Active = 1
+           AND LOWER(COALESCE(o.Status, '')) NOT IN ('closed', 'settled', 'cancelled')
+         ORDER BY o.CreatedOn ASC
+         LIMIT 50`,
+    },
+
+    // GST return exports. Every query reads LEDGER documents only — the invoice
+    // as issued — and takes the branch as `(? IS NULL OR l.BranchId = ?)` so the
+    // pack (one GSTIN) and the reference export (any branch) share them.
+    GST_EXPORT: {
+      SELECT_BRANCH: 'SELECT Id, BranchName, GSTIN FROM branchdetail WHERE Id = ? AND TenantId = ? LIMIT 1',
+      // One row per document. `Source` answers "how was this sold" — which
+      // portal, which channel — through the bill's rounds. A credit note reads
+      // the source of the sale it reverses, since it has no bill of its own.
+      SELECT_DOCUMENTS: `
+        SELECT l.Id, l.TransactionNo, l.TransactionDate, l.BranchId, b.BranchName,
+               l.NetAmount, l.TaxAmount, l.DiscountAmount, l.RoundOff, l.GrossAmount,
+               l.TaxMode, l.BuyerGstin, l.BuyerLegalName, l.SellerGstin, l.CustomerName, l.ReversesLogId, l.CreatedOn,
+               t.Name AS TypeName, s.Name AS StatusName,
+               orig.TransactionNo AS OriginalNo, orig.TransactionDate AS OriginalDate,
+               orig.BuyerGstin AS OriginalBuyerGstin, orig.BuyerLegalName AS OriginalBuyerLegalName,
+               (SELECT JSON_OBJECT('portalName', p.Name, 'portalGstin', p.GSTIN,
+                                   'channel', ch.Name, 'orderType', o.OrderType)
+                  FROM pos_bill pb
+                  JOIN pos_bill_order bo ON bo.BillId = pb.Id AND bo.TenantId = pb.TenantId
+                  JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+                  LEFT JOIN pos_channel ch       ON ch.Id = o.ChannelId
+                  LEFT JOIN pos_online_order oo  ON oo.OrderId = o.Id AND oo.TenantId = o.TenantId
+                  LEFT JOIN pos_portal p         ON p.Id = oo.PortalId
+                 WHERE pb.TransactionDetailLogId = COALESCE(l.ReversesLogId, l.Id)
+                   AND pb.TenantId = l.TenantId
+                 ORDER BY p.Id IS NULL
+                 LIMIT 1) AS Source
+          FROM transactiondetaillog l
+          JOIN transactiontype t              ON t.Id = l.TransactionTypeId
+          LEFT JOIN transactiontypestatus s   ON s.Id = l.TransactionTypeStatusId
+          LEFT JOIN branchdetail b            ON b.Id = l.BranchId
+          LEFT JOIN transactiondetaillog orig ON orig.Id = l.ReversesLogId AND orig.TenantId = l.TenantId
+         WHERE l.TenantId = ? AND (? IS NULL OR l.BranchId = ?)
+           AND l.TransactionDate BETWEEN ? AND ?
+           AND t.Name IN (?, ?)
+         ORDER BY l.TransactionDate ASC, l.CreatedOn ASC, l.TransactionNo ASC`,
+      SELECT_LINES: `
+        SELECT d.TransactionDetailLogId AS LogId, d.LineNo, d.ItemId, d.Quantity, d.UnitPrice,
+               d.NetAmount, d.DiscountAmount, d.TaxAmount, d.GrossAmount, d.TaxComponents,
+               d.Variants, d.Addons, d.TaxCharged, d.Comment,
+               i.Name AS ItemName, i.SACCode, i.HSNCode
+          FROM transactionitemdetail d
+          JOIN transactiondetaillog l ON l.Id = d.TransactionDetailLogId AND l.TenantId = d.TenantId
+          JOIN transactiontype t      ON t.Id = l.TransactionTypeId
+          LEFT JOIN itemdetail i      ON i.Id = d.ItemId AND i.TenantId = d.TenantId
+         WHERE l.TenantId = ? AND (? IS NULL OR l.BranchId = ?)
+           AND l.TransactionDate BETWEEN ? AND ?
+           AND t.Name IN (?, ?)
+         ORDER BY d.TransactionDetailLogId, d.LineNo`,
+      // "Cash + UPI" per document, for the registers.
+      SELECT_TENDERS: `
+        SELECT pd.TransactionDetailLogId AS LogId,
+               GROUP_CONCAT(DISTINCT pm.Type ORDER BY pm.Type SEPARATOR ' + ') AS Modes
+          FROM paymentdetail pd
+          JOIN transactiondetaillog l ON l.Id = pd.TransactionDetailLogId AND l.TenantId = pd.TenantId
+          JOIN paymentbreakup pbk     ON pbk.PaymentDetailId = pd.Id AND pbk.TenantId = pd.TenantId
+          JOIN paymentmodetransactiondetail pmt ON pmt.Id = pbk.PaymentModeTransactionDetailId
+          JOIN paymentmode pm         ON pm.Id = pmt.PaymentModeId
+         WHERE l.TenantId = ? AND (? IS NULL OR l.BranchId = ?)
+           AND l.TransactionDate BETWEEN ? AND ?
+         GROUP BY pd.TransactionDetailLogId`,
+      // The split report. Returns count against sales, so a refunded plate
+      // does not stay in "sold with GST".
+      SPLIT_TOTALS: `
+        SELECT CASE WHEN l.TaxMode = 'gst' THEN 'with' ELSE 'without' END AS Bucket,
+               SUM(CASE WHEN t.Name = ? THEN 1 ELSE 0 END) AS Bills,
+               SUM(CASE WHEN t.Name = ? THEN -l.NetAmount ELSE l.NetAmount END) AS NetAmount,
+               SUM(CASE WHEN t.Name = ? THEN -l.TaxAmount ELSE l.TaxAmount END) AS TaxAmount,
+               SUM(CASE WHEN t.Name = ? THEN -l.GrossAmount ELSE l.GrossAmount END) AS GrossAmount
+          FROM transactiondetaillog l
+          JOIN transactiontype t            ON t.Id = l.TransactionTypeId
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+         WHERE l.TenantId = ? AND (? IS NULL OR l.BranchId = ?)
+           AND l.TransactionDate BETWEEN ? AND ?
+           AND t.Name IN (?, ?)
+           AND s.Name IN (?, ?, ?)
+         GROUP BY Bucket`,
+      SPLIT_TAX_COMPONENTS: `
+        SELECT d.TaxComponents,
+               CASE WHEN t.Name = ? THEN -1 ELSE 1 END AS Sign
+          FROM transactionitemdetail d
+          JOIN transactiondetaillog l       ON l.Id = d.TransactionDetailLogId AND l.TenantId = d.TenantId
+          JOIN transactiontype t            ON t.Id = l.TransactionTypeId
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+         WHERE l.TenantId = ? AND (? IS NULL OR l.BranchId = ?)
+           AND l.TransactionDate BETWEEN ? AND ?
+           AND t.Name IN (?, ?)
+           AND s.Name IN (?, ?, ?)
+           AND d.TaxCharged = 1 AND l.TaxMode = 'gst'`,
+      // Sign is (1 - 2 * isReturn), written out five times rather than joined in,
+      // so the query runs on any MySQL 8 without LATERAL.
+      SPLIT_PRODUCTS: `
+        SELECT d.ItemId, MAX(COALESCE(i.Name, d.Comment)) AS ItemName,
+               SUM(CASE WHEN d.TaxCharged = 1 AND l.TaxMode = 'gst' THEN (1 - 2 * (t.Name = ?)) * d.Quantity ELSE 0 END)    AS QtyWith,
+               SUM(CASE WHEN d.TaxCharged = 1 AND l.TaxMode = 'gst' THEN (1 - 2 * (t.Name = ?)) * d.GrossAmount ELSE 0 END) AS GrossWith,
+               SUM(CASE WHEN d.TaxCharged = 1 AND l.TaxMode = 'gst' THEN (1 - 2 * (t.Name = ?)) * d.TaxAmount ELSE 0 END)   AS TaxWith,
+               SUM(CASE WHEN d.TaxCharged = 1 AND l.TaxMode = 'gst' THEN 0 ELSE (1 - 2 * (t.Name = ?)) * d.Quantity END)    AS QtyWithout,
+               SUM(CASE WHEN d.TaxCharged = 1 AND l.TaxMode = 'gst' THEN 0 ELSE (1 - 2 * (t.Name = ?)) * d.GrossAmount END) AS GrossWithout
+          FROM transactionitemdetail d
+          JOIN transactiondetaillog l       ON l.Id = d.TransactionDetailLogId AND l.TenantId = d.TenantId
+          JOIN transactiontype t            ON t.Id = l.TransactionTypeId
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+          LEFT JOIN itemdetail i            ON i.Id = d.ItemId AND i.TenantId = d.TenantId
+         WHERE l.TenantId = ? AND (? IS NULL OR l.BranchId = ?)
+           AND l.TransactionDate BETWEEN ? AND ?
+           AND t.Name IN (?, ?)
+           AND s.Name IN (?, ?, ?)
+         GROUP BY d.ItemId
+         ORDER BY (GrossWith + GrossWithout) DESC
+         LIMIT 200`,
+    },
+
+    GST_FILING: {
+      UPSERT: `
+        INSERT INTO pos_gst_filing (Id, TenantId, BranchId, Period, FiledOn, RecordedBy, RecordedOn)
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE FiledOn = VALUES(FiledOn), RecordedBy = VALUES(RecordedBy), RecordedOn = NOW()`,
+      SELECT_ONE:
+        'SELECT Period, FiledOn, RecordedBy, RecordedOn FROM pos_gst_filing WHERE TenantId = ? AND BranchId = ? AND Period = ? LIMIT 1',
     },
 
     POS_SETTING: {
@@ -2520,6 +2767,11 @@ module.exports = {
         'DELETE FROM pos_portal_listing_variant WHERE TenantId = ?',
         'DELETE FROM pos_portal_listing WHERE TenantId = ?',
         'DELETE FROM pos_setting WHERE TenantId = ?',
+        // The GST switch, its history and recorded filings. No foreign keys in or
+        // out, so their place in the sweep is free.
+        'DELETE FROM pos_tax_setting WHERE TenantId = ?',
+        'DELETE FROM pos_tax_mode_history WHERE TenantId = ?',
+        'DELETE FROM pos_gst_filing WHERE TenantId = ?',
         'DELETE FROM pos_token WHERE TenantId = ?',
         'DELETE FROM pos_token_counter WHERE TenantId = ?',
         'DELETE FROM taxgrouptaxtypemapper WHERE TenantId = ?',
@@ -2792,8 +3044,12 @@ module.exports = {
           (Id, TenantId, TransactionNo, TransactionTypeConfigId, TransactionTypeId,
            TransactionTypeStatusId, BranchId, TransactionDate,
            NetAmount, TaxAmount, DiscountAmount, RoundOff, GrossAmount, TaxByComponent,
-           ContactDetailId, CustomerName, CustomerMobile, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+           ContactDetailId, CustomerName, CustomerMobile, TaxMode, BuyerGstin, BuyerLegalName,
+           SellerGstin, Remarks, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+      // The branch's GSTIN at the moment a sale is issued — snapshotted onto
+      // the document as SellerGstin.
+      SELECT_BRANCH_GSTIN: 'SELECT GSTIN FROM branchdetail WHERE Id = ? AND TenantId = ? LIMIT 1',
       UPDATE_LOG_STATUS:
         'UPDATE transactiondetaillog SET TransactionTypeStatusId = ?, SettledAt = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       SELECT_LOG_FULL: `
@@ -2870,10 +3126,10 @@ module.exports = {
       INSERT_LINE: `
         INSERT INTO transactionitemdetail
           (Id, TenantId, TransactionDetailLogId, LineNo, ItemId, Quantity, CostInfoId,
-           UnitPrice, BasePrice, VariantAmount, NetAmount, DiscountAmount, ItemDiscountAmount,
+           UnitPrice, BasePrice, VariantAmount, AddonAmount, NetAmount, DiscountAmount, ItemDiscountAmount,
            TaxAmount, GrossAmount,
-           TaxComponents, Variants, Comment, Active, CreatedOn, CreatedBy, UpdatedBy)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+           TaxComponents, Variants, Addons, TaxCharged, Note, Comment, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
       // ── Returns / credit notes ──────────────────────────────────────────
       //
       // A credit note is a transactiondetaillog row like any other, plus the
@@ -2887,18 +3143,18 @@ module.exports = {
           (Id, TenantId, TransactionNo, TransactionTypeConfigId, TransactionTypeId,
            TransactionTypeStatusId, BranchId, TransactionDate,
            NetAmount, TaxAmount, DiscountAmount, RoundOff, GrossAmount, TaxByComponent,
-           ContactDetailId, CustomerName, CustomerMobile,
-           ReversesLogId, SettlementStatus, SettlementRef, ReturnReasonId,
+           ContactDetailId, CustomerName, CustomerMobile, TaxMode, BuyerGstin, BuyerLegalName,
+           SellerGstin, ReversesLogId, SettlementStatus, SettlementRef, ReturnReasonId,
            Remarks, Active, CreatedOn, CreatedBy, UpdatedBy)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
       INSERT_RETURN_LINE: `
         INSERT INTO transactionitemdetail
           (Id, TenantId, TransactionDetailLogId, LineNo, ItemId, Quantity, CostInfoId,
-           UnitPrice, BasePrice, VariantAmount, NetAmount, DiscountAmount, ItemDiscountAmount,
-           TaxAmount, GrossAmount, TaxComponents, Variants, Comment,
+           UnitPrice, BasePrice, VariantAmount, AddonAmount, NetAmount, DiscountAmount, ItemDiscountAmount,
+           TaxAmount, GrossAmount, TaxComponents, Variants, Addons, TaxCharged, Note, Comment,
            SourceLineId, RestockRequested,
            Active, CreatedOn, CreatedBy, UpdatedBy)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)`,
 
       // THE CONCURRENCY GUARD. Two cashiers refunding one invoice at the same
       // moment would both read "nothing returned yet" and both be allowed to
@@ -2909,6 +3165,7 @@ module.exports = {
         SELECT l.Id, l.TenantId, l.TransactionNo, l.GrossAmount, l.NetAmount, l.TaxAmount,
                l.DiscountAmount, l.BranchId, l.ContactDetailId, l.CustomerName,
                l.CustomerMobile, l.TransactionTypeConfigId, l.TransactionTypeStatusId,
+               l.TaxMode, l.BuyerGstin, l.BuyerLegalName, l.SellerGstin,
                l.SettledAt, s.Name AS StatusName
           FROM transactiondetaillog l
           LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
@@ -3261,6 +3518,10 @@ module.exports = {
           COALESCE(SUM(ti.DiscountAmount), 0)     AS DiscountAmount,
           COALESCE(SUM(ti.TaxAmount), 0)          AS TaxAmount,
           COALESCE(SUM(ti.GrossAmount), 0)        AS GrossAmount,
+          -- What options and add-ons added on top of the dish price, per unit
+          -- times quantity, BEFORE discount. Part of GrossAmount, not beside it.
+          COALESCE(SUM(ti.VariantAmount * ti.Quantity), 0) AS OptionsAmount,
+          COALESCE(SUM(ti.AddonAmount * ti.Quantity), 0)   AS AddonsAmount,
           COUNT(DISTINCT ti.TransactionDetailLogId) AS Documents
         FROM transactionitemdetail ti
         JOIN transactiondetaillog l  ON l.Id = ti.TransactionDetailLogId
@@ -3271,6 +3532,38 @@ module.exports = {
           AND l.TransactionDate BETWEEN ? AND ?
           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
           AND l.ReversesLogId IS NULL`,
+
+      // The lines behind the options & add-ons report: only those that carried
+      // a choice, with the choice SNAPSHOT as sold. Same document scope as
+      // PRODUCT_SALES, so the two reports always describe the same sales.
+      // Aggregated in ledger.options.report — the snapshot is JSON in two
+      // historical shapes, and a take rate needs a denominator SQL cannot see.
+      OPTION_LINES: `
+        SELECT ti.ItemId, ti.Quantity, ti.Variants, ti.Addons
+        FROM transactionitemdetail ti
+        JOIN transactiondetaillog l  ON l.Id = ti.TransactionDetailLogId
+        JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+        LEFT JOIN itemdetail i       ON i.Id = ti.ItemId
+        WHERE ti.TenantId = ?
+          AND l.TransactionDate BETWEEN ? AND ?
+          AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')
+          AND l.ReversesLogId IS NULL
+          AND (JSON_LENGTH(COALESCE(ti.Variants, JSON_ARRAY())) > 0
+               OR JSON_LENGTH(COALESCE(ti.Addons, JSON_ARRAY())) > 0)`,
+
+      // Which sold dishes OFFER which variant or add-on group on today's menu —
+      // the denominator of a take rate. Keyed by the catalogue item, which is
+      // what an invoice line references. :ids is expanded twice.
+      OPTION_OFFERS: `
+        SELECT m.ItemDetailId AS ItemId, 'variant' AS Kind, mv.VariantId AS OptionId
+          FROM pos_item_meta m
+          JOIN pos_item_meta_variant mv ON mv.ItemMetaId = m.Id AND mv.TenantId = m.TenantId AND mv.Active = 1
+         WHERE m.TenantId = ? AND m.Active = 1 AND m.ItemDetailId IN (:ids)
+        UNION
+        SELECT m.ItemDetailId AS ItemId, 'group' AS Kind, mg.AddonGroupId AS OptionId
+          FROM pos_item_meta m
+          JOIN pos_item_meta_addon_group mg ON mg.ItemMetaId = m.Id AND mg.TenantId = m.TenantId AND mg.Active = 1
+         WHERE m.TenantId = ? AND m.Active = 1 AND m.ItemDetailId IN (:ids)`,
 
       // Revenue by floor and table.
       //
@@ -3645,6 +3938,10 @@ module.exports = {
     // line on an order carries its own PrepTimeMinutes — a KPT of zero would
     // promise a portal the food is already made.
     KPT_DEFAULT_MINUTES: 'kpt.default_minutes',
+    // The quick-pick kitchen notes Billing offers ("Less spicy", "No onion").
+    // A JSON list of strings, per branch — a Jain outlet and a grill want
+    // different ones.
+    KITCHEN_NOTE_PRESETS: 'kitchen.note_presets',
   },
 
   // Minutes. The number a portal is told the kitchen needs, and the number a
@@ -3665,6 +3962,23 @@ module.exports = {
   //         reprints. For a screen-only kitchen with no printer attached.
   KOT_AUTO_PRINT: { ON: 'on', OFF: 'off' },
   KOT_AUTO_PRINT_DEFAULT: 'on',
+  // Limits on what the kitchen is told. See modules/posorder/kitchenNotes.js.
+  KITCHEN_NOTES: {
+    // A dish note typed at the till. Two lines of an 80mm ticket at the note's
+    // size; longer is refused rather than cut, because half an allergy is worse
+    // than none.
+    LINE_MAX: 140,
+    // The whole-order note. = pos_order / pos_kot.CookingInstructions VARCHAR(500).
+    ORDER_MAX: 500,
+    // = transactionitemdetail.Note VARCHAR(255). Wider than LINE_MAX so a portal
+    // note, which is not held to the till's limit, still reaches the invoice.
+    STORED_LINE_MAX: 255,
+    // One quick-pick, and how many a branch may keep. 20 × 40 plus JSON
+    // punctuation stays under pos_setting.SettingValue VARCHAR(1000).
+    PRESET_MAX: 40,
+    PRESETS_MAX: 20,
+    DEFAULT_PRESETS: ['Less spicy', 'Extra spicy', 'Less salt', 'Less oil', 'No onion', 'No garlic', 'Jain'],
+  },
   // Series tag + fallback prefix for 'series' numbering.
   POS_TOKEN_SERIES: { TAG: 'POS_TOKEN', PREFIX: 'TOK' },
   // Ordered: the Tracking board advances an order one stage at a time, so the
@@ -3787,6 +4101,23 @@ module.exports = {
   // Onboarding auto-approval configuration.
   // TEMPLATE_TENANT_ID is the reference tenant whose standard role catalog is
   // cloned into every auto-created tenant (the seeded ANM Tech tenant).
+  // Which clock the trading day runs on.
+  //
+  // app_settings has no tenant_id, so this is a PLATFORM default rather than a
+  // per-tenant one — the right shape while every outlet is in one country, and
+  // the reason it lives here instead of on pos_setting. Moving it per-branch
+  // later is a column plus a lookup; nothing else here changes.
+  //
+  // It exists because a category schedule is written in the outlet's local time
+  // ("breakfast 07:00-11:00") and evaluated on a server that is UTC in
+  // production. Without it a 07:00 window opens at 12:30 IST.
+  CLOCK: {
+    SETTING_TIMEZONE: 'pos.timezone',
+    // Only ever used when the setting is missing or names a zone this Node
+    // build does not know. Wrong is better than crashed, and it is logged.
+    DEFAULT_TIMEZONE: 'Asia/Kolkata',
+  },
+
   ONBOARDING: {
     SETTING_AUTO_APPROVE: 'onboarding.auto_approve.enabled',
     TEMPLATE_TENANT_ID:

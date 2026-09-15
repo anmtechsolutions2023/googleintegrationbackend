@@ -64,12 +64,14 @@ const makeConn = (orders, tables, kots = []) => {
       if (sql.startsWith('UPDATE pos_order SET OrderNo')) {
         // ChannelId binds between OrderType and Status, so everything after it
         // sits one place further along than it used to.
-        const id = params[17];
+        // The whole-order note and the no-cutlery flag bind after the venue.
+        const id = params[19];
         oStore.set(id, {
           ...oStore.get(id), OrderNo: params[0], TableId: params[1],
           ChannelId: params[4], Status: params[5],
           Items: parseItems(params[6]), SubTotal: params[7], TaxAmount: params[8],
           Total: params[9], BranchDetailId: params[10], ...venueOf(params, 11),
+          CookingInstructions: params[15], NoCutlery: params[16],
         });
         return [{ affectedRows: 1 }];
       }
@@ -79,6 +81,7 @@ const makeConn = (orders, tables, kots = []) => {
           ChannelId: params[6], Status: params[7],
           Items: parseItems(params[8]), SubTotal: params[9], TaxAmount: params[10],
           Total: params[11], BranchDetailId: params[12], ...venueOf(params, 13),
+          CookingInstructions: params[17], NoCutlery: params[18],
         });
         return [{ affectedRows: 1 }];
       }
@@ -344,3 +347,26 @@ describe('transfer · tickets and venue follow the round', () => {
     expect(repoint).toBeLessThan(del);
   });
 });
+
+describe('transfer · the kitchen note travels with the food', () => {
+  it('a split round keeps the dish note, the whole-order note and the cutlery flag', async () => {
+    const conn = makeConn([{
+      Id: 'o1', TableId: 't1', Status: 'open', OrderType: 'dinein',
+      Items: [line({ name: 'Paneer', note: 'Less spicy' }), line({ name: 'Naan' })],
+      SubTotal: 200, TaxAmount: 36, Total: 236, BranchDetailId: 'br-1',
+      CookingInstructions: 'Serve starters first', NoCutlery: 1,
+    }], TABLES);
+
+    const res = await transfer(conn, {
+      scope: 'items', sourceOrderId: 'o1', items: [{ index: 0, qty: 1 }], toTableId: 't2',
+    }, 'tn', 'u@x');
+
+    const dest = conn.oStore.get(res.createdOrderId);
+    expect(dest.Items[0].note).toBe('Less spicy');
+    expect(dest.CookingInstructions).toBe('Serve starters first');
+    expect(dest.NoCutlery).toBe(1);
+    // The round the guests stayed at keeps its own.
+    expect(conn.oStore.get('o1').CookingInstructions).toBe('Serve starters first');
+  });
+});
+

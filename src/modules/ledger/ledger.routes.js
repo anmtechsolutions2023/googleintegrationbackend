@@ -24,6 +24,8 @@ const WRITE = [SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.TRANSACTIO
 router.get('/reports/overview', authenticateToken, checkScope(...READ), ...controller.overviewReport);
 router.get('/reports/sales', authenticateToken, checkScope(...READ), ...controller.salesReport);
 router.get('/reports/products', authenticateToken, checkScope(...READ), ...controller.productReport);
+// Which options and add-ons sell, on which dishes, and how often they are taken.
+router.get('/reports/options', authenticateToken, checkScope(...READ), ...controller.optionsReport);
 router.get('/reports/pending', authenticateToken, checkScope(...READ), ...controller.pendingReport);
 router.get('/reports/tenders', authenticateToken, checkScope(...READ), ...controller.tenderReport);
 router.get('/reports/cashflow', authenticateToken, checkScope(...READ), ...controller.cashFlowReport);

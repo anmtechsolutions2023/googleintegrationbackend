@@ -2,8 +2,12 @@
 // Joi validation schemas for POS Order operations.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
-const { POS_ORDER_STATUSES, POS_ORDER_TYPES } = require('../../config/constants');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
+const { POS_ORDER_STATUSES, POS_ORDER_TYPES, KITCHEN_NOTES } = require('../../config/constants');
+
+// The whole-order note and the no-cutlery flag. A DISH note is not a field here:
+// it rides on its line inside Items, and posorder.service cleans and bounds it.
+const cookingInstructions = Joi.string().max(KITCHEN_NOTES.ORDER_MAX).allow(null, '').trim();
 
 // Canonical lowercase enums, normalized on write. Status and OrderType were both
 // free-text before, which is how 'Active'/'open' and 'Dine-in'/'dinein' ended up
@@ -16,8 +20,8 @@ const orderTypeField = Joi.string().lowercase().valid(...POS_ORDER_TYPES);
 // ~16m40s and collided with UNIQUE (OrderNo, TenantId). Any value sent is ignored.
 const createSchema = Joi.object({
   OrderNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  TableId: entityId.optional().allow(null),
-  CustomerId: entityId.optional().allow(null),
+  TableId: optionalEntityId,
+  CustomerId: optionalEntityId,
   OrderType: orderTypeField.optional().allow(null, '').default('dinein'),
   // A round is born open — the client does not choose this. Both columns are
   // NOT NULL, so an omitted Status has to resolve to a value before it reaches
@@ -27,21 +31,25 @@ const createSchema = Joi.object({
   SubTotal: Joi.number().optional().default(0).allow(null),
   TaxAmount: Joi.number().optional().default(0).allow(null),
   Total: Joi.number().optional().default(0).allow(null),
-  BranchDetailId: entityId.optional().allow(null),
+  BranchDetailId: optionalEntityId,
+  CookingInstructions: cookingInstructions.optional(),
+  NoCutlery: Joi.boolean().optional(),
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   OrderNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  TableId: entityId.optional().allow(null),
-  CustomerId: entityId.optional().allow(null),
+  TableId: optionalEntityId,
+  CustomerId: optionalEntityId,
   OrderType: orderTypeField.optional().allow(null, ''),
   Status: statusField.optional().allow(null, ''),
   Items: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   SubTotal: Joi.number().optional().allow(null),
   TaxAmount: Joi.number().optional().allow(null),
   Total: Joi.number().optional().allow(null),
-  BranchDetailId: entityId.optional().allow(null),
+  BranchDetailId: optionalEntityId,
+  CookingInstructions: cookingInstructions.optional(),
+  NoCutlery: Joi.boolean().optional(),
   Active: Joi.boolean().optional(),
 }).min(1);
 

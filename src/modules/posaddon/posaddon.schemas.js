@@ -2,7 +2,7 @@
 // Joi validation schemas for POS Add-on master operations.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
 
@@ -21,7 +21,7 @@ const createSchema = Joi.object({
   Price: Joi.number().min(0).precision(4).optional().default(0),
   // Dietary tag on the add-on itself; optional because a vegetarian kitchen
   // has nothing to distinguish.
-  FoodTypeId: entityId.allow(null).optional(),
+  FoodTypeId: optionalEntityId,
   SortOrder: Joi.number().integer().optional().default(0),
   Active: Joi.boolean().optional().default(true),
 });
@@ -37,7 +37,7 @@ const updateSchema = Joi.object({
   Name: Joi.string().max(100).trim().optional(),
   Code: Joi.string().max(50).trim().optional(),
   Price: Joi.number().min(0).precision(4).optional(),
-  FoodTypeId: entityId.allow(null).optional(),
+  FoodTypeId: optionalEntityId,
   SortOrder: Joi.number().integer().optional(),
   Active: Joi.boolean().optional(),
 }).min(1);

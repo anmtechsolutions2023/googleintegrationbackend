@@ -2,7 +2,7 @@
 // Joi validation schemas for the expense category master.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
 
@@ -14,7 +14,7 @@ const createSchema = Joi.object({
   // also a genuine input.
   ...joinedEchoes(QUERIES.EXPENSE_CATEGORY),
   Name: Joi.string().max(100).required().trim(),
-  AccountTypeBaseId: entityId.optional().allow(null),
+  AccountTypeBaseId: optionalEntityId,
   Active: Joi.boolean().optional().default(true),
 });
 
@@ -26,7 +26,7 @@ const updateSchema = Joi.object({
   // also a genuine input.
   ...joinedEchoes(QUERIES.EXPENSE_CATEGORY),
   Name: Joi.string().max(100).optional().trim(),
-  AccountTypeBaseId: entityId.optional().allow(null),
+  AccountTypeBaseId: optionalEntityId,
   Active: Joi.boolean().optional(),
 }).min(1);
 

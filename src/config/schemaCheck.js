@@ -23,13 +23,26 @@ const { logger } = require('../utils/logger');
 
 const REQUIRED_COLUMNS = {
   // Venue snapshot — where a round was served, frozen at the time.
-  pos_order: ['TableName', 'FloorId', 'FloorName', 'TableCapacity'],
+  pos_order: ['TableName', 'FloorId', 'FloorName', 'TableCapacity', 'CookingInstructions', 'NoCutlery'],
   // Per-item discounts granted on a bill.
   pos_bill: ['LineDiscounts'],
   // What the customer asked the kitchen for, snapshotted onto the ticket.
   pos_kot: ['CookingInstructions', 'NoCutlery'],
-  // The per-dish share of a discount, split from the total borne by the line.
-  transactionitemdetail: ['ItemDiscountAmount'],
+  // The per-dish share of a discount, split from the total borne by the line,
+  // and the add-on surcharge + snapshot split out from the variant ones.
+  // Written by LEDGER.INSERT_ITEM: a database without them fails EVERY bill
+  // settlement with ER_BAD_FIELD_ERROR, which is exactly the unreadable
+  // failure this check exists to name.
+  // Note: the dish's kitchen note, carried to the invoice line.
+  transactionitemdetail: ['ItemDiscountAmount', 'AddonAmount', 'Addons', 'Note', 'TaxCharged'],
+  // GST switch + CA export. A database without these fails every settle
+  // (TaxMode is written on each invoice header).
+  transactiondetaillog: ['TaxMode', 'BuyerGstin', 'BuyerLegalName', 'SellerGstin'],
+  pos_customer: ['GSTIN', 'LegalName'],
+  pos_portal: ['GSTIN'],
+  pos_tax_setting: ['GstCharging', 'OffReason'],
+  pos_tax_mode_history: ['FromCharging', 'ToCharging'],
+  pos_gst_filing: ['Period', 'FiledOn'],
 
   // ── Zomato / portal menu integration ──────────────────────────────────────
   // Sub-category tree and portal menu ordering.

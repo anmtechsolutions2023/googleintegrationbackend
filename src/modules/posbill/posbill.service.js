@@ -8,6 +8,25 @@ const { withConnection, withTransaction } = require('../../utils/dbHelper');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const pricingService = require('../pricing/pricing.service');
+const taxSettingRepository = require('../taxsetting/taxsetting.repository');
+const { taxModeOf } = require('../taxsetting/taxsetting.service');
+const { isGstin, normaliseGstin } = require('../../utils/gstStates');
+const { QUERIES: TAX_QUERIES } = require('../../config/constants');
+
+/**
+ * A business buyer's GST identity, for the invoice header.
+ *
+ * Null for a walk-in, and for a customer whose GSTIN is missing or malformed —
+ * a sale is only B2B in a GST return when the buyer's GSTIN is on the invoice,
+ * and printing a broken one would make the whole line unfileable.
+ */
+const readBuyerTx = async (conn, posCustomerId, tenantId) => {
+  if (!posCustomerId) return null;
+  const [rows] = await conn.execute(TAX_QUERIES.POS_CUSTOMER.SELECT_TAX_IDENTITY, [posCustomerId, tenantId]);
+  const row = rows[0];
+  if (!row || !isGstin(row.GSTIN)) return null;
+  return { gstin: normaliseGstin(row.GSTIN), legalName: row.LegalName || row.Name || null };
+};
 const ledgerService = require('../ledger/ledger.service');
 // Campaign offers. The engine produces the same per-line discounts a cashier
 // types by hand, so nothing below this line had to change to support them.
@@ -266,6 +285,16 @@ class PosBillService extends BaseCRUDService {
         recomputed.SubTotal, recomputed.TaxAmount, userPhone, id, tenantId,
       ]);
 
+      // ── How this document is issued ────────────────────────────────────
+      // Read from the LINES, not from today's switch. The switch is refused
+      // while any round is open, so every line on this bill was priced under
+      // one state — and that state is what the invoice must say.
+      const anyCharged = (recomputed.Lines || []).some((l) => l.taxCharged !== false);
+      const taxMode = anyCharged
+        ? 'gst'
+        : taxModeOf({ ...(await taxSettingRepository.getTx(connection, tenantId)), gstCharging: false });
+      const buyer = await readBuyerTx(connection, posCustomerId, tenantId);
+
       // ── Post to the accounting ledger ──────────────────────────────────
       const lines = await repository.toLedgerLinesTx(connection, recomputed.Lines, tenantId);
       const posted = await ledgerService.postSaleFromBill(
@@ -277,6 +306,8 @@ class PosBillService extends BaseCRUDService {
           tenders: normalizeTenders(data, recomputed.Total),
           posCustomerId,
           branchId: existing.BranchDetailId,
+          taxMode,
+          buyer,
         },
         tenantId,
         userPhone,

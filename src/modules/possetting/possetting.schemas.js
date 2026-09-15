@@ -4,7 +4,7 @@
 const Joi = require('joi');
 const { entityId } = require('../../utils/idSchema');
 const {
-  TOKEN_NUMBERING, POS_SETTING_KEYS, KOT_AUTO_PRINT, KPT,
+  TOKEN_NUMBERING, POS_SETTING_KEYS, KOT_AUTO_PRINT, KPT, KITCHEN_NOTES,
 } = require('../../config/constants');
 
 // The branch is the address of every setting, so it is required on both the
@@ -39,6 +39,14 @@ const updateSchema = Joi.object({
     .integer()
     .min(KPT.MIN_MINUTES)
     .max(KPT.MAX_MINUTES)
+    .optional(),
+  // The quick-pick kitchen notes Billing offers, in the order they are shown.
+  // Duplicates are refused ignoring case — two "Less spicy" chips side by side
+  // look like a bug. An empty list is allowed: it means "type every note".
+  [POS_SETTING_KEYS.KITCHEN_NOTE_PRESETS]: Joi.array()
+    .items(Joi.string().trim().min(1).max(KITCHEN_NOTES.PRESET_MAX))
+    .max(KITCHEN_NOTES.PRESETS_MAX)
+    .unique((a, b) => a.toLowerCase() === b.toLowerCase())
     .optional(),
 }).min(1);
 

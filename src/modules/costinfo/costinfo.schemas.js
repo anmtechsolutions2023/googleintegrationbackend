@@ -1,6 +1,6 @@
 // src/modules/costinfo/costinfo.schemas.js
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { taxBreakdownEcho } = require('../pricing/pricing.enrich');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
@@ -13,7 +13,7 @@ const createSchema = Joi.object({
   // also a genuine input.
   ...joinedEchoes(QUERIES.COST_INFO),
   Amount: Joi.number().precision(4).required(),
-  TaxGroupId: entityId.optional().allow(null),
+  TaxGroupId: optionalEntityId,
   IsTaxIncluded: Joi.boolean().optional().default(false),
   Active: Joi.boolean().optional().default(true),
   TaxBreakdown: taxBreakdownEcho(),
@@ -27,7 +27,7 @@ const updateSchema = Joi.object({
   // also a genuine input.
   ...joinedEchoes(QUERIES.COST_INFO),
   Amount: Joi.number().precision(4).optional(),
-  TaxGroupId: entityId.optional().allow(null),
+  TaxGroupId: optionalEntityId,
   IsTaxIncluded: Joi.boolean().optional(),
   Active: Joi.boolean().optional(),
   TaxBreakdown: taxBreakdownEcho(),

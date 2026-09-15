@@ -84,6 +84,8 @@ const whatsappRoutes = require('../modules/whatsapp/whatsapp.routes');
 const posfeedbackRoutes = require('../modules/posfeedback/posfeedback.routes');
 const postokenRoutes = require('../modules/postoken/postoken.routes');
 const possettingRoutes = require('../modules/possetting/possetting.routes');
+const taxsettingRoutes = require('../modules/taxsetting/taxsetting.routes');
+const gstexportRoutes = require('../modules/gstexport/gstexport.routes');
 const receiptFormatRoutes = require('../modules/posreceipt/receipt.format.routes');
 const offerRoutes = require('../modules/posoffer/offer.routes');
 const posbranchRoutes = require('../modules/posbranch/posbranch.routes');
@@ -161,6 +163,9 @@ const registerRoutes = (app) => {
   // Accounting ledger — settled sales and expenses as numbered, immutable
   // documents, plus the financial reporting engine (/api/ledger/reports/*).
   app.use('/api/ledger', ledgerRoutes);
+  // GST returns: the CA pack, the sales-without-GST record, and the split
+  // report. Read from the same ledger documents as every other report.
+  app.use('/api/gst', gstexportRoutes);
 
   // Cash sessions — a cashier's shift at a till, and the day-close variance.
   app.use('/api/pos/cash-sessions', poscashsessionRoutes);
@@ -297,6 +302,8 @@ const registerRoutes = (app) => {
   app.use('/api/pos/feedback', posfeedbackRoutes);
   app.use('/api/pos/tokens', postokenRoutes);
   app.use('/api/pos/settings', possettingRoutes);
+  // The tenant's GST switch — one value, obeyed by pricing and the receipt.
+  app.use('/api/pos/tax-settings', taxsettingRoutes);
   // What prints on paper, per branch. Beside settings because that is what it
   // is — but its own module: the catalogue of printable fields, their legal
   // locks and their defaults is a different concern from token numbering.

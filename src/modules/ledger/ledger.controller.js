@@ -126,6 +126,7 @@ module.exports = {
 
   salesReport: [validateQuery(reportQuerySchema), report(reportService.salesReport, 'Sales report retrieved')],
   productReport: [validateQuery(reportQuerySchema), report(reportService.productReport, 'Product report retrieved')],
+  optionsReport: [validateQuery(reportQuerySchema), report(reportService.optionsReport, 'Options and add-ons report retrieved')],
   pendingReport: [validateQuery(reportQuerySchema), report(reportService.pendingReport, 'Pending report retrieved')],
   tenderReport: [validateQuery(reportQuerySchema), report(reportService.tenderReport, 'Tender report retrieved')],
   cashFlowReport: [validateQuery(reportQuerySchema), report(reportService.cashFlowReport, 'Cash flow report retrieved')],

@@ -3,7 +3,7 @@
 // Centralized validation rules for better maintainability
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
 
@@ -21,10 +21,14 @@ const createCategorySchema = Joi.object({
   // First in the literal, so the real rules below override any alias that is
   // also a genuine input.
   ...joinedEchoes(QUERIES.CATEGORY),
+  // A real input, and deliberately declared after the joinedEchoes spread
+  // above — the SELECT returns TagIds as an alias too, so without its own rule
+  // here the spread would accept the array and silently strip it.
+  TagIds: Joi.array().items(entityId).optional(),
   Name: Joi.string().required().max(NAME_MAX).trim(),
   // Null or absent = a top-level category. Depth is enforced in the service,
   // which needs a lookup Joi cannot do.
-  ParentId: entityId.allow(null).optional(),
+  ParentId: optionalEntityId,
   SortOrder: Joi.number().integer().optional().default(0),
   Active: Joi.boolean().optional().default(true),
 });
@@ -37,11 +41,15 @@ const updateCategorySchema = Joi.object({
   // First in the literal, so the real rules below override any alias that is
   // also a genuine input.
   ...joinedEchoes(QUERIES.CATEGORY),
+  // A real input, and deliberately declared after the joinedEchoes spread
+  // above — the SELECT returns TagIds as an alias too, so without its own rule
+  // here the spread would accept the array and silently strip it.
+  TagIds: Joi.array().items(entityId).optional(),
   Name: Joi.string().optional().max(NAME_MAX).trim(),
   // Explicit null promotes a sub-category back to top level, which is why null
   // is allowed rather than stripped — omitting the key means "leave it alone",
   // and the two must stay distinguishable.
-  ParentId: entityId.allow(null).optional(),
+  ParentId: optionalEntityId,
   SortOrder: Joi.number().integer().optional(),
   Active: Joi.boolean().optional(),
 }).min(1); // At least one field must be provided

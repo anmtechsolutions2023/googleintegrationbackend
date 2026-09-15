@@ -3,12 +3,21 @@
 // service composes the pure calculator — batching, document discounts, and the
 // per-line/per-document policy. The maths itself is covered in taxCalculator.test.js.
 
+// The GST switch. On by default — every existing pricing test describes a tenant
+// that charges GST; the switched-off behaviour has its own block below.
+jest.mock('../../modules/taxsetting/taxsetting.repository', () => ({
+  isGstCharging: jest.fn(async () => true),
+}));
+const taxSettingRepository = require('../../modules/taxsetting/taxsetting.repository');
+
 jest.mock('../../modules/pricing/pricing.repository', () => ({
   getChainForCostInfos: jest.fn(),
   getTaxGroupComponents: jest.fn(),
 }));
 jest.mock('../../modules/positemmeta/positemmeta.repository', () => ({
   getVariantPricesByIds: jest.fn(async () => new Map()),
+  getAddonPricesByIds: jest.fn(async () => new Map()),
+  getAddonRulesByItemMetaIds: jest.fn(async () => new Map()),
   getCostInfoIdsByItemMetaIds: jest.fn(async () => new Map()),
 }));
 
@@ -479,5 +488,46 @@ describe('getTaxGroupRate', () => {
   it('returns null for an unknown group', async () => {
     repository.getTaxGroupComponents.mockResolvedValue(null);
     expect(await service.getTaxGroupRate('nope', TENANT)).toBeNull();
+  });
+});
+
+describe('GST switched off', () => {
+  beforeEach(() => taxSettingRepository.isGstCharging.mockResolvedValue(false));
+  afterEach(() => taxSettingRepository.isGstCharging.mockResolvedValue(true));
+
+  test('charges an exclusive price as it stands, with no tax', async () => {
+    repository.getChainForCostInfos.mockResolvedValueOnce(new Map([['ci-x', {
+      amount: 219, isTaxIncluded: false, taxGroupId: 'g', taxGroupName: 'GST 5%',
+      components: [{ name: 'CGST', rate: 2.5 }, { name: 'SGST', rate: 2.5 }],
+    }]]));
+    const { lines, totals } = await service.priceLines([{ costInfoId: 'ci-x', quantity: 1 }], 't1');
+    expect(lines[0]).toMatchObject({ netAmount: 219, taxAmount: 0, grossAmount: 219, taxCharged: false });
+    expect(totals).toMatchObject({ taxAmount: 0, grossAmount: 219, taxCharged: false });
+    expect(totals.taxByComponent).toEqual([]);
+  });
+
+  test('keeps an inclusive price identical — the whole of it is the price', async () => {
+    repository.getChainForCostInfos.mockResolvedValueOnce(new Map([['ci-i', {
+      amount: 239, isTaxIncluded: true, taxGroupId: 'g', taxGroupName: 'GST 5%',
+      components: [{ name: 'CGST', rate: 2.5 }, { name: 'SGST', rate: 2.5 }],
+    }]]));
+    const { lines } = await service.priceLines([{ costInfoId: 'ci-i', quantity: 1 }], 't1');
+    expect(lines[0]).toMatchObject({ netAmount: 239, taxAmount: 0, grossAmount: 239 });
+  });
+
+  test('the menu breakdown carries no tax either', async () => {
+    repository.getChainForCostInfos.mockResolvedValueOnce(new Map([['ci-m', {
+      amount: 219, isTaxIncluded: false, taxGroupId: 'g', taxGroupName: 'GST 5%',
+      components: [{ name: 'CGST', rate: 2.5 }, { name: 'SGST', rate: 2.5 }],
+    }]]));
+    const priced = await service.priceCostInfos(['ci-m'], 't1');
+    expect(priced.get('ci-m')).toMatchObject({ effectiveRate: 0, taxAmount: 0, taxCharged: false });
+  });
+
+  test('an explicit option wins without reading the setting', async () => {
+    taxSettingRepository.isGstCharging.mockClear();
+    repository.getChainForCostInfos.mockResolvedValueOnce(new Map());
+    await service.priceLines([{ costInfoId: 'ci-none', quantity: 1 }], 't1', { gstCharging: true });
+    expect(taxSettingRepository.isGstCharging).not.toHaveBeenCalled();
   });
 });

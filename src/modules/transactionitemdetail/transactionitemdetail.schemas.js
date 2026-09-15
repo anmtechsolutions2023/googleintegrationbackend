@@ -1,6 +1,6 @@
 // src/modules/transactionitemdetail/transactionitemdetail.schemas.js
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
 
@@ -18,7 +18,7 @@ const createSchema = Joi.object({
   TransactionDetailLogId: entityId.required(),
   ItemId: entityId.required(),
   Quantity: Joi.number().min(0).optional().default(1),
-  CostInfoId: entityId.optional().allow(null),
+  CostInfoId: optionalEntityId,
   UnitPrice: Joi.any().optional().strip(),
   NetAmount: Joi.any().optional().strip(),
   TaxAmount: Joi.any().optional().strip(),
@@ -38,7 +38,7 @@ const updateSchema = Joi.object({
   TransactionDetailLogId: entityId.optional(),
   ItemId: entityId.optional(),
   Quantity: Joi.number().min(0).optional(),
-  CostInfoId: entityId.optional().allow(null),
+  CostInfoId: optionalEntityId,
   UnitPrice: Joi.any().optional().strip(),
   NetAmount: Joi.any().optional().strip(),
   TaxAmount: Joi.any().optional().strip(),

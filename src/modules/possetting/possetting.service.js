@@ -21,6 +21,7 @@ const {
   LOYALTY,
   KOT_AUTO_PRINT_DEFAULT,
   KPT,
+  KITCHEN_NOTES,
 } = require('../../config/constants');
 
 // Every key this module recognises, with the value it falls back to. Unknown
@@ -38,6 +39,9 @@ const DEFAULTS = {
   // promise a portal the food is already made. Stored as a string like every
   // other setting; the KPT resolver reads it back through Number().
   [POS_SETTING_KEYS.KPT_DEFAULT_MINUTES]: String(KPT.DEFAULT_MINUTES),
+  // Quick-pick kitchen notes. JSON text like every stored value; Billing and
+  // POS Settings parse it, and fall back to these when it will not parse.
+  [POS_SETTING_KEYS.KITCHEN_NOTE_PRESETS]: JSON.stringify(KITCHEN_NOTES.DEFAULT_PRESETS),
 };
 
 /**
@@ -105,7 +109,11 @@ const setBranchSettings = async (branchId, patch, tenantId, userPhone) => {
   await withConnection(async (conn) => {
     for (const [key, value] of Object.entries(patch)) {
       await conn.execute(QUERIES.POS_SETTING.UPSERT, [
-        uuidv4(), tenantId, branchId, key, value, userPhone, userPhone,
+        // A list setting (the kitchen note presets) is stored as JSON text;
+        // every other value is already a string.
+        uuidv4(), tenantId, branchId, key,
+        Array.isArray(value) ? JSON.stringify(value) : value,
+        userPhone, userPhone,
       ]);
     }
   });

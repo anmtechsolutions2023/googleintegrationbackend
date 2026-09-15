@@ -1,6 +1,6 @@
 // src/modules/addressdetail/addressdetail.schemas.js
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
 
@@ -16,7 +16,7 @@ const createSchema = Joi.object({
   City: Joi.string().optional().max(50).trim().allow(null, ''),
   State: Joi.string().optional().max(50).trim().allow(null, ''),
   Pincode: Joi.string().optional().max(50).trim().allow(null, ''),
-  MapProviderLocationMapperId: entityId.optional().allow(null),
+  MapProviderLocationMapperId: optionalEntityId,
   Landmark: Joi.string().optional().max(50).trim().allow(null, ''),
   ContactAddressTypeId: entityId.required(),
   TagName: Joi.string().max(100).required(),
@@ -35,7 +35,7 @@ const updateSchema = Joi.object({
   City: Joi.string().optional().max(50).trim().allow(null, ''),
   State: Joi.string().optional().max(50).trim().allow(null, ''),
   Pincode: Joi.string().optional().max(50).trim().allow(null, ''),
-  MapProviderLocationMapperId: entityId.optional().allow(null),
+  MapProviderLocationMapperId: optionalEntityId,
   Landmark: Joi.string().optional().max(50).trim().allow(null, ''),
   ContactAddressTypeId: entityId.optional(),
   TagName: Joi.string().max(100).optional(),

@@ -26,6 +26,7 @@ const { toMinor, fromMinor } = require('../../utils/taxCalculator');
 const numberService = require('./transactionNumber.service');
 const contactResolver = require('./contactResolver.service');
 const { logger } = require('../../utils/logger');
+const { isGstin, normaliseGstin } = require('../../utils/gstStates');
 const customerStats = require('../poscustomer/poscustomer.stats.service');
 const loyalty = require('../loyalty/loyalty.service');
 // Shared with the returns service. Lifted out so a credit note does not have to
@@ -89,8 +90,32 @@ const resolveTenderMode = async (conn, tender, tenantId) => {
  * @param {string} userPhone
  * @returns {Promise<Object>} { transactionDetailLogId, transactionNo, status, roundOff, balanceDue }
  */
+/**
+ * The GSTIN a sale is issued under: the branch's, as it stands right now.
+ *
+ * Read at settle and written onto the document, never looked up again — a
+ * branch that changes or drops its GSTIN later must not change what an invoice
+ * already handed to a guest says, or which return it was filed in. NULL for a
+ * bill of supply issued unregistered (it has no GSTIN to state) and for a branch
+ * whose GSTIN is blank or malformed.
+ *
+ * @param {Object} conn
+ * @param {string|null} branchId
+ * @param {'gst'|'composition'|'unregistered'} taxMode
+ * @param {string} tenantId
+ * @returns {Promise<string|null>}
+ */
+const sellerGstinTx = async (conn, branchId, taxMode, tenantId) => {
+  if (!branchId || taxMode === 'unregistered') return null;
+  const [rows] = await conn.execute(QUERIES.LEDGER.SELECT_BRANCH_GSTIN, [branchId, tenantId]);
+  const gstin = Array.isArray(rows) && rows[0] ? rows[0].GSTIN : null;
+  return isGstin(gstin) ? normaliseGstin(gstin) : null;
+};
+
 const postSaleFromBill = async (conn, input, tenantId, userPhone) => {
-  const { billId, totals, lines, tenders = [], posCustomerId, branchId } = input;
+  const {
+    billId, totals, lines, tenders = [], posCustomerId, branchId, taxMode = 'gst', buyer = null,
+  } = input;
 
   // ── Idempotency: a posted bill must never issue a second invoice ──────────
   const [billRows] = await conn.execute(QUERIES.LEDGER.SELECT_BILL_LEDGER_LINK, [billId, tenantId]);
@@ -121,6 +146,9 @@ const postSaleFromBill = async (conn, input, tenantId, userPhone) => {
     conn, posCustomerId, tenantId, userPhone,
   );
 
+  // ── Seller ───────────────────────────────────────────────────────────────
+  const sellerGstin = await sellerGstinTx(conn, branchId, taxMode, tenantId);
+
   // ── Number + header ──────────────────────────────────────────────────────
   const { transactionNo } = await numberService.issueNumber(conn, configId, tenantId, userPhone);
   const logId = uuidv4();
@@ -131,6 +159,11 @@ const postSaleFromBill = async (conn, input, tenantId, userPhone) => {
     totals.SubTotal ?? 0, totals.TaxAmount ?? 0, totals.Discount ?? 0,
     roundOff, roundedGross, toJson(totals.TaxByComponent || []),
     customer.contactDetailId, customer.name, customer.mobile,
+    // Snapshots: how the document was issued, and to which business. Neither
+    // is re-read later — a reprint and a GST return both read what was issued.
+    taxMode, buyer?.gstin ?? null, buyer?.legalName ?? null,
+    // ...and under which registration it was issued.
+    sellerGstin,
     null, userPhone, userPhone,
   ]);
 
@@ -153,9 +186,14 @@ const postSaleFromBill = async (conn, input, tenantId, userPhone) => {
       uuidv4(), tenantId, logId, lineNo, line.itemDetailId,
       line.quantity ?? 1, line.costInfoId ?? null,
       line.unitAmount ?? null, line.basePrice ?? null, line.variantAmount ?? 0,
+      line.addonAmount ?? 0,
       line.netAmount ?? null, line.discountAmount ?? 0, line.itemDiscountAmount ?? 0,
       line.taxAmount ?? null, line.grossAmount ?? null,
       toJson(line.taxComponents || []), toJson(line.variants || []),
+      toJson(line.addons || []),
+      line.taxCharged === false ? 0 : 1,
+      // transactionitemdetail.Note is VARCHAR(255) — KITCHEN_NOTES.STORED_LINE_MAX.
+      line.note ? String(line.note).slice(0, 255) : null,
       line.name ? String(line.name).slice(0, 100) : null,
       userPhone, userPhone,
     ]);
@@ -362,6 +400,9 @@ const postExpense = async (conn, input, tenantId, userPhone) => {
     businessDate(expenseDate),
     gross, 0, 0, 0, gross, toJson([]),
     null, null, null,
+    // Tax mode, buyer and seller describe a SALE. An expense has none of them;
+    // the mode takes the column's default so the row is still well-formed.
+    'gst', null, null, null,
     description ? String(description).slice(0, 500) : null, userPhone, userPhone,
   ]);
 

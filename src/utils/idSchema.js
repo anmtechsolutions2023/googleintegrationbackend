@@ -29,6 +29,9 @@
 // deliberately NOT a bare `Joi.string()` — that would validate nothing.
 
 const Joi = require('joi');
+// One implementation of "a blank control means null", shared with the number
+// and object rules — the same empty string causes all of them.
+const { blankable } = require('./optionalFields');
 
 /**
  * The id grammar shared by generated and seeded rows: UUID layout, but each
@@ -50,7 +53,25 @@ const entityId = Joi.string()
     'string.max': '{{#label}} is longer than an id can be.',
   });
 
+/**
+ * An OPTIONAL reference to another record — a nullable foreign key.
+ *
+ * An unselected `<select>` posts an empty string, not null and not nothing.
+ * `entityId.optional().allow(null)` refuses it, so every form with an optional
+ * reference on it failed to save with
+ *
+ *     400  Validation error: "MeatTypeId" is not allowed to be empty
+ *
+ * and the field the user had deliberately left blank was the one being
+ * complained about. It affected every optional reference in the application,
+ * not one field.
+ *
+ * Blank becomes NULL — see utils/optionalFields for why that, and not
+ * undefined, is the right answer on a PATCH.
+ */
+const optionalEntityId = blankable(entityId, '{{#label}} must be a valid record id.');
+
 /** An array of record ids, for the join-table fields. */
 const entityIdArray = Joi.array().items(entityId);
 
-module.exports = { entityId, entityIdArray, ID_PATTERN };
+module.exports = { entityId, optionalEntityId, entityIdArray, ID_PATTERN };

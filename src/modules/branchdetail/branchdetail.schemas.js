@@ -1,7 +1,8 @@
 // src/modules/branchdetail/branchdetail.schemas.js
 const Joi = require('joi')
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
+const { gstinField } = require('../../utils/gstinSchema');
 const { QUERIES } = require('../../config/constants');
 
 const createSchema = Joi.object({
@@ -14,14 +15,14 @@ const createSchema = Joi.object({
   BranchName: Joi.string().max(100).trim(),
   // legacy alias support: accept `Name` from older clients
   Name: Joi.string().max(100).trim(),
-  AddressDetailId: entityId.optional().allow(null),
-  ContactDetailId: entityId.optional().allow(null),
-  OrganizationDetailId: entityId.optional().allow(null),
+  AddressDetailId: optionalEntityId,
+  ContactDetailId: optionalEntityId,
+  OrganizationDetailId: optionalEntityId,
   // legacy alias support
-  OrganizationId: entityId.optional().allow(null),
-  TransactionTypeConfigId: entityId.optional().allow(null),
+  OrganizationId: optionalEntityId,
+  TransactionTypeConfigId: optionalEntityId,
   TINNo: Joi.string().optional().max(50).allow(null, ''),
-  GSTIN: Joi.string().optional().max(50).allow(null, ''),
+  GSTIN: gstinField.optional(),
   PAN: Joi.string().optional().max(50).allow(null, ''),
   CF1: Joi.string().optional().max(50).allow(null, ''),
   CF2: Joi.string().optional().max(50).allow(null, ''),
@@ -39,14 +40,14 @@ const updateSchema = Joi.object({
   ...joinedEchoes(QUERIES.BRANCH_DETAIL),
   BranchName: Joi.string().optional().max(100).trim(),
   Name: Joi.string().optional().max(100).trim(),
-  AddressDetailId: entityId.optional().allow(null),
-  ContactDetailId: entityId.optional().allow(null),
-  OrganizationDetailId: entityId.optional().allow(null),
+  AddressDetailId: optionalEntityId,
+  ContactDetailId: optionalEntityId,
+  OrganizationDetailId: optionalEntityId,
   // legacy alias support
-  OrganizationId: entityId.optional().allow(null),
-  TransactionTypeConfigId: entityId.optional().allow(null),
+  OrganizationId: optionalEntityId,
+  TransactionTypeConfigId: optionalEntityId,
   TINNo: Joi.string().optional().max(50).allow(null, ''),
-  GSTIN: Joi.string().optional().max(50).allow(null, ''),
+  GSTIN: gstinField.optional(),
   PAN: Joi.string().optional().max(50).allow(null, ''),
   CF1: Joi.string().optional().max(50).allow(null, ''),
   CF2: Joi.string().optional().max(50).allow(null, ''),

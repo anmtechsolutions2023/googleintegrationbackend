@@ -1,7 +1,7 @@
 // src/modules/itemdetail/itemdetail.schemas.js
 const Joi = require('joi');
 const { SUPPLY_TYPES } = require('../../config/constants');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { taxBreakdownEcho } = require('../pricing/pricing.enrich');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
@@ -16,9 +16,9 @@ const createSchema = Joi.object({
   Name: Joi.string().required().max(255).trim(),
   Code: Joi.string().optional().max(50).trim().allow(null, ''),
   Description: Joi.string().optional().max(1000).trim().allow(null, ''),
-  CategoryId: entityId.optional().allow(null),
-  UOMId: entityId.optional().allow(null),
-  CostInfoId: entityId.optional().allow(null),
+  CategoryId: optionalEntityId,
+  UOMId: optionalEntityId,
+  CostInfoId: optionalEntityId,
   // 50, not 100: itemdetail.SKU and .Barcode are VARCHAR(50). A Joi rule looser
   // than its column turns a clear 400 into a 500 from MySQL.
   SKU: Joi.string().optional().max(50).trim().allow(null, ''),
@@ -43,9 +43,9 @@ const updateSchema = Joi.object({
   Name: Joi.string().optional().max(255).trim(),
   Code: Joi.string().optional().max(50).trim().allow(null, ''),
   Description: Joi.string().optional().max(1000).trim().allow(null, ''),
-  CategoryId: entityId.optional().allow(null),
-  UOMId: entityId.optional().allow(null),
-  CostInfoId: entityId.optional().allow(null),
+  CategoryId: optionalEntityId,
+  UOMId: optionalEntityId,
+  CostInfoId: optionalEntityId,
   // 50, not 100: itemdetail.SKU and .Barcode are VARCHAR(50). A Joi rule looser
   // than its column turns a clear 400 into a 500 from MySQL.
   SKU: Joi.string().optional().max(50).trim().allow(null, ''),

@@ -14,6 +14,7 @@
 
 const { withConnection } = require('../../utils/dbHelper');
 const { QUERIES, LEDGER } = require('../../config/constants');
+const { buildOptionsReport } = require('./ledger.options.report');
 const {
   resolveRange,
   bucketExpression,
@@ -273,6 +274,30 @@ const returnProductReport = (query, tenantId) =>
   });
 
 /**
+ * The filters a product-level report accepts, as one clause: weekends only,
+ * branch, category, item, and the venue bounds. Shared by the product and the
+ * options report so the two can never describe different sales.
+ *
+ * Expects the aliases PRODUCT_SALES and OPTION_LINES both use: l (document),
+ * ti (line), i (catalogue item).
+ *
+ * @returns {{clause: string, params: Array}}
+ */
+const productScope = (query, range) => {
+  let clause = weekendPredicate(range.weekendOnly, 'l.TransactionDate');
+  const params = [];
+  if (query.branchId) { clause += ' AND l.BranchId = ?'; params.push(query.branchId); }
+  if (query.categoryId) { clause += ' AND i.CategoryId = ?'; params.push(query.categoryId); }
+  if (query.itemId) { clause += ' AND ti.ItemId = ?'; params.push(query.itemId); }
+  // Mix and match: "what sold on the rooftop last weekend" is this report with
+  // two more bounds, not a report of its own.
+  const venue = venueFilter(query);
+  clause += venue.clause;
+  params.push(...venue.params);
+  return { clause, params };
+};
+
+/**
  * Product performance: quantity sold, revenue and DISCOUNT per product.
  *
  * Discount is a stored per-line column rather than a derivation, so a line
@@ -283,30 +308,61 @@ const returnProductReport = (query, tenantId) =>
 const productReport = (query, tenantId) =>
   withConnection(async (conn) => {
     const range = resolveRange(query);
-    const params = [tenantId, range.from, range.to];
-
-    let sql = QUERIES.LEDGER_REPORT.PRODUCT_SALES
-      + weekendPredicate(range.weekendOnly, 'l.TransactionDate');
-    if (query.branchId) { sql += ' AND l.BranchId = ?'; params.push(query.branchId); }
-    if (query.categoryId) { sql += ' AND i.CategoryId = ?'; params.push(query.categoryId); }
-    if (query.itemId) { sql += ' AND ti.ItemId = ?'; params.push(query.itemId); }
-    // Mix and match: "what sold on the rooftop last weekend" is this report with
-    // two more bounds, not a report of its own.
-    const venue = venueFilter(query);
-    sql += venue.clause;
-    params.push(...venue.params);
+    const scope = productScope(query, range);
 
     // Ranked and capped: a product report is a leaderboard, not a data dump.
     const limit = Math.min(Number(query.limit) || 50, 200);
-    sql += ` GROUP BY ti.ItemId, i.Name, c.Name ORDER BY GrossAmount DESC LIMIT ${limit}`;
+    const sql = `${QUERIES.LEDGER_REPORT.PRODUCT_SALES}${scope.clause}`
+      + ` GROUP BY ti.ItemId, i.Name, c.Name ORDER BY GrossAmount DESC LIMIT ${limit}`;
 
-    const [rows] = await conn.execute(sql, params);
+    const [rows] = await conn.execute(sql, [tenantId, range.from, range.to, ...scope.params]);
     return {
       range,
       products: rows.map((r) => numeric(r, [
         'QuantitySold', 'NetAmount', 'DiscountAmount', 'TaxAmount', 'GrossAmount', 'Documents',
+        'OptionsAmount', 'AddonsAmount',
       ])),
     };
+  });
+
+/**
+ * Options and add-ons: which sell, on which dishes, and how often each is taken.
+ *
+ * Three reads on one connection — per-dish plates (the denominators), the lines
+ * that carried a choice (the snapshot), and which of the sold dishes offer each
+ * choice today. The arithmetic is ledger.options.report, which is pure.
+ *
+ * Same query contract and the same document scope as the product report, so the
+ * two tabs describe exactly the same sales.
+ *
+ * @param {Object} query - { preset, fromDate, toDate, branchId, categoryId, itemId, floorId, tableId }
+ */
+const optionsReport = (query, tenantId) =>
+  withConnection(async (conn) => {
+    const range = resolveRange(query);
+    const scope = productScope(query, range);
+    const params = [tenantId, range.from, range.to, ...scope.params];
+
+    const [productRows] = await conn.execute(
+      `${QUERIES.LEDGER_REPORT.PRODUCT_SALES}${scope.clause} GROUP BY ti.ItemId, i.Name, c.Name`,
+      params,
+    );
+    const [lineRows] = await conn.execute(
+      `${QUERIES.LEDGER_REPORT.OPTION_LINES}${scope.clause}`,
+      params,
+    );
+
+    const itemIds = [...new Set(productRows.map((r) => r.ItemId).filter(Boolean))];
+    let offerRows = [];
+    if (itemIds.length > 0) {
+      const placeholders = new Array(itemIds.length).fill('?').join(', ');
+      [offerRows] = await conn.execute(
+        QUERIES.LEDGER_REPORT.OPTION_OFFERS.replace(/:ids/g, placeholders),
+        [tenantId, ...itemIds, tenantId, ...itemIds],
+      );
+    }
+
+    return { range, ...buildOptionsReport(productRows, lineRows, offerRows) };
   });
 
 /**
@@ -785,6 +841,7 @@ module.exports = {
   lapsedReport,
   salesReport,
   productReport,
+  optionsReport,
   pendingReport,
   tenderReport,
   cashFlowReport,

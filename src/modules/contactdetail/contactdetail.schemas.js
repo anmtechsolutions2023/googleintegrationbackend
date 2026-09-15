@@ -1,6 +1,6 @@
 // src/modules/contactdetail/contactdetail.schemas.js
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
 
@@ -19,7 +19,7 @@ const createSchema = Joi.object({
   LandLine2: Joi.string().optional().max(20).trim().allow(null, ''),
   Ext1: Joi.string().optional().max(10).trim().allow(null, ''),
   Ext2: Joi.string().optional().max(10).trim().allow(null, ''),
-  ContactAddressTypeId: entityId.optional().allow(null),
+  ContactAddressTypeId: optionalEntityId,
   Active: Joi.boolean().optional().default(true),
 });
 
@@ -38,7 +38,7 @@ const updateSchema = Joi.object({
   LandLine2: Joi.string().optional().max(20).trim().allow(null, ''),
   Ext1: Joi.string().optional().max(10).trim().allow(null, ''),
   Ext2: Joi.string().optional().max(10).trim().allow(null, ''),
-  ContactAddressTypeId: entityId.optional().allow(null),
+  ContactAddressTypeId: optionalEntityId,
   Active: Joi.boolean().optional(),
 }).min(1);
 

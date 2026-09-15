@@ -54,6 +54,7 @@ class PosPortalService extends BaseCRUDService {
       data.CommissionAccountTypeBaseId ?? null,
       data.SettlementPaymentModeId ?? null,
       data.SortOrder !== undefined ? data.SortOrder : 0,
+      data.GSTIN ? String(data.GSTIN).trim().toUpperCase() : null,
       data.Active !== undefined ? data.Active : true,
       userPhone,
       userPhone,
@@ -76,6 +77,9 @@ class PosPortalService extends BaseCRUDService {
         ? data.SettlementPaymentModeId
         : existing.SettlementPaymentModeId,
       data.SortOrder !== undefined ? data.SortOrder : existing.SortOrder,
+      data.GSTIN !== undefined
+        ? (data.GSTIN ? String(data.GSTIN).trim().toUpperCase() : null)
+        : existing.GSTIN,
       data.Active !== undefined ? data.Active : existing.Active,
       userPhone,
       id,

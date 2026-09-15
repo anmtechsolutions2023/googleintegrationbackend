@@ -38,6 +38,18 @@ router.post(
   ...controller.create
 );
 
+/**
+ * PATCH /bulk — one change for many menu rows (Menu Master's bulk bar).
+ * Declared before the /:id routes so "bulk" is never read as an id.
+ */
+router.patch(
+  '/bulk',
+  authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CONFIG_WRITE),
+  audit,
+  ...controller.bulkUpdate
+);
+
 /** PUT /:id — update a POS Item Meta. */
 router.put(
   '/:id',

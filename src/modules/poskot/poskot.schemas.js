@@ -2,7 +2,7 @@
 // Joi validation schemas for POS KOT operations.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { POS_KOT_STATUSES } = require('../../config/constants');
 
 // Status was previously a free-text VARCHAR(20) with no validation, which let
@@ -14,23 +14,23 @@ const statusField = Joi.string().lowercase().valid(...POS_KOT_STATUSES);
 // the client no longer has to invent one (it used to send an epoch timestamp).
 const createSchema = Joi.object({
   KotNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  OrderId: entityId.optional().allow(null),
-  TableId: entityId.optional().allow(null),
+  OrderId: optionalEntityId,
+  TableId: optionalEntityId,
   Items: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   Status: statusField.optional().allow(null, '').default('pending'),
   FiredAt: Joi.date().optional().allow(null),
-  BranchDetailId: entityId.optional().allow(null),
+  BranchDetailId: optionalEntityId,
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   KotNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  OrderId: entityId.optional().allow(null),
-  TableId: entityId.optional().allow(null),
+  OrderId: optionalEntityId,
+  TableId: optionalEntityId,
   Items: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   Status: statusField.optional().allow(null, ''),
   FiredAt: Joi.date().optional().allow(null),
-  BranchDetailId: entityId.optional().allow(null),
+  BranchDetailId: optionalEntityId,
   Active: Joi.boolean().optional(),
 }).min(1);
 

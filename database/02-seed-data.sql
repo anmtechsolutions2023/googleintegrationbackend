@@ -712,6 +712,18 @@ VALUES (
 INSERT IGNORE INTO app_settings (setting_key, setting_value, updated_by)
 VALUES ('onboarding.auto_approve.enabled', 'false', 'system-seed');
 
+-- Which clock the trading day runs on, as an IANA zone name.
+--
+-- A category schedule is written in the OUTLET'S local time ("breakfast
+-- 07:00-11:00") and evaluated on a server that is UTC in production, so without
+-- this a 07:00 window opens at 12:30 IST and every menu is wrong by the offset.
+--
+-- app_settings has no tenant_id, so this is a platform default: correct while
+-- every outlet is in one country, and a column on branchdetail the day one is
+-- not. Change it here or from Application Configuration, not in code.
+INSERT IGNORE INTO app_settings (setting_key, setting_value, updated_by)
+VALUES ('pos.timezone', 'Asia/Kolkata', 'system-seed');
+
 -- =============================================================================
 -- PART 11 — Accounting ledger masters
 -- =============================================================================

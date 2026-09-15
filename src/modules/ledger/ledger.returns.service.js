@@ -244,6 +244,7 @@ const priceReturnLines = (requested, originalById, alreadyReturnedByLine) => {
       unitPrice: original.UnitPrice,
       basePrice: original.BasePrice,
       variantAmount: original.VariantAmount,
+      addonAmount: original.AddonAmount,
       netAmount: fromMinor(lineNet),
       discountAmount: fromMinor(lineDisc),
       itemDiscountAmount: fromMinor(lineItemDisc),
@@ -256,6 +257,11 @@ const priceReturnLines = (requested, originalById, alreadyReturnedByLine) => {
         amount: fromMinor(Math.round(toMinor(c.amount || 0) * share)),
       })),
       variants: asArray(original.Variants),
+      addons: asArray(original.Addons),
+      // A return undoes the sale as it was issued, GST or not.
+      taxCharged: Number(original.TaxCharged ?? 1) === 1,
+      // What the kitchen was told about the dish going back.
+      note: original.Note ?? null,
       name: original.ItemName || original.Comment || null,
       // Intent only — there is no stock ledger to restock into. See the
       // RestockRequested column comment.
@@ -435,6 +441,11 @@ const createReturnTx = async (conn, input, tenantId, userPhone) => {
     0, priced.totals.gross,
     toJson(priced.lines.flatMap((l) => l.taxComponents)),
     sale.ContactDetailId ?? null, sale.CustomerName ?? null, sale.CustomerMobile ?? null,
+    // A credit note is issued on the same terms as the sale it reverses: a
+    // note against a tax invoice is a GST credit note to the same buyer.
+    sale.TaxMode || 'gst', sale.BuyerGstin ?? null, sale.BuyerLegalName ?? null,
+    // Issued under the same registration as the sale, whatever the branch holds now.
+    sale.SellerGstin ?? null,
     saleLogId,
     // Store credit is issued instantly; money back through a tender is settled
     // the moment the cashier hands it over, which today is also instant. The
@@ -455,10 +466,12 @@ const createReturnTx = async (conn, input, tenantId, userPhone) => {
     lineNo += 1;
     await conn.execute(QUERIES.LEDGER.INSERT_RETURN_LINE, [
       uuidv4(), tenantId, noteId, lineNo, l.itemId, l.quantity, l.costInfoId,
-      l.unitPrice, l.basePrice, l.variantAmount,
+      l.unitPrice, l.basePrice, l.variantAmount, l.addonAmount ?? 0,
       l.netAmount, l.discountAmount, l.itemDiscountAmount,
       l.taxAmount, l.grossAmount,
-      toJson(l.taxComponents), toJson(l.variants),
+      toJson(l.taxComponents), toJson(l.variants), toJson(l.addons || []),
+      l.taxCharged === false ? 0 : 1,
+      l.note ? String(l.note).slice(0, 255) : null,
       l.name ? String(l.name).slice(0, 100) : null,
       l.sourceLineId, l.restockRequested ? 1 : 0,
       userPhone, userPhone,

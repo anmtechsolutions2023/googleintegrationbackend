@@ -27,7 +27,7 @@ jest.mock('../../utils/dbHelper', () => ({
 }));
 
 const service = require('../../modules/possetting/possetting.service');
-const { POS_SETTING_KEYS } = require('../../config/constants');
+const { POS_SETTING_KEYS, KITCHEN_NOTES } = require('../../config/constants');
 
 const TENANT = 'tn';
 const BRANCH = 'branch-a';
@@ -72,6 +72,8 @@ describe('reading a branch\'s settings', () => {
         'kot.auto_print': 'on',
         // Fallback prep time for portal orders with no per-dish timings.
         'kpt.default_minutes': '20',
+        // Quick-pick kitchen notes, as JSON text like every stored value.
+        'kitchen.note_presets': JSON.stringify(KITCHEN_NOTES.DEFAULT_PRESETS),
       });
   });
 
@@ -83,6 +85,7 @@ describe('reading a branch\'s settings', () => {
         'loyalty.rupees_per_point': '100',
         'kot.auto_print': 'on',
         'kpt.default_minutes': '20',
+        'kitchen.note_presets': JSON.stringify(KITCHEN_NOTES.DEFAULT_PRESETS),
       });
   });
 
@@ -103,5 +106,60 @@ describe('writing settings', () => {
     const upsert = executed.find((e) => /INSERT INTO pos_setting/.test(e.sql));
     expect(upsert.sql).toMatch(/ON DUPLICATE KEY UPDATE/);
     expect(upsert.params.slice(1, 5)).toEqual([TENANT, BRANCH, 'token.numbering', 'series']);
+  });
+});
+
+describe('kitchen note presets', () => {
+  it('stores the list as JSON text, in the order given', async () => {
+    rows.all = [];
+    await service.setBranchSettings(
+      BRANCH, { 'kitchen.note_presets': ['No onion', 'Less oil'] }, TENANT, 'u@x',
+    );
+    const upsert = executed.find((e) => /INSERT INTO pos_setting/.test(e.sql));
+    expect(upsert.params[3]).toBe('kitchen.note_presets');
+    expect(JSON.parse(upsert.params[4])).toEqual(['No onion', 'Less oil']);
+  });
+
+  it('leaves every other setting a plain string', async () => {
+    rows.all = [];
+    await service.setBranchSettings(BRANCH, { 'kot.auto_print': 'off' }, TENANT, 'u@x');
+    const upsert = executed.find((e) => /INSERT INTO pos_setting/.test(e.sql));
+    expect(upsert.params[4]).toBe('off');
+  });
+});
+
+describe('kitchen note presets — what the endpoint accepts', () => {
+  const { updateSchema } = require('../../modules/possetting/possetting.schemas');
+  const check = (list) => updateSchema.validate({ 'kitchen.note_presets': list });
+
+  it('accepts a short list and trims each note', () => {
+    const { error, value } = check(['  Less spicy ', 'Jain']);
+    expect(error).toBeUndefined();
+    expect(value['kitchen.note_presets']).toEqual(['Less spicy', 'Jain']);
+  });
+
+  it('accepts an empty list, which means "type every note"', () => {
+    expect(check([]).error).toBeUndefined();
+  });
+
+  it('refuses the same note twice, ignoring case', () => {
+    expect(check(['Less oil', 'less OIL']).error).toBeDefined();
+  });
+
+  it('refuses a blank note, an over-long note and too many notes', () => {
+    expect(check(['']).error).toBeDefined();
+    expect(check(['x'.repeat(KITCHEN_NOTES.PRESET_MAX + 1)]).error).toBeDefined();
+    const many = Array.from({ length: KITCHEN_NOTES.PRESETS_MAX + 1 }, (_, i) => `Note ${i}`);
+    expect(check(many).error).toBeDefined();
+  });
+
+  it('the largest list allowed fits the stored column', () => {
+    const widest = Array.from(
+      { length: KITCHEN_NOTES.PRESETS_MAX },
+      (_, i) => `${i}`.padEnd(KITCHEN_NOTES.PRESET_MAX, 'x'),
+    );
+    expect(check(widest).error).toBeUndefined();
+    // pos_setting.SettingValue is VARCHAR(1000).
+    expect(JSON.stringify(widest).length).toBeLessThanOrEqual(1000);
   });
 });

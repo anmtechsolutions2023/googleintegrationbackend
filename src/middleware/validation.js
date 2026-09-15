@@ -29,6 +29,19 @@ const validateBody = (schema) => {
         )
       );
     }
+    // Hand the COERCED value onward, not the raw one.
+    //
+    // Joi does not only check a body, it normalises it: optionalEntityId turns
+    // the empty string a blank dropdown posts into null, and the read-only
+    // echoes a form sends back are .strip()ed. All of that lived in `value` and
+    // was then thrown away — 67 of the 74 controllers read req.body, so the
+    // service received exactly what the browser sent. A cleared dropdown passed
+    // validation as null and still arrived as '', which MySQL refuses as a
+    // foreign key.
+    //
+    // req.validatedBody stays for the handful of controllers already written
+    // against it.
+    req.body = value;
     req.validatedBody = value;
     next();
   };

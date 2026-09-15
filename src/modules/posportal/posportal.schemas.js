@@ -2,7 +2,13 @@
 // Joi validation for the portal master, its store mappings and its listings.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { GSTIN_PATTERN } = require('../../utils/gstStates');
+
+// The aggregator's GSTIN — GSTR-1 Table 14 reports food sold through it.
+const gstinField = Joi.string().trim().uppercase().pattern(GSTIN_PATTERN)
+  .allow(null, '').optional()
+  .messages({ 'string.pattern.base': 'GSTIN must be 15 characters in the GST format.' });
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const {
   POS_PORTAL_ADAPTERS,
   POS_PORTAL_SYNC_STATUSES,
@@ -28,28 +34,30 @@ const createSchema = Joi.object({
   Name: Joi.string().max(100).trim().required(),
   Code: Joi.string().max(50).trim().uppercase().required(),
   // Defaulted to the tenant's ONLINE channel by the service when omitted.
-  ChannelId: entityId.optional().allow(null),
+  ChannelId: optionalEntityId,
   Adapter: adapterField.optional().default('manual'),
   ColorHex: colorField.optional().allow(null, ''),
   ShortCode: shortCodeField.optional().allow(null, ''),
   CommissionPct: Joi.number().min(0).max(100).precision(3).optional().default(0),
-  CommissionAccountTypeBaseId: entityId.optional().allow(null),
-  SettlementPaymentModeId: entityId.optional().allow(null),
+  CommissionAccountTypeBaseId: optionalEntityId,
+  SettlementPaymentModeId: optionalEntityId,
   SortOrder: Joi.number().integer().optional().default(0),
+  GSTIN: gstinField,
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   Name: Joi.string().max(100).trim().optional(),
   Code: Joi.string().max(50).trim().uppercase().optional(),
-  ChannelId: entityId.optional().allow(null),
+  ChannelId: optionalEntityId,
   Adapter: adapterField.optional(),
   ColorHex: colorField.optional().allow(null, ''),
   ShortCode: shortCodeField.optional().allow(null, ''),
   CommissionPct: Joi.number().min(0).max(100).precision(3).optional(),
-  CommissionAccountTypeBaseId: entityId.optional().allow(null),
-  SettlementPaymentModeId: entityId.optional().allow(null),
+  CommissionAccountTypeBaseId: optionalEntityId,
+  SettlementPaymentModeId: optionalEntityId,
   SortOrder: Joi.number().integer().optional(),
+  GSTIN: gstinField,
   Active: Joi.boolean().optional(),
   // Read-only columns the list view joins in. An edit form is seeded from a GET,
   // so these come straight back on the next PUT — accept and drop them rather
@@ -117,7 +125,7 @@ const listingCreateSchema = Joi.object({
   ListedName: Joi.string().max(255).trim().optional().allow(null, ''),
   ListedDescription: Joi.string().max(1000).trim().optional().allow(null, ''),
   // A costinfo row, never a bare price — see posportal.pricing.js.
-  PriceOverrideCostInfoId: entityId.optional().allow(null),
+  PriceOverrideCostInfoId: optionalEntityId,
   Available: Joi.boolean().optional().default(true),
   SortOrder: Joi.number().integer().optional().default(0),
   Active: Joi.boolean().optional().default(true),
@@ -127,7 +135,7 @@ const listingUpdateSchema = Joi.object({
   ExternalItemId: Joi.string().max(100).trim().optional().allow(null, ''),
   ListedName: Joi.string().max(255).trim().optional().allow(null, ''),
   ListedDescription: Joi.string().max(1000).trim().optional().allow(null, ''),
-  PriceOverrideCostInfoId: entityId.optional().allow(null),
+  PriceOverrideCostInfoId: optionalEntityId,
   Available: Joi.boolean().optional(),
   SortOrder: Joi.number().integer().optional(),
   SyncStatus: Joi.string().valid(...POS_PORTAL_SYNC_STATUSES).optional(),

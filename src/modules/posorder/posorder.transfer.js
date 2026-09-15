@@ -96,6 +96,7 @@ const writeOrder = (conn, o, userPhone, tenantId) =>
     o.Status ?? null,
     toJson(o.Items), o.SubTotal, o.TaxAmount, o.Total, o.BranchDetailId ?? null,
     o.TableName ?? null, o.FloorId ?? null, o.FloorName ?? null, o.TableCapacity ?? null,
+    o.CookingInstructions ?? null, o.NoCutlery ? 1 : 0,
     o.Active != null ? o.Active : 1, userPhone, o.Id, tenantId,
   ]);
 
@@ -107,6 +108,7 @@ const insertOrder = (conn, o, userPhone, tenantId) =>
     o.Status ?? 'open', toJson(o.Items), o.SubTotal, o.TaxAmount, o.Total,
     o.BranchDetailId ?? null,
     o.TableName ?? null, o.FloorId ?? null, o.FloorName ?? null, o.TableCapacity ?? null,
+    o.CookingInstructions ?? null, o.NoCutlery ? 1 : 0,
     1, userPhone, userPhone,
   ]);
 
@@ -249,6 +251,9 @@ const moveItems = async (conn, { sourceOrderId, items, toTableId, destOrderNo },
     CustomerId: src.CustomerId ?? null,
     OrderType: src.OrderType || 'dinein',
     ChannelId: src.ChannelId ?? null,
+    // The guests' instructions travel with the food they ordered.
+    CookingInstructions: src.CookingInstructions ?? null,
+    NoCutlery: src.NoCutlery ?? 0,
     Status: srcWasSent ? 'fired' : 'open',
     Items: moved,
     ...sumTotals(moved),

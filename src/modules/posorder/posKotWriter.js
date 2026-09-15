@@ -25,7 +25,7 @@ const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.strin
  * @param {string} tenantId
  * @param {string} userPhone
  * @param {string} [kotNo] - Explicit number; otherwise issued from the series.
- * @returns {Promise<Object>} { KotId, KotNo, OrderId, Status }
+ * @returns {Promise<Object>} { KotId, KotNo, OrderId, Status, CookingInstructions, NoCutlery }
  */
 const writeKot = async (conn, order, tenantId, userPhone, kotNo) => {
   const kotId = uuidv4();
@@ -49,7 +49,16 @@ const writeKot = async (conn, order, tenantId, userPhone, kotNo) => {
     userPhone,
     userPhone,
   ]);
-  return { KotId: kotId, KotNo: number, OrderId: order.Id, Status: 'pending' };
+  // The instructions come back with the ticket so a caller printing it has them
+  // without re-reading the round.
+  return {
+    KotId: kotId,
+    KotNo: number,
+    OrderId: order.Id,
+    Status: 'pending',
+    CookingInstructions: order.CookingInstructions ?? null,
+    NoCutlery: !!order.NoCutlery,
+  };
 };
 
 /**

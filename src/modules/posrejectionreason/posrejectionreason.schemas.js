@@ -2,7 +2,7 @@
 // Joi validation schemas for POS Rejection Reason master operations.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
 
@@ -19,7 +19,7 @@ const createSchema = Joi.object({
   // one would push a value a live API rejects on the first refusal.
   ExternalCode: Joi.string().max(50).trim().allow('', null).optional(),
   // null = a house reason, offered on every portal.
-  PortalId: entityId.allow(null).optional(),
+  PortalId: optionalEntityId,
   // Set on an out-of-stock reason: the portal has to be told WHICH dish ran
   // out, and the reject path refuses a rejection that cannot say.
   RequiresItems: Joi.boolean().optional().default(false),
@@ -38,7 +38,7 @@ const updateSchema = Joi.object({
   Name: Joi.string().max(100).trim().optional(),
   Code: Joi.string().max(50).trim().optional(),
   ExternalCode: Joi.string().max(50).trim().allow('', null).optional(),
-  PortalId: entityId.allow(null).optional(),
+  PortalId: optionalEntityId,
   RequiresItems: Joi.boolean().optional(),
   Description: Joi.string().max(255).trim().allow('', null).optional(),
   SortOrder: Joi.number().integer().optional(),

@@ -260,11 +260,19 @@ class BaseCRUDService {
   async update(id, data, tenantId, userPhone) {
     logger.info(`Updating ${this.entityName}`, { id, tenantId, userPhone })
 
-    return await withConnection(async (connection) => {
-      // First check if record exists — on THIS connection, not a second one.
-      const existing = await this.getById(id, tenantId, false, connection)
+    await withConnection(async (connection) => {
+      // The PLAIN row, on the connection we hold.
+      //
+      // Deliberately getByIdTx and not this.getById: several subclasses
+      // override getById to enrich the row — nutrition, a tax breakdown,
+      // trading hours — and each of those enrichments takes a connection of
+      // its own. Those overrides also predate the 4th `conn` parameter and
+      // silently drop it, so handing it down did not help: a single update
+      // became a four-connection request that deadlocks a pool of four, and
+      // deadlocks a pool of one on the very first call. Nothing here wants the
+      // enriched row anyway — prepareUpdateParams reads real columns.
+      const existing = await this.getByIdTx(connection, id, tenantId)
 
-      // Prepare update parameters - this should be overridden in child classes
       const params = this.prepareUpdateParams(
         data,
         existing,
@@ -272,14 +280,12 @@ class BaseCRUDService {
         id,
         tenantId,
       )
-      // Log query and params for debugging update persistence issues
       try {
         logger.debug('Executing UPDATE', { sql: this.queries.UPDATE, params })
       } catch (e) {
         // swallow logging errors
       }
 
-      // Log update query and params for debugging
       logger.info(`${this.entityName} UPDATE params:`, {
         params,
         query: this.queries.UPDATE,
@@ -291,10 +297,14 @@ class BaseCRUDService {
       await connection.execute(this.queries.UPDATE, sanitizedParams)
 
       logger.info(`${this.entityName} updated successfully`, { id, tenantId })
-
-      // Return updated record — still on the connection we hold.
-      return await this.getById(id, tenantId, false, connection)
     })
+
+    // The RESPONSE, read back through whatever getById this class has — so a
+    // caller still receives the enriched row. Outside the block above on
+    // purpose: the write's connection is back in the pool before the read-back
+    // asks for one, which keeps the request at one connection at a time. There
+    // is no transaction open, so the update is already visible.
+    return this.getById(id, tenantId)
   }
 
   /**
@@ -354,8 +364,10 @@ class BaseCRUDService {
     logger.info(`Deleting ${this.entityName}`, { id, tenantId })
 
     return await withConnection(async (connection) => {
-      // First check if record exists — on THIS connection, not a second one.
-      await this.getById(id, tenantId, false, connection)
+      // Existence only, and the PLAIN row — see update() for why this is not
+      // this.getById. An enriching override turns a delete into a
+      // multi-connection request and hangs it.
+      await this.getByIdTx(connection, id, tenantId)
 
       await connection.execute(this.queries.DELETE, [id, tenantId])
 

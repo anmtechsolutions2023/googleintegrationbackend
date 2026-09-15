@@ -36,8 +36,13 @@ const createMockConnection = () => ({
  */
 const setupReadWriteMock = (connection, row) => {
   connection.execute.mockImplementation((sql) => {
-    const upper = (sql || '').toUpperCase();
-    if (upper.includes('COUNT(')) return Promise.resolve([[{ total: 1 }]]);
+    const upper = (sql || '').trimStart().toUpperCase();
+    // STARTS WITH, not contains. A pagination COUNT is written
+    // 'SELECT COUNT(*) as total FROM …', but a row query may carry a
+    // correlated count in its projection — categorydetail returns ItemCount,
+    // pos_addon_group returns AddonCount — and a 'contains' test classified
+    // those as counts and handed every caller { total: 1 } instead of the row.
+    if (upper.startsWith('SELECT COUNT(')) return Promise.resolve([[{ total: 1 }]]);
     if (upper.includes('SELECT'))  return Promise.resolve([[row]]);
     return Promise.resolve([[{ affectedRows: 1 }]]);
   });

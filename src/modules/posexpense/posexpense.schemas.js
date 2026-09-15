@@ -6,7 +6,7 @@
 // by posting a status straight from the client.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
 
@@ -22,8 +22,8 @@ const createSchema = Joi.object({
   // Positive: a negative expense is a refund, which is a reversal, not an entry.
   Amount: Joi.number().positive().required(),
   ExpenseDate: Joi.date().optional().allow(null),
-  PaymentModeId: entityId.optional().allow(null),
-  BranchDetailId: entityId.optional().allow(null),
+  PaymentModeId: optionalEntityId,
+  BranchDetailId: optionalEntityId,
   Active: Joi.boolean().optional().default(true),
 });
 
@@ -38,14 +38,14 @@ const updateSchema = Joi.object({
   Description: Joi.string().optional().max(500).allow(null, '').trim(),
   Amount: Joi.number().positive().optional(),
   ExpenseDate: Joi.date().optional().allow(null),
-  PaymentModeId: entityId.optional().allow(null),
-  BranchDetailId: entityId.optional().allow(null),
+  PaymentModeId: optionalEntityId,
+  BranchDetailId: optionalEntityId,
   Active: Joi.boolean().optional(),
 }).min(1);
 
 /** Settling may name the mode the money actually left by. */
 const settleSchema = Joi.object({
-  PaymentModeId: entityId.optional().allow(null),
+  PaymentModeId: optionalEntityId,
 });
 
 const paginationSchema = Joi.object({

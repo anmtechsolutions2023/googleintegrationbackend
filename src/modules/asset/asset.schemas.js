@@ -2,7 +2,7 @@
 // Joi validation schemas for the asset register.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { ASSET_STATUS } = require('../../config/constants');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
@@ -24,7 +24,7 @@ const createSchema = Joi.object({
   SerialNo: Joi.string().max(100).optional().allow(null, '').trim(),
   PurchaseDate: Joi.date().optional().allow(null),
   PurchaseCost: Joi.number().min(0).optional().default(0),
-  SupplierContactDetailId: entityId.optional().allow(null),
+  SupplierContactDetailId: optionalEntityId,
   Status: Joi.string().valid(...STATUSES).optional().default(ASSET_STATUS.IN_USE),
   Notes: Joi.string().max(500).optional().allow(null, '').trim(),
   Active: Joi.boolean().optional().default(true),
@@ -43,7 +43,7 @@ const updateSchema = Joi.object({
   SerialNo: Joi.string().max(100).optional().allow(null, '').trim(),
   PurchaseDate: Joi.date().optional().allow(null),
   PurchaseCost: Joi.number().min(0).optional(),
-  SupplierContactDetailId: entityId.optional().allow(null),
+  SupplierContactDetailId: optionalEntityId,
   Status: Joi.string().valid(...STATUSES).optional(),
   Notes: Joi.string().max(500).optional().allow(null, '').trim(),
   Active: Joi.boolean().optional(),

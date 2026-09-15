@@ -465,7 +465,7 @@ describe('refund — reversal, never deletion', () => {
 
     expect(r.creditNoteId).toBeTruthy();
     const note = firstCall(/INSERT INTO transactiondetaillog[\s\S]*ReversesLogId/i)[1];
-    expect(note[17]).toBe('log-1');   // ReversesLogId
+    expect(note[21]).toBe('log-1');   // ReversesLogId (after SellerGstin)
     expect(Number(note[12])).toBe(118); // GrossAmount, positive on the note
   });
 
@@ -530,7 +530,7 @@ describe('line integrity — a document must itemise everything it charges for',
       totals: { SubTotal: 90, TaxAmount: 0, Discount: 10, Total: 90, TaxByComponent: [] },
       lines: [{ itemDetailId: 'item-1', quantity: 1, unitAmount: 100, netAmount: 90, discountAmount: 10, grossAmount: 90, name: 'Dosa' }],
     }), TENANT, USER);
-    expect(firstCall(/INSERT INTO transactionitemdetail/i)[1][11]).toBe(10);
+    expect(firstCall(/INSERT INTO transactionitemdetail/i)[1][12]).toBe(10);
   });
 });
 
@@ -716,5 +716,104 @@ describe('refund — the customer record must move back too', () => {
     route({ ...SETTLED, billCustomer: [] });
     const r = await ledger.refundSale(mockConn, 'log-1', null, TENANT, USER);
     expect(r.status).toBe('REFUNDED');
+  });
+});
+
+describe('the kitchen note on the invoice line', () => {
+  const colsOf = (sql) => sql.slice(sql.indexOf('('), sql.indexOf(')')).replace(/[()\s]/g, '').split(',');
+
+  it('stores what the kitchen was told, beside the dish name', async () => {
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL({
+      totals: { SubTotal: 479, TaxAmount: 0, Discount: 0, Total: 479, TaxByComponent: [] },
+      lines: [{
+        itemDetailId: 'item-1', quantity: 1, unitAmount: 479, basePrice: 239,
+        variantAmount: 170, addonAmount: 70, grossAmount: 479,
+        name: 'Veg Triple Fried Rice', note: 'Less spicy, No onion',
+      }],
+    }), TENANT, USER);
+
+    const [sql, params] = firstCall(/INSERT INTO transactionitemdetail/i);
+    const cols = colsOf(sql);
+    expect(params[cols.indexOf('Note')]).toBe('Less spicy, No onion');
+    // Comment keeps the NAME, so a note never masquerades as the dish.
+    expect(params[cols.indexOf('Comment')]).toBe('Veg Triple Fried Rice');
+  });
+
+  it('a line with no note stores none', async () => {
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL({
+      totals: { SubTotal: 100, TaxAmount: 0, Discount: 0, Total: 100, TaxByComponent: [] },
+      lines: [{ itemDetailId: 'item-1', quantity: 1, unitAmount: 100, grossAmount: 100, name: 'Dosa' }],
+    }), TENANT, USER);
+    const [sql, params] = firstCall(/INSERT INTO transactionitemdetail/i);
+    expect(params[colsOf(sql).indexOf('Note')]).toBeNull();
+  });
+});
+
+
+describe('the seller GSTIN on the document', () => {
+  // Maps each ? in an INSERT to the column it fills, so a test names the column
+  // instead of counting to it — a new column cannot silently shift the answer.
+  const valueOf = ([sql, params], column) => {
+    const q = String(sql);
+    const cols = q.slice(q.indexOf('(') + 1, q.indexOf(')')).split(',').map((c) => c.trim());
+    const tail = q.slice(q.indexOf('VALUES') + 6);
+    const vals = tail.slice(tail.indexOf('(') + 1, tail.lastIndexOf(')')).split(',').map((v) => v.trim());
+    let p = -1;
+    for (let i = 0; i < cols.length; i += 1) {
+      if (vals[i] === '?') p += 1;
+      if (cols[i] === column) return vals[i] === '?' ? params[p] : undefined;
+    }
+    return undefined;
+  };
+  const placeholders = (sql) => (String(sql).match(/\?/g) || []).length;
+  const branchGstin = (gstin) => ({
+    handler: (q) => (/FROM branchdetail/i.test(q) ? [[{ GSTIN: gstin }]] : undefined),
+  });
+
+  it('takes the branch GSTIN as it stands at settle, normalised', async () => {
+    route(branchGstin(' 29abcde1234f1z5 '));
+    await ledger.postSaleFromBill(mockConn, BILL({ branchId: 'branch-1' }), TENANT, USER);
+    expect(valueOf(firstCall(/INSERT INTO transactiondetaillog/i), 'SellerGstin')).toBe('29ABCDE1234F1Z5');
+    expect(firstCall(/FROM branchdetail/i)[1]).toEqual(['branch-1', TENANT]);
+  });
+
+  it('is null when the branch has no GSTIN, or a malformed one', async () => {
+    route(branchGstin('GST-123'));
+    await ledger.postSaleFromBill(mockConn, BILL({ branchId: 'branch-1' }), TENANT, USER);
+    expect(valueOf(firstCall(/INSERT INTO transactiondetaillog/i), 'SellerGstin')).toBeNull();
+  });
+
+  it('is not looked up for a bill of supply issued unregistered', async () => {
+    route(branchGstin('29ABCDE1234F1Z5'));
+    await ledger.postSaleFromBill(mockConn, BILL({ branchId: 'branch-1', taxMode: 'unregistered' }), TENANT, USER);
+    expect(calls(/FROM branchdetail/i)).toHaveLength(0);
+    expect(valueOf(firstCall(/INSERT INTO transactiondetaillog/i), 'SellerGstin')).toBeNull();
+  });
+
+  it('a composition bill still states the GSTIN it was issued under', async () => {
+    route(branchGstin('29ABCDE1234F1Z5'));
+    await ledger.postSaleFromBill(mockConn, BILL({ branchId: 'branch-1', taxMode: 'composition' }), TENANT, USER);
+    expect(valueOf(firstCall(/INSERT INTO transactiondetaillog/i), 'SellerGstin')).toBe('29ABCDE1234F1Z5');
+  });
+
+  // mysqld refuses a statement whose value count differs from its placeholders,
+  // and a mocked connection never does — this is the check that stands in for it.
+  it('every document insert sends exactly as many values as it has placeholders', async () => {
+    route(branchGstin('29ABCDE1234F1Z5'));
+    await ledger.postSaleFromBill(mockConn, BILL({ branchId: 'branch-1' }), TENANT, USER);
+    await ledger.postExpense(mockConn, {
+      expenseId: 'exp-1', amount: 500, categoryId: 'cat-1', paymentModeId: CASH_MODE,
+      description: 'LPG cylinder', branchId: 'branch-1', expenseDate: '2026-08-01',
+    }, TENANT, USER);
+
+    const inserts = calls(/INSERT INTO transactiondetaillog/i);
+    expect(inserts).toHaveLength(2);
+    inserts.forEach(([sql, params]) => expect(params).toHaveLength(placeholders(sql)));
+    // The expense's own fields land where they belong, not one column over.
+    expect(valueOf(inserts[1], 'Remarks')).toBe('LPG cylinder');
+    expect(valueOf(inserts[1], 'TaxMode')).toBe('gst');
+    expect(valueOf(inserts[1], 'SellerGstin')).toBeNull();
   });
 });

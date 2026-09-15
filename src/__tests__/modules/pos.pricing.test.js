@@ -40,10 +40,15 @@ const GST18_ROWS = (costInfoId, amount = '100', included = 0) => [
 
 const orderService = require('../../modules/posorder/posorder.service');
 const billService = require('../../modules/posbill/posbill.service');
+const itemMetaRepository = require('../../modules/positemmeta/positemmeta.repository');
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockConnection.query.mockResolvedValue([[]]);
+  // Every dish here is on sale. The routes below answer any
+  // "FROM pos_item_meta WHERE TenantId" with menu rows, which the turned-off
+  // lookup would otherwise read as every dish being off.
+  jest.spyOn(itemMetaRepository, 'getInactiveItemMetaIds').mockResolvedValue(new Set());
 });
 
 describe('POS order — server-authoritative totals', () => {

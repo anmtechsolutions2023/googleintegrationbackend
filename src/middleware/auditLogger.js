@@ -104,4 +104,4 @@ const auditLogCrud = (moduleName, category = AUDIT_CATEGORIES.MASTER_DATA, defau
   };
 };
 
-module.exports = { auditLog, auditLogCrud };
+module.exports = { auditLog, auditLogCrud, writeAuditLog, getIp };

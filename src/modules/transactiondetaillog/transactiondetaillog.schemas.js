@@ -1,6 +1,6 @@
 // src/modules/transactiondetaillog/transactiondetaillog.schemas.js
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
 
@@ -13,8 +13,8 @@ const createSchema = Joi.object({
   ...joinedEchoes(QUERIES.TRANSACTION_DETAIL_LOG),
   TransactionNo: Joi.string().required().max(100).trim(),
   TransactionTypeConfigId: entityId.required(),
-  TransactionTypeStatusId: entityId.optional().allow(null),
-  BranchId: entityId.optional().allow(null),
+  TransactionTypeStatusId: optionalEntityId,
+  BranchId: optionalEntityId,
   TransactionDate: Joi.alternatives()
     .try(Joi.date().iso(), Joi.string().regex(/^\d{1,2}-\d{1,2}-\d{4}$/))
     .required(),
@@ -31,8 +31,8 @@ const updateSchema = Joi.object({
   ...joinedEchoes(QUERIES.TRANSACTION_DETAIL_LOG),
   TransactionNo: Joi.string().optional().max(100).trim(),
   TransactionTypeConfigId: entityId.optional(),
-  TransactionTypeStatusId: entityId.optional().allow(null),
-  BranchId: entityId.optional().allow(null),
+  TransactionTypeStatusId: optionalEntityId,
+  BranchId: optionalEntityId,
   TransactionDate: Joi.alternatives()
     .try(Joi.date().iso(), Joi.string().regex(/^\d{1,2}-\d{1,2}-\d{4}$/))
     .optional(),

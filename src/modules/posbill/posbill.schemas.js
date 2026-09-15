@@ -2,7 +2,7 @@
 // Joi validation schemas for POS Bill operations.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { POS_BILL_STATUS } = require('../../config/constants');
 
 // Canonical lowercase vocabulary, normalized on write. Status was free text, so
@@ -31,7 +31,7 @@ const lineDiscountsSchema = Joi.object()
 // sent is ignored. Clients used to generate it from Date.now().
 const createSchema = Joi.object({
   BillNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  OrderId: entityId.optional().allow(null),
+  OrderId: optionalEntityId,
   // A dine-in session is several rounds billed together. When present the server
   // recomputes SubTotal/TaxAmount/Total from every listed order's priced lines,
   // applying Discount BEFORE tax. OrderId alone still works for single-order bills.
@@ -44,13 +44,13 @@ const createSchema = Joi.object({
   Payments: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   Status: statusField.optional().allow(null, '').default(POS_BILL_STATUS.UNPAID),
   SettledAt: Joi.date().optional().allow(null),
-  BranchDetailId: entityId.optional().allow(null),
+  BranchDetailId: optionalEntityId,
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   BillNo: Joi.string().optional().max(50).allow(null, '').trim(),
-  OrderId: entityId.optional().allow(null),
+  OrderId: optionalEntityId,
   SubTotal: Joi.number().optional().allow(null),
   TaxAmount: Joi.number().optional().allow(null),
   Discount: Joi.number().optional().allow(null),
@@ -59,7 +59,7 @@ const updateSchema = Joi.object({
   Payments: Joi.alternatives(Joi.object(), Joi.array()).optional().allow(null),
   Status: statusField.optional().allow(null, ''),
   SettledAt: Joi.date().optional().allow(null),
-  BranchDetailId: entityId.optional().allow(null),
+  BranchDetailId: optionalEntityId,
   Active: Joi.boolean().optional(),
 }).min(1);
 

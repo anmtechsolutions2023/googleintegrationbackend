@@ -25,6 +25,8 @@ const { logger } = require('../../utils/logger');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const catalogue = require('./receipt.catalogue');
+const taxSettingRepository = require('../taxsetting/taxsetting.repository');
+const { taxModeOf } = require('../taxsetting/taxsetting.service');
 
 const {
   DOCUMENTS, TAX_MODE, TAX_MODE_KEY,
@@ -67,7 +69,10 @@ const readBranch = async (conn, branchId, tenantId) => {
  * @param {Object<string,string>} stored - Already-read receipt.* overrides.
  * @returns {'gst'|'composition'|'unregistered'}
  */
-const resolveTaxMode = (branch, stored) => {
+const resolveTaxMode = (branch, stored, setting = null) => {
+  // The tenant's GST switch outranks everything below it. A tenant that has
+  // stopped charging GST cannot print a tax invoice, whatever a branch chose.
+  if (setting && setting.gstCharging === false) return taxModeOf(setting);
   const chosen = stored[TAX_MODE_KEY];
   if (chosen && Object.values(TAX_MODE).includes(chosen)) return chosen;
   // A branch holding a GSTIN is registered; one that does not cannot be. The
@@ -136,7 +141,8 @@ const resolveAll = (branchId, tenantId) =>
   withConnection(async (conn) => {
     const stored = await readOverrides(conn, branchId, tenantId);
     const branch = await readBranch(conn, branchId, tenantId);
-    const taxMode = resolveTaxMode(branch, stored);
+    const setting = await taxSettingRepository.getTx(conn, tenantId);
+    const taxMode = resolveTaxMode(branch, stored, setting);
     const ctx = { taxMode };
 
     return {
@@ -170,7 +176,8 @@ const describe = (doc, branchId, tenantId) =>
 
     const stored = await readOverrides(conn, branchId, tenantId);
     const branch = await readBranch(conn, branchId, tenantId);
-    const taxMode = resolveTaxMode(branch, stored);
+    const setting = await taxSettingRepository.getTx(conn, tenantId);
+    const taxMode = resolveTaxMode(branch, stored, setting);
     const ctx = { taxMode };
     const values = applyDoc(doc, stored, ctx);
 
@@ -280,7 +287,8 @@ const save = async (doc, values, branchId, tenantId, userPhone) => {
   await withTransaction(async (conn) => {
     const stored = await readOverrides(conn, branchId, tenantId);
     const branch = await readBranch(conn, branchId, tenantId);
-    const taxMode = resolveTaxMode(branch, stored);
+    const setting = await taxSettingRepository.getTx(conn, tenantId);
+    const taxMode = resolveTaxMode(branch, stored, setting);
     const ctx = { taxMode };
     const defaults = defaultsOf(doc);
 
@@ -334,6 +342,17 @@ const setTaxMode = async (taxMode, branchId, tenantId, userPhone) => {
     throw new HttpError(
       `Tax mode must be one of: ${Object.values(TAX_MODE).join(', ')}.`,
       MESSAGES.HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+
+  // While GST is off the paper follows POS Settings → GST. Letting a branch pick
+  // "GST registered" here would print a tax invoice on a bill that charged none.
+  const setting = await taxSettingRepository.get(tenantId);
+  if (!setting.gstCharging) {
+    throw new HttpError(
+      'GST is switched off in POS Settings → GST, so the receipt follows that setting. Turn GST on there first.',
+      MESSAGES.HTTP_STATUS.CONFLICT,
+      'TAX_MODE_FOLLOWS_GST_SWITCH',
     );
   }
 

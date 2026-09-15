@@ -2,11 +2,34 @@
 // Category Service extending BaseCRUDService
 // Handles business logic for category operations with standardized patterns
 
+const { v4: uuidv4 } = require('uuid');
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
 const { logger } = require('../../utils/logger');
-const { executeQuery } = require('../../utils/dbHelper');
+const { executeQuery, withTransaction } = require('../../utils/dbHelper');
 const { HttpError } = require('../../middleware/errorHandler');
+
+/**
+ * JSON_ARRAYAGG returns a JSON value, which mysql2 hands back as a parsed array
+ * on some server/driver combinations and as a string on others; a category with
+ * no tags yields NULL rather than an empty array. Normalising here means every
+ * caller — the form, the till, the tests — sees a plain array of ids.
+ * @param {*} v
+ * @returns {string[]}
+ */
+const toIdArray = (v) => {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.filter((x) => x != null);
+  if (typeof v === 'string') {
+    try {
+      const parsed = JSON.parse(v);
+      return Array.isArray(parsed) ? parsed.filter((x) => x != null) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
 
 /**
  * A menu tree is EXACTLY two levels: category → sub-category. Portals reject
@@ -112,6 +135,77 @@ class CategoryService extends BaseCRUDService {
       id,
       tenantId,
     ];
+  }
+
+  /**
+   * Replace the category's tag links.
+   *
+   * Same shape as positemmeta.syncLinks: delete the set, insert the new one, on
+   * the CALLER'S connection so the links and the row they belong to commit or
+   * roll back together.
+   *
+   * Only acted on when an ARRAY is supplied. `undefined` means "not sent, leave
+   * the links alone" — a PATCH that renames a category must not silently strip
+   * every tag from it — while an empty array means "detach everything".
+   *
+   * @param {Object} connection open transaction connection
+   * @param {string} categoryId
+   * @param {string} tenantId
+   * @param {string} userPhone
+   * @param {string[]|undefined} tagIds
+   */
+  async syncTags(connection, categoryId, tenantId, userPhone, tagIds) {
+    if (!Array.isArray(tagIds)) return;
+    await connection.execute(this.queries.DELETE_TAG_LINKS, [categoryId, tenantId]);
+    for (const tagId of tagIds) {
+      await connection.execute(this.queries.INSERT_TAG_LINK, [
+        uuidv4(), categoryId, tagId, tenantId, userPhone,
+      ]);
+    }
+  }
+
+  /** The row as every caller wants it: TagIds a plain array, never NULL. */
+  normalizeRow(row) {
+    if (!row) return row;
+    return { ...row, TagIds: toIdArray(row.TagIds) };
+  }
+
+  // Create the category and its tag links atomically.
+  async create(data, tenantId, userPhone) {
+    return withTransaction(async (connection) => {
+      const id = uuidv4();
+      await connection.execute(
+        this.queries.INSERT,
+        this.prepareInsertParams(id, data, tenantId, userPhone),
+      );
+      await this.syncTags(connection, id, tenantId, userPhone, data.TagIds);
+      return { id, ...data };
+    });
+  }
+
+  // Update the category and re-sync its tag links atomically.
+  async update(id, data, tenantId, userPhone) {
+    return withTransaction(async (connection) => {
+      const [existingRows] = await connection.execute(this.queries.SELECT_BY_ID, [id, tenantId]);
+      if (!existingRows || existingRows.length === 0) {
+        throw new HttpError('Category not found', 404);
+      }
+      const params = this.prepareUpdateParams(data, existingRows[0], userPhone, id, tenantId)
+        .map((p) => (p === undefined ? null : p));
+      await connection.execute(this.queries.UPDATE, params);
+      await this.syncTags(connection, id, tenantId, userPhone, data.TagIds);
+      const [rows] = await connection.execute(this.queries.SELECT_BY_ID, [id, tenantId]);
+      return this.normalizeRow(rows[0]);
+    });
+  }
+
+  async getById(id, tenantId, expand, conn) {
+    return this.normalizeRow(await super.getById(id, tenantId, expand, conn));
+  }
+
+  async getAll(tenantId, page, limit, expand) {
+    const result = await super.getAll(tenantId, page, limit, expand);
+    return { ...result, data: (result.data || []).map((r) => this.normalizeRow(r)) };
   }
 
   /**

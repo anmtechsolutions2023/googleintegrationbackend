@@ -4,9 +4,10 @@
 // strings; booleans persist as 'true' / 'false'.
 
 const { withConnection } = require('../../utils/dbHelper');
-const { QUERIES, ONBOARDING } = require('../../config/constants');
+const { QUERIES, ONBOARDING, CLOCK } = require('../../config/constants');
 
 const AUTO_APPROVE_KEY = ONBOARDING.SETTING_AUTO_APPROVE;
+const TIMEZONE_KEY = CLOCK.SETTING_TIMEZONE;
 
 /**
  * Reads a single setting value (string) or null when absent.
@@ -35,6 +36,10 @@ const isAutoApproveEnabled = async (existingConn) => {
  */
 const getConfig = async () => ({
   autoApproveOnboarding: await isAutoApproveEnabled(),
+  // The clock every category schedule is read against. Reported as the
+  // effective value, so a blank or unknown setting shows what is ACTUALLY in
+  // use rather than an empty box that implies no schedule is running.
+  timezone: (await getSetting(TIMEZONE_KEY)) || CLOCK.DEFAULT_TIMEZONE,
 });
 
 /**
@@ -55,6 +60,13 @@ const setSetting = (key, value, updatedBy) =>
  * @returns {Promise<Object>}
  */
 const updateConfig = async (patch, updatedBy) => {
+  if (patch.timezone !== undefined) {
+    await setSetting(TIMEZONE_KEY, patch.timezone, updatedBy);
+    // The schedule service memoises this for five minutes; without dropping it
+    // here a change would appear to save and then not take effect.
+    // eslint-disable-next-line global-require
+    require('../poscategoryschedule/poscategoryschedule.service').forgetTimeZone();
+  }
   if (patch.autoApproveOnboarding !== undefined) {
     await setSetting(
       AUTO_APPROVE_KEY,

@@ -11,6 +11,7 @@
 // what actually gets persisted.
 
 const Joi = require('joi');
+const { gstinField } = require('../../utils/gstinSchema');
 
 // ── Leaf nodes ────────────────────────────────────────────────────────────────
 const organizationSchema = Joi.object({
@@ -118,6 +119,9 @@ const addressSchema = Joi.object({
 
 const branchSchema = Joi.object({
   Name: Joi.string().max(200).trim().required(),
+  // Optional. A new restaurant may not be registered yet, and it can be added
+  // later from POS Settings → GST.
+  GSTIN: gstinField.optional(),
   address: addressSchema.required(),
   contact: contactSchema.required(),
   // Absent from the wizard's payload entirely now. Spelled out rather than

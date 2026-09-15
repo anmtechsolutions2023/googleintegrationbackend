@@ -21,6 +21,20 @@ const {
 } = require('../../utils/taxCalculator');
 const repository = require('./pricing.repository');
 const itemMetaRepository = require('../positemmeta/positemmeta.repository');
+// The tenant's GST switch. Read on every pricing call, never cached: the guard
+// that refuses a switch while orders are open only works if the very next
+// order sees the new value.
+const taxSettingRepository = require('../taxsetting/taxsetting.repository');
+
+/**
+ * Whether tax is charged on this call. An explicit option wins, so a caller
+ * that already knows (or a test) need not read the setting again.
+ */
+const resolveGstCharging = async (tenantId, options = {}) => (
+  typeof options.gstCharging === 'boolean'
+    ? options.gstCharging
+    : taxSettingRepository.isGstCharging(tenantId)
+);
 
 /** Shape returned for a costinfo that could not be resolved. */
 const missingBreakdown = (costInfoId) => ({
@@ -37,8 +51,11 @@ const missingBreakdown = (costInfoId) => ({
  * @param {string} tenantId
  * @returns {Promise<Map<string, Object>>} costInfoId → breakdown
  */
-const priceCostInfos = async (costInfoIds, tenantId) => {
-  const chain = await repository.getChainForCostInfos(costInfoIds, tenantId);
+const priceCostInfos = async (costInfoIds, tenantId, options = {}) => {
+  const [chain, gstCharging] = await Promise.all([
+    repository.getChainForCostInfos(costInfoIds, tenantId),
+    resolveGstCharging(tenantId, options),
+  ]);
   const result = new Map();
 
   [...new Set((costInfoIds || []).filter(Boolean))].forEach((id) => {
@@ -52,11 +69,14 @@ const priceCostInfos = async (costInfoIds, tenantId) => {
       found: true,
       taxGroupId: entry.taxGroupId,
       taxGroupName: entry.taxGroupName,
+      // With GST off there are no components, and computeTax's exempt path
+      // charges the price as it stands. The menu reads "₹239" with no tax flag.
       ...computeTax({
         amount: entry.amount,
         isTaxIncluded: entry.isTaxIncluded,
-        components: entry.components,
+        components: gstCharging ? entry.components : [],
       }),
+      taxCharged: gstCharging,
     });
   });
 
@@ -97,14 +117,19 @@ const priceLines = async (lines, tenantId, options = {}) => {
     return { lines: [], totals: sumLines([]) };
   }
 
-  // Both lookups are batched, so a whole cart costs two queries regardless of
-  // how many lines or variants it has.
-  const [chain, variants] = await Promise.all([
+  // Every lookup is batched, so a whole cart costs the same four reads
+  // regardless of how many lines, variants or add-ons it has.
+  const [chain, variants, addons, gstCharging] = await Promise.all([
     repository.getChainForCostInfos(input.map((l) => l.costInfoId), tenantId),
     itemMetaRepository.getVariantPricesByIds(
       input.flatMap((l) => l.variantIds || []),
       tenantId,
     ),
+    itemMetaRepository.getAddonPricesByIds(
+      input.flatMap((l) => l.addonIds || []),
+      tenantId,
+    ),
+    resolveGstCharging(tenantId, options),
   ]);
 
   /**
@@ -116,6 +141,15 @@ const priceLines = async (lines, tenantId, options = {}) => {
       .map((id) => variants.get(id))
       .filter(Boolean);
 
+  /**
+   * Selected add-ons, resolved the same way. Kept in the order the client sent
+   * them so a ticket reads back in the order the guest was asked.
+   */
+  const resolveAddons = (line) =>
+    (line.addonIds || [])
+      .map((id) => addons.get(id))
+      .filter(Boolean);
+
   // Pass 1 — resolve each line's value net of its OWN discount. That value is
   // the weight used to spread the document discount, so a bigger line absorbs a
   // proportionally bigger share of it.
@@ -123,8 +157,13 @@ const priceLines = async (lines, tenantId, options = {}) => {
     const entry = chain.get(line.costInfoId);
     const quantity = Number(line.quantity ?? 1) || 0;
     const selectedVariants = resolveVariants(line);
-    // Variants are a flat surcharge on the unit price — never taxed separately.
-    const addOnMinor = selectedVariants.reduce((sum, v) => sum + toMinor(v.price), 0);
+    const selectedAddons = resolveAddons(line);
+    // Variants and add-ons are both a flat surcharge on the unit price — never
+    // taxed separately. They are summed apart only so the line can report which
+    // half of the surcharge came from where; the tax engine sees one figure.
+    const variantMinor = selectedVariants.reduce((sum, v) => sum + toMinor(v.price), 0);
+    const addonMinor = selectedAddons.reduce((sum, a) => sum + toMinor(a.price), 0);
+    const addOnMinor = variantMinor + addonMinor;
     const unitMinor = entry ? toMinor(entry.amount) + addOnMinor : 0;
     const lineMinor = Math.round(unitMinor * quantity);
     const lineDiscountMinor = discountMinorFor(lineMinor, line.discount);
@@ -133,6 +172,9 @@ const priceLines = async (lines, tenantId, options = {}) => {
       entry,
       quantity,
       selectedVariants,
+      selectedAddons,
+      variantAmount: fromMinor(variantMinor),
+      addonAmount: fromMinor(addonMinor),
       addOn: fromMinor(addOnMinor),
       lineDiscountMinor,
       weightMinor: lineMinor - lineDiscountMinor,
@@ -150,7 +192,9 @@ const priceLines = async (lines, tenantId, options = {}) => {
     const breakdown = computeTax({
       amount: p.entry ? p.entry.amount : 0,
       isTaxIncluded: p.entry ? p.entry.isTaxIncluded : false,
-      components: p.entry ? p.entry.components : [],
+      // GST off: no components, so the price is charged exactly as it stands —
+      // an inclusive ₹239 stays ₹239, an exclusive ₹219 stops having tax added.
+      components: p.entry && gstCharging ? p.entry.components : [],
       quantity: p.quantity,
       addOn: p.addOn,
       discount: totalDiscountMinor
@@ -167,7 +211,16 @@ const priceLines = async (lines, tenantId, options = {}) => {
       // Resolved from the master so the caller can render "Large +₹30" without
       // a second lookup, and so an order stores what was actually charged.
       variants: p.selectedVariants,
+      addons: p.selectedAddons,
+      // Stamped on every line so the order, the bill and the invoice all record
+      // whether GST was charged — separately from a 0% rate, which is exempt.
+      taxCharged: gstCharging,
       ...breakdown,
+      // `addOnAmount` in the breakdown is the combined surcharge. These two
+      // split it, because a guest disputing a bill asks about the extras, not
+      // about the portion — and the two are priced from different masters.
+      variantAmount: p.variantAmount,
+      addonAmount: p.addonAmount,
       // Kept apart so a bill can show "₹20 off this dish" separately from
       // "this dish's share of the 10% off the bill". `discountAmount` remains
       // the total borne by the line.
@@ -176,7 +229,7 @@ const priceLines = async (lines, tenantId, options = {}) => {
     };
   });
 
-  return { lines: pricedLines, totals: sumLines(pricedLines) };
+  return { lines: pricedLines, totals: { ...sumLines(pricedLines), taxCharged: gstCharging } };
 };
 
 /**

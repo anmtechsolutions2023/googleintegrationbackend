@@ -138,7 +138,7 @@ describe('the credit note', () => {
       saleLogId: 'log-1', lines: [{ lineId: 'line-dosa', quantity: 1 }],
     }, TENANT, USER);
 
-    const components = JSON.parse(lineInserts()[0][15]);
+    const components = JSON.parse(lineInserts()[0][16]);
     expect(components).toEqual([
       { name: 'CGST', rate: 9, amount: 18 },
       { name: 'SGST', rate: 9, amount: 18 },
@@ -161,8 +161,8 @@ describe('the credit note', () => {
       saleLogId: 'log-1', lines: [{ lineId: 'line-naan', quantity: 2 }],
     }, TENANT, USER);
 
-    expect(noteInsert()[17]).toBe('log-1');          // ReversesLogId
-    expect(lineInserts()[0][18]).toBe('line-naan');  // SourceLineId
+    expect(noteInsert()[21]).toBe('log-1');          // ReversesLogId (after SellerGstin)
+    expect(lineInserts()[0][22]).toBe('line-naan');  // SourceLineId (after Note)
     expect(Number(lineInserts()[0][5])).toBe(2);     // Quantity
   });
 
@@ -181,7 +181,7 @@ describe('the credit note', () => {
     await returns.createReturnTx(mockConn, {
       saleLogId: 'log-1', lines: [{ lineId: 'line-dosa', quantity: 1, restock: true }],
     }, TENANT, USER);
-    expect(lineInserts()[0][19]).toBe(1);
+    expect(lineInserts()[0][23]).toBe(1);
     expect(calls(/UPDATE batchdetail/i)).toHaveLength(0);
     expect(calls(/stock_movement/i)).toHaveLength(0);
   });

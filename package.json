@@ -14,7 +14,8 @@
     "db:reset": "node scripts/reset-db.js",
     "mock:graph": "node scripts/mock-graph.js",
     "lint": "eslint src/**/*.js",
-    "lint:fix": "eslint src/**/*.js --fix"
+    "lint:fix": "eslint src/**/*.js --fix",
+    "db:migrate": "node scripts/run-migration.js"
   },
   "keywords": [
     "nodejs",

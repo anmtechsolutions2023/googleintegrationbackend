@@ -1006,6 +1006,20 @@ CREATE TABLE transactiondetaillog (
     ContactDetailId          VARCHAR(50)   NULL,
     CustomerName             VARCHAR(150)  NULL,
     CustomerMobile           VARCHAR(50)   NULL,
+    -- How this document was issued: 'gst' (tax invoice), 'composition' or
+    -- 'unregistered' (bill of supply). A snapshot, like every amount on the row,
+    -- so a reprint or a return export reads what was ISSUED, not today's switch.
+    TaxMode                  VARCHAR(20)   NOT NULL DEFAULT 'gst',
+    -- A business buyer, snapshotted at settle from the customer record. Only
+    -- these two fields make a sale B2B in a GST return; without them it is B2C.
+    BuyerGstin               VARCHAR(15)   NULL,
+    BuyerLegalName           VARCHAR(150)  NULL,
+    -- The SELLER's GSTIN — the branch's, as it stood when this document was
+    -- issued. Snapshotted for the same reason as the buyer: a GST return is filed
+    -- against the registration that issued the invoice, and a reprint must say
+    -- what the paper said. NULL on a bill of supply issued unregistered, and on a
+    -- tax invoice from a branch that had no GSTIN (the GST export flags those).
+    SellerGstin              VARCHAR(15)   NULL,
     SettledAt                DATETIME      NULL,
     -- WHICH DOCUMENT THIS ONE REVERSES. Set on a credit note (POS Return),
     -- NULL on everything else.
@@ -1079,9 +1093,15 @@ CREATE TABLE transactionitemdetail (
     ItemId                 VARCHAR(50)    NOT NULL,
     Quantity               DECIMAL(18,4)  NOT NULL DEFAULT 1,
     CostInfoId             VARCHAR(50)    NULL COMMENT 'Cost record this line was priced from',
-    UnitPrice              DECIMAL(18,4)  NULL COMMENT 'Effective unit price charged (BasePrice + VariantAmount)',
-    BasePrice              DECIMAL(18,4)  NULL COMMENT 'Item price before variant surcharge',
+    UnitPrice              DECIMAL(18,4)  NULL COMMENT 'Effective unit price charged (BasePrice + VariantAmount + AddonAmount)',
+    BasePrice              DECIMAL(18,4)  NULL COMMENT 'Item price before any surcharge',
     VariantAmount          DECIMAL(18,4)  NOT NULL DEFAULT 0 COMMENT 'Per-unit variant surcharge',
+    -- Split from VariantAmount rather than folded into it. Both are per-unit
+    -- surcharges taxed with the dish, but they answer different questions:
+    -- "which portion sizes sell" is a menu-engineering question, "what do we
+    -- earn on extras" is a margin one. One column cannot answer both, and a
+    -- guest querying a bill asks about the extras, never about the portion.
+    AddonAmount            DECIMAL(18,4)  NOT NULL DEFAULT 0 COMMENT 'Per-unit add-on surcharge',
     NetAmount              DECIMAL(18,4)  NULL COMMENT 'Taxable base after discount',
     -- Discount BORNE BY THIS LINE: its own discount plus its apportioned share
     -- of any document-level discount. The pricing engine already computes this
@@ -1105,6 +1125,18 @@ CREATE TABLE transactionitemdetail (
     -- Options as sold: [{id,name,price}]. Names are snapshotted, so renaming a
     -- variant later cannot rewrite an invoice already issued.
     Variants               JSON           NULL,
+    -- Add-ons as sold, same shape and same snapshot rule, plus the group each
+    -- came from: [{id,name,price,groupId,groupName}]. A reprint has to be able
+    -- to say "Toppings: Olives" and not merely "Olives".
+    Addons                 JSON           NULL,
+    -- Was GST charged on this line? Separate from its rate: a 0% dish sold while
+    -- GST was ON is exempt, a 5% dish sold while it was OFF is not taxed at all,
+    -- and a return has to report the two differently.
+    TaxCharged             TINYINT(1)     NOT NULL DEFAULT 1,
+    -- The kitchen note on this dish as it was ordered ("less spicy"). Carried
+    -- onto the invoice so a reprint, a return and the order detail can all say
+    -- what was asked for. Comment below holds the dish NAME, not a note.
+    Note                   VARCHAR(255)   NULL,
     Comment                VARCHAR(100),
     -- On a CREDIT NOTE line: the sale line this one sends back.
     --
@@ -1349,6 +1381,9 @@ DROP TABLE IF EXISTS pos_online_order;
 DROP TABLE IF EXISTS pos_feedback;
 DROP TABLE IF EXISTS pos_token;
 DROP TABLE IF EXISTS pos_token_counter;
+DROP TABLE IF EXISTS pos_gst_filing;
+DROP TABLE IF EXISTS pos_tax_mode_history;
+DROP TABLE IF EXISTS pos_tax_setting;
 DROP TABLE IF EXISTS pos_setting;
 DROP TABLE IF EXISTS pos_expense;
 DROP TABLE IF EXISTS pos_loyalty_ledger;
@@ -1467,11 +1502,17 @@ CREATE TABLE pos_meat_type (
 
 -- 4.4d pos_addon_group — a block of choices offered against a dish.
 --
--- An ADD-ON IS NOT A VARIANT. A variant REPLACES the item's price (Half/Full);
--- an add-on AUGMENTS it (extra cheese) and carries selection rules of its own.
--- Modelling add-ons as variants is the single most common way a portal
--- integration goes wrong, because the portal validates quantity against
--- Min/MaxSelection and a variant has no such pair to validate against.
+-- An ADD-ON IS NOT A VARIANT, but NOT because of how they are priced: both are
+-- a per-unit surcharge added to the item price before tax, and pricing.service
+-- treats them as one combined figure. (This comment previously claimed a
+-- variant REPLACED the item's price. No code ever did that, and live menus are
+-- priced as surcharges, so the comment was wrong, not the engine.)
+--
+-- What separates them is THE RULES BELOW. Min/MaxSelection make a choice
+-- compulsory or capped; a variant has no such pair. Modelling add-ons as
+-- variants is the single most common way a portal integration goes wrong,
+-- because the portal validates an inbound line's quantity against that pair
+-- and a variant gives it nothing to validate against.
 CREATE TABLE pos_addon_group (
     Id              VARCHAR(50)   NOT NULL,
     Name            VARCHAR(100)  NOT NULL,
@@ -1730,6 +1771,10 @@ CREATE TABLE pos_customer (
     Name            VARCHAR(100)    NOT NULL,
     Phone           VARCHAR(20)     NULL,
     Email           VARCHAR(100)    NULL,
+    -- A business customer's GST identity. Snapshotted onto the invoice at
+    -- settle; editing it later does not rewrite a bill already issued.
+    GSTIN           VARCHAR(15)     NULL,
+    LegalName       VARCHAR(150)    NULL,
     Visits          INT             NOT NULL DEFAULT 0,
     TotalSpent      DECIMAL(12,2)   NOT NULL DEFAULT 0,
     LoyaltyPoints   INT             NOT NULL DEFAULT 0,
@@ -1826,6 +1871,15 @@ CREATE TABLE pos_order (
     FloorId         VARCHAR(50)    NULL,
     FloorName       VARCHAR(100)   NULL,
     TableCapacity   INT            NULL,
+    -- What the customer asked of the WHOLE order ("pack sauces separately"),
+    -- as opposed to a dish note, which rides on its line inside Items. Kept on
+    -- the round so it survives until the round is sent to the kitchen, where it
+    -- is snapshotted onto pos_kot.CookingInstructions like the items are.
+    CookingInstructions VARCHAR(500) NULL,
+    -- Takeaway only in practice. A flag, not a phrase inside the note above, for
+    -- the same reason pos_kot carries one: whoever packs the bag acts on it
+    -- without reading the cooking instructions.
+    NoCutlery       TINYINT(1)     NOT NULL DEFAULT 0,
     TenantId        VARCHAR(50)    NOT NULL,
     Active          TINYINT(1)     NOT NULL,
     CreatedOn       DATETIME,
@@ -1964,6 +2018,9 @@ CREATE TABLE pos_portal (
     -- The tender an accepted order settles against, so aggregator money lands
     -- in a receivable rather than in the cash drawer.
     SettlementPaymentModeId     VARCHAR(50) NULL,
+    -- The aggregator's own GSTIN. Food sold through an e-commerce operator is
+    -- reported against it in GSTR-1 Table 14.
+    GSTIN           VARCHAR(15)   NULL,
     SortOrder       INT           NOT NULL DEFAULT 0,
     TenantId        VARCHAR(50)   NOT NULL,
     Active          TINYINT(1)    NOT NULL,
@@ -2405,7 +2462,9 @@ CREATE TABLE pos_setting (
     TenantId        VARCHAR(50)   NOT NULL,
     BranchDetailId  VARCHAR(50)   NOT NULL,
     SettingKey      VARCHAR(100)  NOT NULL,
-    SettingValue    VARCHAR(255)  NULL,
+    -- 1000, not 255: a branch's quick-pick kitchen notes are stored here as a
+    -- JSON list, and twenty short notes do not fit in 255.
+    SettingValue    VARCHAR(1000) NULL,
     Active          TINYINT(1)    NOT NULL DEFAULT 1,
     CreatedOn       DATETIME,
     CreatedBy       VARCHAR(50),
@@ -2413,6 +2472,62 @@ CREATE TABLE pos_setting (
     UpdatedBy       VARCHAR(50),
     PRIMARY KEY (Id),
     UNIQUE (TenantId, BranchDetailId, SettingKey)
+);
+
+-- 4.14b pos_tax_setting — whether this tenant charges GST at all.
+--
+-- ONE ROW PER TENANT, and the one value pricing obeys. Deliberately not a
+-- pos_setting key: those are per branch and default to "no row = default", and
+-- the receipt's own per-branch tax mode already defaults from the GSTIN — which
+-- most branches do not have filled in. Had pricing read THAT, every tenant with
+-- an empty GSTIN field would have stopped charging GST the day this shipped.
+-- Here, no row means charging, exactly as the system always has.
+--
+-- OffReason says WHICH kind of off, because it decides what the paper says:
+-- 'composition' prints the composition declaration, 'unregistered' prints none.
+CREATE TABLE pos_tax_setting (
+    TenantId        VARCHAR(50)   NOT NULL,
+    GstCharging     TINYINT(1)    NOT NULL DEFAULT 1,
+    OffReason       VARCHAR(20)   NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (TenantId)
+);
+
+-- 4.14c pos_tax_mode_history — every time the switch moved.
+--
+-- Append-only. The GST report's period strip ("on 1-9 Sep, off 10-15 Sep") is
+-- read from here, and so is the answer to "who turned it off". Written in the
+-- same transaction as the setting, so the two cannot disagree.
+CREATE TABLE pos_tax_mode_history (
+    Id              VARCHAR(50)   NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    FromCharging    TINYINT(1)    NOT NULL,
+    ToCharging      TINYINT(1)    NOT NULL,
+    OffReason       VARCHAR(20)   NULL,
+    ChangedBy       VARCHAR(50)   NULL,
+    ChangedOn       DATETIME      NOT NULL,
+    PRIMARY KEY (Id),
+    INDEX idx_taxmodehistory_tenant (TenantId, ChangedOn)
+);
+
+-- 4.14d pos_gst_filing — a month the accountant has filed, per GSTIN (branch).
+--
+-- Recorded by hand from the export screen. Its only job is to say "this month
+-- is closed": a credit note issued afterwards belongs to the month it is issued
+-- in, and the export warns rather than quietly changing a filed return.
+CREATE TABLE pos_gst_filing (
+    Id              VARCHAR(50)   NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    BranchId        VARCHAR(50)   NOT NULL,
+    Period          CHAR(7)       NOT NULL COMMENT 'YYYY-MM',
+    FiledOn         DATE          NOT NULL,
+    RecordedBy      VARCHAR(50)   NULL,
+    RecordedOn      DATETIME      NULL,
+    PRIMARY KEY (Id),
+    UNIQUE (TenantId, BranchId, Period)
 );
 
 -- 4.15 pos_expense — petty-cash / operational expenses

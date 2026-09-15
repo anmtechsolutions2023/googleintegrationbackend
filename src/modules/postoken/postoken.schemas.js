@@ -2,7 +2,7 @@
 // Joi validation schemas for POS Token operations.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { POS_TOKEN_STATUSES } = require('../../config/constants');
 const { VALID_PRESETS } = require('../../utils/dateRange');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
@@ -26,7 +26,7 @@ const createSchema = Joi.object({
   // Required: a token belongs to exactly one counter queue, and the queue is
   // what the number is unique within.
   BranchDetailId: entityId.required(),
-  OrderId: entityId.optional().allow(null),
+  OrderId: optionalEntityId,
   Active: Joi.boolean().optional().default(true),
 });
 
@@ -37,7 +37,7 @@ const updateSchema = Joi.object({
   // First in the literal, so the real rules below override any alias that is
   // also a genuine input.
   ...joinedEchoes(QUERIES.POS_TOKEN),
-  OrderId: entityId.optional().allow(null),
+  OrderId: optionalEntityId,
   Status: statusField.optional().allow(null, ''),
   BranchDetailId: entityId.optional(),
   Active: Joi.boolean().optional(),

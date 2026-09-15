@@ -182,6 +182,10 @@ const accept = async (id, data, tenantId, userPhone) => {
         TaxAmount: priced ? priced.totals.taxAmount : 0,
         Total: priced ? priced.totals.grossAmount : 0,
         BranchDetailId: order.BranchDetailId,
+        // On the round as well as the ticket, so the order detail can show
+        // what the customer asked for after the ticket has left the pass.
+        CookingInstructions: order.CookingInstructions ?? null,
+        NoCutlery: order.NoCutlery ? 1 : 0,
       },
       tenantId,
       userPhone,

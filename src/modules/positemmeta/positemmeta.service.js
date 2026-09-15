@@ -12,13 +12,56 @@ const { withTransaction, executeQuery } = require('../../utils/dbHelper');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const { attachBreakdown, attachBreakdownToOne } = require('../pricing/pricing.enrich');
+// The schedule rule, from the one module that owns it.
+const categorySchedule = require('../poscategoryschedule/poscategoryschedule.service');
 
 const PRICING_OPTS = { idField: 'CostInfoId' };
+
+// What a bulk change may touch. Columns come from THIS list, never from the
+// request, so a field name can never reach the SQL. Item, Branch and Price are
+// absent on purpose: each belongs to the item itself, and setting one on many
+// rows at once would make several dishes claim to be the same one.
+const BULK_SCALARS = ['Active', 'FoodTypeId', 'MeatTypeId', 'PrepTimeMinutes', 'ServesCount'];
+const BULK_LINKS = {
+  ChannelIds: 'SELECT_CHANNEL_LINKS_FOR',
+  VariantIds: 'SELECT_VARIANT_LINKS_FOR',
+  AddonGroupIds: 'SELECT_ADDON_GROUP_LINKS_FOR',
+  TagIds: 'SELECT_TAG_LINKS_FOR',
+};
+
+/** One dish's link set after an add / remove / replace. Order is kept. */
+const applyListChange = (current, { mode, ids }) => {
+  if (mode === 'replace') return [...new Set(ids)];
+  if (mode === 'remove') {
+    const drop = new Set(ids);
+    return current.filter((x) => !drop.has(x));
+  }
+  const out = [...current];
+  ids.forEach((x) => { if (!out.includes(x)) out.push(x); });
+  return out;
+};
+const sameList = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 // Serialize object/array values for JSON columns; pass through strings and null.
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
 
 // Normalize a JSON_ARRAYAGG result (string | array | null) into a plain array.
+/**
+ * The tag objects a menu row carries, from either level.
+ *
+ * JSON_ARRAYAGG hands back a parsed array on some driver/server combinations
+ * and a string on others, and NULL when a dish or its section has no tags.
+ * @param {*} v
+ * @returns {Array<{id: string, name: string, type: string}>}
+ */
+const toTagArray = (v) => {
+  if (v == null) return [];
+  const raw = Array.isArray(v) ? v : (() => {
+    try { return JSON.parse(String(v)); } catch { return []; }
+  })();
+  return Array.isArray(raw) ? raw.filter((t) => t && t.id) : [];
+};
+
 const toIdArray = (v) => {
   if (v == null) return [];
   if (Array.isArray(v)) return v.filter((x) => x != null);
@@ -255,7 +298,122 @@ class PosItemMetaService extends BaseCRUDService {
       VariantIds: toIdArray(row.VariantIds),
       AddonGroupIds: toIdArray(row.AddonGroupIds),
       TagIds: toIdArray(row.TagIds),
+      // Kept APART on purpose. The till draws a tag set on the dish differently
+      // from one inherited from its section, so it has to know which is which;
+      // the union happens where it is displayed and filtered.
+      OwnTags: toTagArray(row.OwnTags),
+      CategoryTags: toTagArray(row.CategoryTags),
     };
+  }
+
+  /**
+   * Marks each row with whether its section is on the menu right now.
+   *
+   * ONE read of the tenancy's rules for the whole page, not one per dish — the
+   * shape SELECT_ALL_FOR_TENANT was written for. Evaluated in JS rather than in
+   * the menu query because the rule lives in exactly one place: MySQL would
+   * apply it on the DATABASE server's clock (UTC here and on Aiven) while the
+   * schedule service compares against the APP server's, and the two disagreed
+   * by five and a half hours the first time both existed.
+   *
+   * A category with no rules is absent from the map, and absent reads as
+   * available — the default the whole feature rests on.
+   *
+   * @param {Array<Object>} rows
+   * @param {string} tenantId
+   * @returns {Promise<Array<Object>>}
+   */
+  async attachAvailability(rows, tenantId) {
+    if (!rows || rows.length === 0) return rows || [];
+    const [rules, timeZone] = await Promise.all([
+      categorySchedule.getAllForTenant(tenantId),
+      categorySchedule.getTimeZone(),
+    ]);
+    const byCategory = categorySchedule.indexByCategory(rules);
+    // ONE instant for the whole page. Calling new Date() per row would let a
+    // menu straddle a window boundary and answer inconsistently within itself.
+    const when = new Date();
+    return rows.map((r) => {
+      const { available, opensAt } = categorySchedule.availabilityOf(
+        byCategory.get(r.CategoryId), when, timeZone,
+      );
+      return { ...r, CategoryAvailableNow: available, CategoryOpensAt: opensAt };
+    });
+  }
+
+  /**
+   * One change applied to many menu rows, all or nothing.
+   *
+   * The whole selection is checked first: if any dish no longer exists the
+   * change is refused, rather than landing on the rest and leaving the manager
+   * to work out which ones missed. Scalar fields are one UPDATE for every row;
+   * a link field is re-synced only on the dishes whose set actually changes.
+   *
+   * @param {string[]} ids
+   * @param {Object} changes - Validated by bulkUpdateSchema.
+   * @param {string} tenantId
+   * @param {string} userPhone
+   * @returns {Promise<{updated: number, items: Array<{Id: string, ItemName: string|null, Active: number}>}>}
+   */
+  async bulkUpdate(ids, changes, tenantId, userPhone) {
+    const unique = [...new Set(ids)];
+    const inList = new Array(unique.length).fill('?').join(', ');
+
+    return withTransaction(async (connection) => {
+      const [targets] = await connection.execute(
+        this.queries.SELECT_BULK_TARGETS.replace(':ids', inList),
+        [tenantId, ...unique],
+      );
+      if (targets.length !== unique.length) {
+        const found = new Set(targets.map((t) => t.Id));
+        const missing = unique.filter((id) => !found.has(id)).length;
+        throw new HttpError(
+          `${missing} of the selected items no longer exist. Refresh the list and try again.`,
+          MESSAGES.HTTP_STATUS.NOT_FOUND,
+        );
+      }
+
+      const sets = [];
+      const params = [];
+      BULK_SCALARS.forEach((column) => {
+        if (changes[column] === undefined) return;
+        sets.push(`${column} = ?`);
+        params.push(column === 'Active' ? (changes[column] ? 1 : 0) : changes[column]);
+      });
+      if (sets.length > 0) {
+        await connection.execute(
+          `UPDATE pos_item_meta SET ${sets.join(', ')}, UpdatedOn = NOW(), UpdatedBy = ?`
+          + ` WHERE TenantId = ? AND Id IN (${inList})`,
+          [...params, userPhone, tenantId, ...unique],
+        );
+      }
+
+      for (const [field, query] of Object.entries(BULK_LINKS)) {
+        const change = changes[field];
+        if (!change) continue;
+        const [linkRows] = await connection.execute(
+          this.queries[query].replace(':ids', inList),
+          [tenantId, ...unique],
+        );
+        const current = new Map(unique.map((id) => [id, []]));
+        linkRows.forEach((r) => current.get(r.ItemMetaId)?.push(r.LinkId));
+        for (const id of unique) {
+          const next = applyListChange(current.get(id), change);
+          if (!sameList(current.get(id), next)) {
+            await this.syncLinks(connection, id, tenantId, userPhone, { [field]: next });
+          }
+        }
+      }
+
+      return {
+        updated: unique.length,
+        items: targets.map((t) => ({
+          Id: t.Id,
+          ItemName: t.ItemName ?? null,
+          Active: changes.Active !== undefined ? (changes.Active ? 1 : 0) : t.Active,
+        })),
+      };
+    });
   }
 
   // Menu rows always carry the tax breakdown — the price they show is the one a
@@ -264,7 +422,8 @@ class PosItemMetaService extends BaseCRUDService {
   async getAll(tenantId, page, limit, expand) {
     const result = await super.getAll(tenantId, page, limit, expand);
     const rows = (result.data || []).map((r) => this.normalizeRow(r));
-    return { ...result, data: await attachBreakdown(rows, tenantId, PRICING_OPTS) };
+    const priced = await attachBreakdown(rows, tenantId, PRICING_OPTS);
+    return { ...result, data: await this.attachAvailability(priced, tenantId) };
   }
 
   /**
@@ -280,7 +439,9 @@ class PosItemMetaService extends BaseCRUDService {
     if (!row) return row;
     const nutritionRows = await executeQuery(this.queries.SELECT_NUTRITION, [id, tenantId]);
     const withNutrition = { ...row, Nutrition: nutritionRows[0] ?? null };
-    return attachBreakdownToOne(withNutrition, tenantId, PRICING_OPTS);
+    const priced = await attachBreakdownToOne(withNutrition, tenantId, PRICING_OPTS);
+    const [withAvailability] = await this.attachAvailability([priced], tenantId);
+    return withAvailability;
   }
 }
 
@@ -291,5 +452,7 @@ module.exports = {
   getById: (id, tenantId) => service.getById(id, tenantId),
   create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
   update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
+  bulkUpdate: (ids, changes, tenantId, userPhone) => service.bulkUpdate(ids, changes, tenantId, userPhone),
+  applyListChange,
   remove: (id, tenantId) => service.delete(id, tenantId),
 };

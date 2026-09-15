@@ -7,6 +7,8 @@
 
 const Joi = require('joi');
 const { entityId } = require('../../utils/idSchema');
+// The same line key the quote receives, under the same derived cap.
+const { lineRef } = require('../pricing/pricing.schemas');
 const { TRIGGER, REWARD, APPLY_TO } = require('./offer.evaluator');
 
 const idParamSchema = Joi.object({ id: entityId.required() });
@@ -71,7 +73,7 @@ const previewSchema = Joi.object({
   // this being absent is a valid answer rather than a missing field.
   posCustomerId: entityId.allow(null),
   lines: Joi.array().items(Joi.object({
-    ref: Joi.string().max(120).required(),
+    ref: lineRef.required(),
     itemId: entityId.allow(null),
     categoryId: entityId.allow(null),
     name: Joi.string().max(200).allow('', null),

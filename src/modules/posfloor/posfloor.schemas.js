@@ -2,17 +2,17 @@
 // Joi validation schemas for POS Floor operations.
 
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 
 const createSchema = Joi.object({
   Name: Joi.string().required().max(100).allow(null).trim(),
-  BranchDetailId: entityId.optional().allow(null),
+  BranchDetailId: optionalEntityId,
   Active: Joi.boolean().optional().default(true),
 });
 
 const updateSchema = Joi.object({
   Name: Joi.string().optional().max(100).allow(null, '').trim(),
-  BranchDetailId: entityId.optional().allow(null),
+  BranchDetailId: optionalEntityId,
   Active: Joi.boolean().optional(),
 }).min(1);
 

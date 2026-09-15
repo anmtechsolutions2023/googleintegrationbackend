@@ -100,3 +100,79 @@ describe('no schema has drifted back to the strict rule', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// An unselected <select> posts an empty string. Before optionalEntityId every
+// optional reference in the application refused it:
+//
+//     400  Validation error: "MeatTypeId" is not allowed to be empty
+//
+// which complained about the one field the user had deliberately left blank.
+describe('optionalEntityId — a reference the user may leave blank', () => {
+  const { optionalEntityId } = require('../../utils/idSchema');
+  const S = Joi.object({ ref: optionalEntityId });
+  const run = (v) => S.validate(v);
+
+  it('accepts an empty string, which is what a blank dropdown posts', () => {
+    expect(run({ ref: '' }).error).toBeUndefined();
+  });
+
+  // The distinction that matters on a PATCH: undefined means "not sent, leave
+  // it alone", null means "clear it". Mapping a cleared dropdown to undefined
+  // would keep the old value — the user unsets it, saves, and it is still set.
+  it('turns the empty string into NULL, not undefined', () => {
+    expect(run({ ref: '' }).value.ref).toBeNull();
+  });
+
+  it('leaves an omitted key omitted, so a PATCH still means "leave alone"', () => {
+    expect(run({}).value).not.toHaveProperty('ref');
+  });
+
+  it('passes an explicit null through', () => {
+    expect(run({ ref: null }).value.ref).toBeNull();
+  });
+
+  it('accepts a generated uuid', () => {
+    expect(run({ ref: 'f4c33126-6f1a-4d62-ba43-026387df4acf' }).error).toBeUndefined();
+  });
+
+  it('accepts a seeded mnemonic id', () => {
+    expect(run({ ref: 'h0000001-mtyp-0000-0000-000000000001' }).error).toBeUndefined();
+  });
+
+  // Still a validator, not a hole: '' is the ONLY empty value it forgives.
+  it('still refuses anything that is not an id', () => {
+    expect(run({ ref: 'not-an-id' }).error).toBeDefined();
+    expect(run({ ref: '../../etc/passwd' }).error).toBeDefined();
+    expect(run({ ref: 42 }).error).toBeDefined();
+    expect(run({ ref: '   ' }).error).toBeDefined();
+  });
+
+  it('names the field in the message', () => {
+    expect(run({ ref: 'nope' }).error.message).toMatch(/"ref" must be a valid record id/);
+  });
+});
+
+// The whole point was that this is not one field. Every optional reference in
+// every module has to forgive a blank dropdown, or the next form fails the same
+// way and gets patched one field at a time.
+describe('every optional reference forgives a blank dropdown', () => {
+  const fs = require('fs');
+  const path = require('path');
+
+  it('no module still declares one the old way', () => {
+    const MODULES = path.resolve(__dirname, '../../modules');
+    const offenders = [];
+    for (const dir of fs.readdirSync(MODULES)) {
+      const p = path.join(MODULES, dir);
+      if (!fs.statSync(p).isDirectory()) continue;
+      for (const file of fs.readdirSync(p)) {
+        if (!file.endsWith('schemas.js')) continue;
+        const src = fs.readFileSync(path.join(p, file), 'utf8');
+        if (/entityId\.(optional\(\)\.allow\(null\)|allow\(null\)\.optional\(\))/.test(src)) {
+          offenders.push(`${dir}/${file}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});

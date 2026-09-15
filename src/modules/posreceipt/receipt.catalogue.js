@@ -156,6 +156,14 @@ const DOCUMENTS = {
           'Useful where staff key by code.'),
         vis('foodTypeMark', 'Veg / non-veg mark', VISIBILITY.NEVER,
           'The green or brown dot beside each dish.'),
+        // How a dish's options and add-ons print under it. A guest querying a
+        // bill asks about the extras, and "479.00" with nothing beneath it
+        // cannot answer them.
+        choice('itemOptions', 'Options & add-ons', 'itemised', [
+          { value: 'itemised', label: 'Itemised with prices' },
+          { value: 'names', label: 'Names only' },
+          { value: 'hidden', label: 'Hidden' },
+        ], 'Itemised prints the dish price, then each option and add-on with what it added, so the rate adds up on paper.'),
         conditional('itemNotes', 'Modifiers & notes', VISIBILITY.IF_PRESENT,
           '"Jain, no onion" — what the kitchen was told.'),
         conditional('returnedQty', 'Returned quantity', VISIBILITY.IF_PRESENT,
@@ -293,6 +301,9 @@ const DOCUMENTS = {
           'Off by default. A cook does not price the dish, and every character that is not the dish or the quantity is noise.'),
         vis('bigQty', 'Oversized quantity', VISIBILITY.ALWAYS,
           'Quantity first at double height. A "2" hidden after a long dish name gets read as a 1.'),
+        // The portion first, then each add-on with its group. Never priced here.
+        conditional('itemOptions', 'Options & add-ons', VISIBILITY.ALWAYS,
+          '"Half portion", "+ Raita". Changes what gets cooked, so it prints straight under the dish.'),
         conditional('itemNotes', 'Modifiers & notes', VISIBILITY.ALWAYS,
           '"Jain, no onion". The single most important line on this ticket.'),
         // Order-level, as opposed to itemNotes which is per dish. Portals send

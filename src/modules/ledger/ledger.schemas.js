@@ -1,6 +1,6 @@
 // src/modules/ledger/ledger.schemas.js
 const Joi = require('joi');
-const { entityId } = require('../../utils/idSchema');
+const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { VALID_PRESETS, VALID_BUCKETS } = require('../../utils/dateRange');
 const { LEDGER } = require('../../config/constants');
 
@@ -91,7 +91,7 @@ const returnSchema = Joi.object({
   lines: Joi.array().items(returnLineSchema).max(200).optional().default([]),
   // The CODED reason. Free text cannot be grouped, so "what are we refunding
   // for?" was unanswerable — see pos_return_reason.
-  reasonId: entityId.optional().allow(null),
+  reasonId: optionalEntityId,
   // Alongside the code, never instead of it: the code is what reports group by,
   // the note is what a human needs to read.
   note: Joi.string().max(500).optional().allow(null, ''),

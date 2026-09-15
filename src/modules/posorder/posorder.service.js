@@ -17,7 +17,9 @@ const { transfer: transferImpl, refreshTable } = require('./posorder.transfer');
 const { issuePosNumber } = require('./posNumbering');
 const { writeKot, findLiveKotTx } = require('./posKotWriter');
 const { resolveVenueTx } = require('./posVenue');
+const { withCleanNotes, assertNotesFit, cleanInstructions } = require('./kitchenNotes');
 const { HttpError } = require('../../middleware/errorHandler');
+const categorySchedule = require('../poscategoryschedule/poscategoryschedule.service');
 
 // A round past this point is history: it can be reprinted for the record but not
 // re-cooked, and it no longer counts towards a table's occupancy.
@@ -49,6 +51,20 @@ const normalizeVariantIds = (line) => {
   return [];
 };
 
+/**
+ * Add-on ids on an order line, accepted in the same two shapes and for the same
+ * reason — a round repeated from a past order carries resolved objects, not ids.
+ * @param {Object} line
+ * @returns {string[]}
+ */
+const normalizeAddonIds = (line) => {
+  if (Array.isArray(line.addonIds)) return line.addonIds.filter(Boolean);
+  if (Array.isArray(line.addons)) {
+    return line.addons.map((a) => (typeof a === 'string' ? a : a?.id)).filter(Boolean);
+  }
+  return [];
+};
+
 class PosOrderService extends BaseCRUDService {
   constructor() {
     super('POS Order', QUERIES.POS_ORDER);
@@ -71,7 +87,9 @@ class PosOrderService extends BaseCRUDService {
    * @returns {Promise<{items:Array, totals:Object}|null>} null when nothing is priceable.
    */
   async priceItems(items, tenantId) {
-    const raw = asArray(items);
+    // Notes cleaned here as well as in create, because the portal path prices
+    // through this seam directly and calls its note `notes`.
+    const raw = withCleanNotes(asArray(items));
     if (raw.length === 0) return null;
 
     // Fill in any missing costInfoId from the menu row the line points at.
@@ -96,8 +114,10 @@ class PosOrderService extends BaseCRUDService {
       priceable.map((l, index) => ({
         costInfoId: l.costInfoId,
         quantity: Number(l.qty ?? l.quantity ?? 1) || 0,
-        // Selected variants are a per-unit surcharge resolved from the master.
+        // Selected variants and add-ons are both a per-unit surcharge resolved
+        // from their masters. Neither is trusted from the request.
         variantIds: normalizeVariantIds(l),
+        addonIds: normalizeAddonIds(l),
         // The same menu item can appear twice with different variants, so the
         // menu id alone is not a unique key — index by position instead.
         ref: `L${index}`,
@@ -115,13 +135,17 @@ class PosOrderService extends BaseCRUDService {
         return {
           ...line,
           costInfoId: line.costInfoId,
-          // Effective unit price — base + variant surcharge, the figure taxed.
+          // Effective unit price — base + variant + add-on surcharge, the
+          // figure taxed.
           price: priced.unitAmount,
           basePrice: priced.baseAmount,
-          variantAmount: priced.addOnAmount,
+          variantAmount: priced.variantAmount,
+          addonAmount: priced.addonAmount,
           // Names and prices as charged, so a reprint or a repeat order can show
-          // the options chosen without re-reading the variant master.
+          // the options chosen without re-reading the masters.
           variants: priced.variants,
+          addons: priced.addons,
+          taxCharged: priced.taxCharged,
           taxPct: priced.effectiveRate,
           isTaxIncluded: priced.isTaxIncluded,
           netAmount: priced.netAmount,
@@ -192,17 +216,174 @@ class PosOrderService extends BaseCRUDService {
    * The venue snapshot (table/floor name, capacity) is resolved and frozen here;
    * see resolveVenueTx for why it is copied rather than joined at read time.
    */
+  /**
+   * Refuses lines whose category is outside its trading hours.
+   *
+   * THIS is the enforcement; greying the card on the till is presentation. A
+   * till left open since breakfast still holds a live token and can still POST
+   * the line, so the rule is re-applied here from live data — the same
+   * discipline settle uses for campaign offers, which are re-evaluated inside
+   * the transaction and never trusted from the request.
+   *
+   * Reads take their own connections and run BEFORE the caller opens one, for
+   * the same reason priceItems does: one connection per request.
+   *
+   * @param {Array<Object>} items raw Items[] from the request
+   * @param {string} tenantId
+   */
+  async assertLinesAreOnMenu(items, tenantId) {
+    const raw = asArray(items);
+    if (raw.length === 0) return;
+
+    const metaIds = raw.map((l) => l.id || l.Id).filter(Boolean);
+    if (metaIds.length === 0) return;
+
+    const [categoryByMeta, inactive, rules, timeZone] = await Promise.all([
+      itemMetaRepository.getCategoryIdsByItemMetaIds(metaIds, tenantId),
+      itemMetaRepository.getInactiveItemMetaIds(metaIds, tenantId),
+      categorySchedule.getAllForTenant(tenantId),
+      categorySchedule.getTimeZone(),
+    ]);
+
+    const byCategory = categorySchedule.indexByCategory(rules);
+    // One instant for the whole cart, so a round straddling a boundary cannot
+    // accept one line and refuse the next.
+    const when = new Date();
+
+    const refused = [];
+    const offSale = [];
+    raw.forEach((line) => {
+      // Turned off in Menu Master. Checked FIRST and it wins: an open section
+      // does not make an Off dish orderable, and saying "back at 18:00" about
+      // one would be wrong — at 18:00 it is still off.
+      if (inactive.has(line.id || line.Id)) {
+        offSale.push(line.name || 'An item');
+        return;
+      }
+      const categoryId = categoryByMeta.get(line.id || line.Id);
+      if (!categoryId) return; // uncategorised is always sellable
+      const { available, opensAt } = categorySchedule.availabilityOf(
+        byCategory.get(categoryId), when, timeZone,
+      );
+      if (!available) {
+        refused.push(`${line.name || 'An item'}${opensAt ? ` (back at ${opensAt.slice(0, 5)})` : ''}`);
+      }
+    });
+
+    const problems = [];
+    if (offSale.length > 0) problems.push(`Not on sale: ${offSale.join(', ')}.`);
+    if (refused.length > 0) problems.push(`Not on the menu right now: ${refused.join(', ')}.`);
+    if (problems.length > 0) {
+      throw new HttpError(problems.join(' '), 400);
+    }
+  }
+
+  /**
+   * Refuses lines whose add-on selections break their groups' Min/Max rules.
+   *
+   * The rule a variant never had, and the reason add-ons could not simply reuse
+   * the variant picker. Enforced here for the same reason trading hours are:
+   * the till greying out a checkbox is presentation, and a stale tab can still
+   * POST whatever it likes.
+   *
+   * Two failures, not one. An id the line DOES carry is checked against its own
+   * group's Max; a group the dish offers but the line never answered is caught
+   * by reading the dish's groups, because an unanswered group leaves no trace
+   * on the line at all.
+   *
+   * Add-ons belonging to a group this dish does not offer are refused outright
+   * rather than dropped — silently pricing a cart the client did not send is
+   * how a guest gets charged for something nobody could see on screen.
+   *
+   * @param {Array<Object>} items raw Items[] from the request
+   * @param {string} tenantId
+   */
+  async assertAddonSelectionsAreValid(items, tenantId) {
+    const raw = asArray(items);
+    if (raw.length === 0) return;
+
+    const metaIds = raw.map((l) => l.id || l.Id).filter(Boolean);
+    if (metaIds.length === 0) return;
+
+    const [rulesByMeta, addons] = await Promise.all([
+      itemMetaRepository.getAddonRulesByItemMetaIds(metaIds, tenantId),
+      itemMetaRepository.getAddonPricesByIds(
+        raw.flatMap((l) => normalizeAddonIds(l)),
+        tenantId,
+      ),
+    ]);
+
+    const refused = [];
+    raw.forEach((line) => {
+      const groups = rulesByMeta.get(line.id || line.Id) || [];
+      const dishName = line.name || 'An item';
+      const selected = normalizeAddonIds(line);
+
+      // How many were chosen from each group the dish actually offers.
+      const offered = new Set(groups.map((g) => g.groupId));
+      const countByGroup = new Map();
+      selected.forEach((id) => {
+        const addon = addons.get(id);
+        if (!addon) {
+          // Unknown or retired — it contributes no price either (pricing drops
+          // it the same way), so refusing keeps screen and bill in agreement.
+          refused.push(`${dishName}: an option is no longer available`);
+          return;
+        }
+        if (!offered.has(addon.groupId)) {
+          refused.push(`${dishName}: "${addon.name}" is not offered with this item`);
+          return;
+        }
+        countByGroup.set(addon.groupId, (countByGroup.get(addon.groupId) || 0) + 1);
+      });
+
+      groups.forEach((g) => {
+        const picked = countByGroup.get(g.groupId) || 0;
+        if (picked < g.minSelection) {
+          refused.push(
+            `${dishName}: choose at least ${g.minSelection} from "${g.groupName}"`,
+          );
+        } else if (g.maxSelection > 0 && picked > g.maxSelection) {
+          refused.push(
+            `${dishName}: choose at most ${g.maxSelection} from "${g.groupName}"`,
+          );
+        }
+      });
+    });
+
+    if (refused.length > 0) {
+      throw new HttpError(refused.join('; '), 400);
+    }
+  }
+
   async create(data, tenantId, userPhone) {
-    const priced = await this.priceItems(data.Items, tenantId);
+    // A dish note that will not fit on the ticket is refused before anything
+    // else is checked or priced. Till only — the same reasoning as below.
+    assertNotesFit(data.Items);
+    const input = {
+      ...data,
+      Items: withCleanNotes(data.Items),
+      CookingInstructions: cleanInstructions(data.CookingInstructions),
+    };
+    // Deliberately here and NOT in createRoundTx. That seam is shared with the
+    // portal path, where an aggregator has already taken the customer's money —
+    // refusing there would strand a paid order rather than prevent one. And
+    // deliberately NOT on update: closing or paying for a round that was placed
+    // while its section was open must keep working after it shuts.
+    await this.assertLinesAreOnMenu(input.Items, tenantId);
+    // Same seam, same reasoning: a portal order that already charged the guest
+    // is reconciled by hand, not refused at the door.
+    await this.assertAddonSelectionsAreValid(input.Items, tenantId);
+    const priced = await this.priceItems(input.Items, tenantId);
     const order = priced
       ? {
-        ...data,
+        ...input,
         Items: priced.items,
         SubTotal: priced.totals.netAmount,
         TaxAmount: priced.totals.taxAmount,
         Total: priced.totals.grossAmount,
       }
-      : { ...data };
+      : { ...input };
 
     return withTransaction(async (connection) => this.createRoundTx(
       connection, order, tenantId, userPhone,
@@ -240,15 +421,23 @@ class PosOrderService extends BaseCRUDService {
   }
 
   async update(id, data, tenantId, userPhone) {
+    // Notes are cleaned but NOT length-checked here: settling or closing a
+    // portal round re-sends its Items, and a customer's long instruction must
+    // not make that round unpayable.
+    const input = { ...data };
+    if (data.CookingInstructions !== undefined) {
+      input.CookingInstructions = cleanInstructions(data.CookingInstructions);
+    }
+    if (data.Items !== undefined) input.Items = withCleanNotes(data.Items);
     // Only re-price when the caller actually changes the lines; a status-only
     // update must not disturb the totals already recorded.
-    if (data.Items === undefined) return super.update(id, data, tenantId, userPhone);
-    const priced = await this.priceItems(data.Items, tenantId);
-    if (!priced) return super.update(id, data, tenantId, userPhone);
+    if (data.Items === undefined) return super.update(id, input, tenantId, userPhone);
+    const priced = await this.priceItems(input.Items, tenantId);
+    if (!priced) return super.update(id, input, tenantId, userPhone);
     return super.update(
       id,
       {
-        ...data,
+        ...input,
         Items: priced.items,
         SubTotal: priced.totals.netAmount,
         TaxAmount: priced.totals.taxAmount,
@@ -394,6 +583,9 @@ class PosOrderService extends BaseCRUDService {
       data.FloorId ?? null,
       data.FloorName ?? null,
       data.TableCapacity ?? null,
+      // The whole-order note and flag — see kitchenNotes.js.
+      data.CookingInstructions ?? null,
+      data.NoCutlery ? 1 : 0,
       data.Active !== undefined ? data.Active : true,
       userPhone,
       userPhone,
@@ -420,6 +612,9 @@ class PosOrderService extends BaseCRUDService {
       data.FloorId !== undefined ? data.FloorId : existing.FloorId,
       data.FloorName !== undefined ? data.FloorName : existing.FloorName,
       data.TableCapacity !== undefined ? data.TableCapacity : existing.TableCapacity,
+      data.CookingInstructions !== undefined
+        ? data.CookingInstructions : (existing.CookingInstructions ?? null),
+      data.NoCutlery !== undefined ? (data.NoCutlery ? 1 : 0) : (existing.NoCutlery ? 1 : 0),
       data.Active !== undefined ? data.Active : existing.Active,
       userPhone,
       id,
@@ -441,6 +636,10 @@ module.exports = {
   fireKot: (id, data, tenantId, userPhone) => service.fireKot(id, data, tenantId, userPhone),
   // Composition seam for callers that own the transaction — see createRoundTx.
   priceItems: (items, tenantId) => service.priceItems(items, tenantId),
+  // Exported for its own test, and for any caller that composes a round.
+  assertLinesAreOnMenu: (items, tenantId) => service.assertLinesAreOnMenu(items, tenantId),
+  assertAddonSelectionsAreValid: (items, tenantId) =>
+    service.assertAddonSelectionsAreValid(items, tenantId),
   createRoundTx: (conn, order, tenantId, userPhone) =>
     service.createRoundTx(conn, order, tenantId, userPhone),
   transfer: (payload, tenantId, userPhone) => service.transfer(payload, tenantId, userPhone),

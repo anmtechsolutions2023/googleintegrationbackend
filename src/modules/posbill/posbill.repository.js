@@ -2,6 +2,7 @@
 // Bill ↔ orders link, and the priced line snapshots a bill is recomputed from.
 
 const { QUERIES } = require('../../config/constants');
+const { lineNoteOf } = require('../posorder/kitchenNotes');
 
 const expandIds = (sql, count) =>
   sql.replace(':ids', new Array(count).fill('?').join(', '));
@@ -129,9 +130,15 @@ const getOrderLinesTx = async (conn, orderIds, tenantId, lineDiscounts = null) =
         // Options as charged, carried through so a printed bill can itemise
         // "Dosa (Large, Extra cheese)".
         variants: Array.isArray(item.variants) ? item.variants : [],
+        addons: Array.isArray(item.addons) ? item.addons : [],
+        // The dish's kitchen note, carried through to the invoice line.
+        note: lineNoteOf(item),
         basePrice: item.basePrice ?? null,
         variantAmount: item.variantAmount ?? 0,
-        // Already includes the variant surcharge — see posorder.priceItems.
+        addonAmount: item.addonAmount ?? 0,
+        // A round placed before the GST switch existed was always charged.
+        taxCharged: item.taxCharged !== false,
+        // Already includes both surcharges — see posorder.priceItems.
         unitAmount: item.price ?? item.unitAmount ?? 0,
         quantity: Number(item.qty ?? item.quantity ?? 1) || 0,
         isTaxIncluded: !!item.isTaxIncluded,
@@ -184,7 +191,11 @@ const toLedgerLinesTx = async (conn, pricedLines, tenantId) => {
     unitAmount: l.unitAmount,
     basePrice: l.basePrice,
     variantAmount: l.variantAmount,
+    addonAmount: l.addonAmount ?? 0,
     variants: l.variants,
+    addons: l.addons,
+    taxCharged: l.taxCharged !== false,
+    note: l.note ?? null,
     netAmount: l.netAmount,
     // The line's own discount plus its share of the bill discount, already
     // apportioned by the pricing engine.

@@ -20,6 +20,8 @@ class PosCustomerService extends BaseCRUDService {
       data.TotalSpent !== undefined ? data.TotalSpent : 0,
       data.LoyaltyPoints !== undefined ? data.LoyaltyPoints : 0,
       data.BranchDetailId ?? null,
+      data.GSTIN ? String(data.GSTIN).trim().toUpperCase() : null,
+      data.LegalName || null,
       data.Active !== undefined ? data.Active : true,
       userPhone,
       userPhone,
@@ -35,6 +37,10 @@ class PosCustomerService extends BaseCRUDService {
       data.TotalSpent !== undefined ? data.TotalSpent : existing.TotalSpent,
       data.LoyaltyPoints !== undefined ? data.LoyaltyPoints : existing.LoyaltyPoints,
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
+      data.GSTIN !== undefined
+        ? (data.GSTIN ? String(data.GSTIN).trim().toUpperCase() : null)
+        : existing.GSTIN,
+      data.LegalName !== undefined ? (data.LegalName || null) : existing.LegalName,
       data.Active !== undefined ? data.Active : existing.Active,
       userPhone,
       id,
