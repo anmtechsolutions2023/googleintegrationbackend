@@ -3,6 +3,16 @@
 // Handles Express app setup, middleware, routes, and server startup.
 
 require('dotenv').config(); // Load environment variables once here
+
+// Pin the process clock to the restaurant's timezone BEFORE anything reads it.
+// Every "which day is it?" (utils/dateRange businessDate, report presets, the
+// token queue's TokenDate) reads the process's local calendar. Serverless hosts
+// run in UTC, so between 00:00 and 05:30 IST the server stamped tokens with
+// YESTERDAY while the browser asked for today, and the queue showed empty.
+// TZ is reserved on Vercel, hence a separate APP_TIMEZONE override. The DB pool
+// pins its own frame (timezone: 'Z'), so stored DATETIMEs are unaffected.
+process.env.TZ = process.env.APP_TIMEZONE || 'Asia/Kolkata';
+
 const express = require('express');
 const cors = require('cors');
 const swaggerUi = require('swagger-ui-express');
