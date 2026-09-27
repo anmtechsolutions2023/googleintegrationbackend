@@ -13,6 +13,11 @@ class ContactDetailService extends BaseCRUDService {
       tenantId,
       data.FirstName,
       data.LastName || null,
+      // The onboarding wizard has offered an Email box since it was written. There
+      // was no column and this method never mapped one, so Joi's .unknown(true)
+      // let the value through validation and it was dropped on the floor. Column
+      // added by migration 001.
+      data.Email || null,
       data.MobileNo || null,
       data.AltMobileNo || null,
       data.Landline1 || null,
@@ -30,6 +35,7 @@ class ContactDetailService extends BaseCRUDService {
     return [
       data.FirstName !== undefined ? data.FirstName : existing.FirstName,
       data.LastName !== undefined ? data.LastName : existing.LastName,
+      data.Email !== undefined ? data.Email : existing.Email,
       data.MobileNo !== undefined ? data.MobileNo : existing.MobileNo,
       data.AltMobileNo !== undefined ? data.AltMobileNo : existing.AltMobileNo,
       data.Landline1 !== undefined ? data.Landline1 : existing.Landline1,

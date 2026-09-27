@@ -128,6 +128,7 @@ const VALID_UUID_CD = 'a1b2c3d4-1111-1111-1111-111111111111';
 describe('contactdetail — field validation', () => {
   const { createSchema: createContactDetailSchema, updateSchema: updateContactDetailSchema } =
     require('../../modules/contactdetail/contactdetail.schemas');
+const { maxOf } = require('../../utils/fieldLimits');
 
   describe('create schema — positive cases', () => {
     it('fails when required LastName is missing', () => {
@@ -144,8 +145,42 @@ describe('contactdetail — field validation', () => {
       };
       expect(createContactDetailSchema.validate(data).error).toBeUndefined();
     });
-    it('accepts FirstName at exactly 100 characters', () => {
-      expect(createContactDetailSchema.validate({ FirstName: 'x'.repeat(100), LastName: 'Doe' }).error).toBeUndefined();
+    // The COLUMN's width. This asserted 100 for a VARCHAR(50) — see the same note
+    // on branchdetail.BranchName. Read from utils/fieldLimits so it cannot drift.
+    it('accepts FirstName at exactly the column width', () => {
+      const max = maxOf('contactdetail', 'FirstName');
+      expect(createContactDetailSchema.validate({ FirstName: 'x'.repeat(max), LastName: 'Doe' }).error).toBeUndefined();
+    });
+    it('refuses FirstName one character over the column width', () => {
+      const max = maxOf('contactdetail', 'FirstName');
+      expect(createContactDetailSchema.validate({ FirstName: 'x'.repeat(max + 1), LastName: 'Doe' }).error).toBeDefined();
+    });
+
+    // The wizard has offered an Email box since it was written. There was no
+    // column and prepareInsertParams never mapped one, so Joi's .unknown(true) let
+    // the value through validation and it was dropped on the floor. Column added
+    // by migration 001.
+    it('accepts an email address', () => {
+      expect(createContactDetailSchema.validate({
+        FirstName: 'Jane', LastName: 'Doe', Email: 'jane@example.com',
+      }).error).toBeUndefined();
+    });
+    it('accepts a blank email as "not given"', () => {
+      expect(createContactDetailSchema.validate({
+        FirstName: 'Jane', LastName: 'Doe', Email: '',
+      }).error).toBeUndefined();
+    });
+    it('refuses something that is not an email address', () => {
+      expect(createContactDetailSchema.validate({
+        FirstName: 'Jane', LastName: 'Doe', Email: 'not-an-email',
+      }).error).toBeDefined();
+    });
+    // A valid address on a domain Joi's TLD list does not know is still valid, and
+    // refusing it would be wrong in a way the user cannot fix.
+    it('accepts an address on an unusual TLD', () => {
+      expect(createContactDetailSchema.validate({
+        FirstName: 'Jane', LastName: 'Doe', Email: 'owner@restaurant.bengaluru',
+      }).error).toBeUndefined();
     });
     it('accepts null for optional string fields', () => {
       expect(createContactDetailSchema.validate({ FirstName: 'Jane', LastName: 'Doe', MobileNo: null }).error).toBeUndefined();

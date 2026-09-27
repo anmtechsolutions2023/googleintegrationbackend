@@ -256,6 +256,12 @@ const importItems = async (rows, options, tenantId, userPhone) => {
             CategoryId: categoryId,
             UOMId: uomId,
             CostInfoId: cost.id,
+            HSNCode: row.hsn ?? existing.HSNCode,
+            SACCode: row.sac ?? existing.SACCode,
+            // A SAC means this is a service. Only asserted when the row actually
+            // says so — a re-import of a file with neither column must not
+            // reclassify goods somebody set deliberately.
+            SupplyType: row.sac ? 'SERVICE' : (row.hsn ? 'GOODS' : existing.SupplyType),
             Active: true,
           }, tenantId, userPhone);
           return { status: OUTCOME.UPDATED, itemId: existing.Id };
@@ -268,6 +274,11 @@ const importItems = async (rows, options, tenantId, userPhone) => {
           CategoryId: categoryId,
           UOMId: uomId,
           CostInfoId: cost.id,
+          HSNCode: row.hsn || null,
+          SACCode: row.sac || null,
+          // Falls back to the service's own default ('GOODS') when neither code is
+          // given, which is what every import did before these columns existed.
+          SupplyType: row.sac ? 'SERVICE' : 'GOODS',
           Active: true,
         }, tenantId, userPhone);
 

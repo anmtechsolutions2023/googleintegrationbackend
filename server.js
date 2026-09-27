@@ -13,7 +13,7 @@ const MESSAGES = require('./src/config/messages');
 const { PORT } = require('./src/config/envConfig');
 const config = require('./src/config/config');
 const { registerRoutes } = require('./src/config/routes');
-const { assertSchemaIsCurrent } = require('./src/config/schemaCheck');
+const { assertSchemaIsCurrent, assertLimitsMatchSchema } = require('./src/config/schemaCheck');
 const whatsappHealth = require('./src/modules/whatsapp/whatsapp.health');
 
 const app = express();
@@ -44,7 +44,17 @@ app.use(cors({ maxAge: config.CORS.PREFLIGHT_MAX_AGE_S }));
 //
 // Each webhook router therefore does its own parsing, and is skipped here.
 const RAW_BODY_PREFIXES = ['/api/webhooks/', '/api/pos/portal-webhooks'];
-const jsonParser = express.json();
+// THE LIMIT IS NOT DECORATION. express.json() defaults to 100kb, and
+// config.SERVER.JSON_LIMIT existed for a long time without ever being passed to
+// it — nothing sent a body big enough to notice. A branch logo does: it arrives as
+// a base64 data URI, and anything past the default came back 413 Payload Too Large
+// from the parser, before a single line of the media module ran.
+//
+// The real ceiling for an upload is MEDIA.MAX_BYTES (512KB decoded), enforced in
+// posmedia.service with a message naming the size. This is only the outer guard
+// that stops a huge body being buffered at all, and it must sit ABOVE that or the
+// parser refuses first and the user gets a bare 413 with nothing to act on.
+const jsonParser = express.json({ limit: config.SERVER.JSON_LIMIT });
 app.use((req, res, next) => {
   if (RAW_BODY_PREFIXES.some((prefix) => req.path.startsWith(prefix))) return next();
   return jsonParser(req, res, next);
@@ -79,4 +89,8 @@ app.listen(PORT, () => {
   // Deliberately after listen and deliberately not awaited: this reports a
   // stale database, it does not gate the service on one.
   assertSchemaIsCurrent();
+  // Same discipline: reports where utils/fieldLimits.js has drifted from the
+  // real column widths it mirrors, rather than letting the drift surface as a
+  // truncated branch name on a printed bill.
+  assertLimitsMatchSchema();
 });

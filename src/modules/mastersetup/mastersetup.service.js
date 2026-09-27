@@ -32,6 +32,8 @@ const category = require('../category/category.service');
 const uom = require('../uom/uom.service');
 const itemDetail = require('../itemdetail/itemdetail.service');
 const { provisionPosMasters } = require('./posMasters.provision');
+const posMedia = require('../posmedia/posmedia.service');
+const { v4: uuidv4 } = require('uuid');
 
 /**
  * Create the full master-data tree atomically.
@@ -58,6 +60,22 @@ const bootstrap = async (payload, tenantId, userPhone) => {
       MESSAGES.HTTP_STATUS.CONFLICT
     );
   }
+
+  // ── Images are checked BEFORE the transaction opens ──────────────────────
+  // Deliberate. A logo that is too large is the user's easiest mistake to make
+  // and the cheapest to report, and validating it after the transaction had
+  // started would turn "that picture is 900KB" into a rolled-back signup with
+  // "Nothing was saved." on the screen. Here it is a 400 with nothing attempted.
+  //
+  // The bytes are re-measured from what actually arrived — the client's downscale
+  // is a courtesy to the network, not a guarantee. See posmedia.service.
+  const media = payload.branch.media || {};
+  const validatedMedia = Object.entries(media)
+    .filter(([, dataUri]) => !!dataUri)
+    .map(([kind, dataUri]) => {
+      posMedia.assertKind(kind);
+      return { kind, image: posMedia.validateImage(dataUri) };
+    });
 
   const ids = await withTransaction(async (conn) => {
     const created = {};
@@ -131,6 +149,42 @@ const bootstrap = async (payload, tenantId, userPhone) => {
       transactionTypeConfig: ttc.id,
       branch: branch.id,
     });
+
+    // 2c′) The GST answer, IF ONE WAS GIVEN ---------------------------------
+    //
+    // An absent taxSetting writes NO ROW, and that is the whole point. The table
+    // treats "no row" as charging — read the note on pos_tax_setting: the default
+    // was chosen that way so a tenant with an empty GSTIN field did not silently
+    // stop charging GST. Writing GstCharging = 1 on every signup would look
+    // identical today and diverge the moment that default is reconsidered.
+    //
+    // History is written alongside, on this connection, because the GST report's
+    // period strip is read from it and the two must not be able to disagree. The
+    // 'from' state is the default the tenant was on a moment ago: charging.
+    if (payload.taxSetting) {
+      const charging = !!payload.taxSetting.gstCharging;
+      const offReason = charging ? null : payload.taxSetting.offReason;
+      await conn.execute(QUERIES.TAX_SETTING.UPSERT, [
+        tenantId, charging ? 1 : 0, offReason, userPhone, userPhone,
+      ]);
+      await conn.execute(QUERIES.TAX_SETTING.INSERT_HISTORY, [
+        uuidv4(), tenantId, 1, charging ? 1 : 0, offReason, userPhone,
+      ]);
+      created.taxSetting = charging ? 'charging' : offReason;
+    }
+
+    // 2c″) Branding, IF ANY WAS UPLOADED ------------------------------------
+    // On this connection on purpose: an image that survived a rolled-back signup
+    // would belong to a branch that does not exist.
+    for (const { kind, image } of validatedMedia) {
+      // eslint-disable-next-line no-await-in-loop
+      await conn.execute(QUERIES.POS_BRANCH_MEDIA.UPSERT, [
+        uuidv4(), tenantId, branch.id, kind,
+        image.mimeType, image.width, image.height, image.byteSize, image.bytes,
+        userPhone, userPhone,
+      ]);
+      created[kind] = 'stored';
+    }
 
     // 2e) Standard POS + ledger masters (payment modes, statuses, 'POS Sale'
     // type, permitted transitions, accounts, received types). Seeded here so a

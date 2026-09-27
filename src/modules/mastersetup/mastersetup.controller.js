@@ -5,6 +5,7 @@ const { createdResponse, successResponse } = require('../../utils/responseHelper
 const { validateBody } = require('../../middleware/validation');
 const { bootstrapSchema } = require('./mastersetup.schemas');
 const { reissueTokenWithSetupComplete } = require('../auth/auth.service');
+const { flatLimits } = require('../../utils/fieldLimits');
 
 const bootstrap = asyncHandler(async (req, res) => {
   const { tid: tenantId, phone } = req.user;
@@ -27,7 +28,14 @@ const getStatus = asyncHandler(async (req, res) => {
   successResponse(res, 'Tenancy setup status retrieved', status);
 });
 
+// Flat 'table.column' → max length. Static, so no service layer and no database
+// read: it is the same object utils/fieldLimits.js builds every Joi rule from.
+const getFieldLimits = asyncHandler(async (req, res) => {
+  successResponse(res, 'Field limits retrieved', flatLimits());
+});
+
 module.exports = {
   bootstrap: [validateBody(bootstrapSchema), bootstrap],
   getStatus: [getStatus],
+  getFieldLimits: [getFieldLimits],
 };

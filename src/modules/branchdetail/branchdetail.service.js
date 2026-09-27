@@ -19,6 +19,10 @@ class BranchDetailService extends BaseCRUDService {
       data.TINNo || null,
       data.GSTIN || null,
       data.PAN || null,
+      // The FSSAI licence. Column added by migration 001; before it, a food
+      // business had nowhere to record the number it is legally required to
+      // display, and the receipt field that printed it could never be non-empty.
+      data.FSSAI || null,
       data.CF1 || null,
       data.CF2 || null,
       data.CF3 || null,
@@ -45,6 +49,7 @@ class BranchDetailService extends BaseCRUDService {
       data.TINNo !== undefined ? data.TINNo : existing.TINNo,
       data.GSTIN !== undefined ? data.GSTIN : existing.GSTIN,
       data.PAN !== undefined ? data.PAN : existing.PAN,
+      data.FSSAI !== undefined ? data.FSSAI : existing.FSSAI,
       data.CF1 !== undefined ? data.CF1 : existing.CF1,
       data.CF2 !== undefined ? data.CF2 : existing.CF2,
       data.CF3 !== undefined ? data.CF3 : existing.CF3,

@@ -34,6 +34,18 @@ const itemRowSchema = Joi.object({
   taxIncluded: Joi.boolean().default(true),
   code: trimmed(50).allow('', null),
   description: trimmed(1000).allow('', null),
+  // The GST classification codes. Neither the wizard nor this import collected
+  // them, and the GST pack needs them: gstexport accumulates `missingCodes` and
+  // builds its HSN sheets from them, so every tenant onboarded so far produces a
+  // CA pack with empty HSN columns until somebody edits each item by hand.
+  //
+  // Optional, because an existing caller's file has neither column and must keep
+  // working. A row that gives a SAC is a SERVICE — restaurant supply is a service
+  // and a sealed bottle sold beside it is goods, taxed differently on one bill —
+  // so SupplyType follows from which code was given rather than being a third
+  // column to get wrong.
+  hsn: trimmed(50).allow('', null),
+  sac: trimmed(50).allow('', null),
   // Only the publish pass uses this; carried here so one file drives both.
   foodType: trimmed(50).allow('', null),
   // The rates that make a tax group mean something. Stated rather than inferred

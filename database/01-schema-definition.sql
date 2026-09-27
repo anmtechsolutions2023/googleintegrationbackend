@@ -779,6 +779,11 @@ CREATE TABLE contactdetail (
     Id                    VARCHAR(50)  NOT NULL,
     FirstName             VARCHAR(50)  NOT NULL,
     LastName              VARCHAR(50)  NOT NULL,
+    -- The onboarding wizard has always offered an Email box. There was no column
+    -- and prepareInsertParams never mapped one, so Joi's .unknown(true) let the
+    -- value through validation and it was dropped. The box was real; the storage
+    -- was not. (migration 001)
+    Email                 VARCHAR(100) NULL,
     MobileNo              VARCHAR(50),
     AltMobileNo           VARCHAR(50),
     Landline1             VARCHAR(50),
@@ -852,6 +857,11 @@ CREATE TABLE branchdetail (
     TINNo                    VARCHAR(50),
     GSTIN                    VARCHAR(50),
     PAN                      VARCHAR(50),
+    -- The FSSAI licence number. Beside the GSTIN because it is the same kind of
+    -- fact: a registration issued to these premises, printed on the bill when the
+    -- branch switches it on. 14 digits; 20 leaves room for pasted formatting.
+    -- (migration 001)
+    FSSAI                    VARCHAR(20)  NULL,
     CF1                      VARCHAR(50),
     CF2                      VARCHAR(50),
     CF3                      VARCHAR(50),
@@ -1361,6 +1371,8 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS pos_portal_event;
 DROP TABLE IF EXISTS pos_portal_credential;
+DROP TABLE IF EXISTS pos_portal_category;
+DROP TABLE IF EXISTS pos_portal_listing_variant;
 DROP TABLE IF EXISTS pos_portal_listing;
 DROP TABLE IF EXISTS pos_portal_branch;
 DROP TABLE IF EXISTS pos_portal;
@@ -1368,9 +1380,18 @@ DROP TABLE IF EXISTS pos_bill_order;
 DROP TABLE IF EXISTS pos_bill;
 DROP TABLE IF EXISTS pos_kot;
 DROP TABLE IF EXISTS pos_order;
+DROP TABLE IF EXISTS pos_item_nutrition;
+DROP TABLE IF EXISTS pos_item_meta_tag;
+DROP TABLE IF EXISTS pos_item_meta_addon_group;
 DROP TABLE IF EXISTS pos_item_meta_channel;
 DROP TABLE IF EXISTS pos_item_meta_variant;
 DROP TABLE IF EXISTS pos_item_meta;
+DROP TABLE IF EXISTS pos_meat_type;
+DROP TABLE IF EXISTS pos_addon;
+DROP TABLE IF EXISTS pos_addon_group;
+DROP TABLE IF EXISTS pos_category_tag;
+DROP TABLE IF EXISTS pos_category_schedule;
+DROP TABLE IF EXISTS pos_menu_tag;
 DROP TABLE IF EXISTS pos_channel;
 DROP TABLE IF EXISTS pos_variant;
 DROP TABLE IF EXISTS pos_food_type;
@@ -1378,6 +1399,7 @@ DROP TABLE IF EXISTS pos_table;
 DROP TABLE IF EXISTS pos_floor;
 DROP TABLE IF EXISTS pos_customer;
 DROP TABLE IF EXISTS pos_online_order;
+DROP TABLE IF EXISTS pos_rejection_reason;
 DROP TABLE IF EXISTS pos_feedback;
 DROP TABLE IF EXISTS pos_token;
 DROP TABLE IF EXISTS pos_token_counter;
@@ -1385,6 +1407,7 @@ DROP TABLE IF EXISTS pos_gst_filing;
 DROP TABLE IF EXISTS pos_tax_mode_history;
 DROP TABLE IF EXISTS pos_tax_setting;
 DROP TABLE IF EXISTS pos_setting;
+DROP TABLE IF EXISTS pos_branch_media;
 DROP TABLE IF EXISTS pos_expense;
 DROP TABLE IF EXISTS pos_loyalty_ledger;
 
@@ -2472,6 +2495,47 @@ CREATE TABLE pos_setting (
     UpdatedBy       VARCHAR(50),
     PRIMARY KEY (Id),
     UNIQUE (TenantId, BranchDetailId, SettingKey)
+);
+
+-- 4.14a pos_branch_media — a branch's logo and its payment QR.
+--
+-- BYTES IN THE DATABASE, NOT A PATH. There is no static file server in this
+-- application and no object store configured, so a stored path would point at a
+-- file an ephemeral host may already have thrown away — and a receipt whose logo
+-- 404s renders a broken image on every bill. Two small images per branch is not
+-- what a blob column is bad at.
+--
+-- NOT pos_setting: SettingValue is VARCHAR(1000) and even a 384px monochrome PNG
+-- is several kilobytes base64.
+--
+-- Kind is a VARCHAR rather than an ENUM so a third kind (a signature image, say)
+-- needs no migration; the permitted values live in one constant in code.
+--
+-- UNIQUE (TenantId, BranchDetailId, Kind) is what makes an upload an upsert. A
+-- branch has ONE logo, and "replace" must not leave the old row behind to be
+-- picked by whichever the query happened to return first.
+CREATE TABLE pos_branch_media (
+    Id              VARCHAR(50)   NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    BranchDetailId  VARCHAR(50)   NOT NULL,
+    Kind            VARCHAR(20)   NOT NULL COMMENT 'logo | paymentQr',
+    MimeType        VARCHAR(50)   NOT NULL,
+    -- Parsed from the image header ON THE SERVER, never taken from the client.
+    -- The renderer needs them to reserve space without decoding the image first.
+    Width           INT           NULL,
+    Height          INT           NULL,
+    ByteSize        INT           NOT NULL,
+    Bytes           LONGBLOB      NOT NULL,
+    Active          TINYINT(1)    NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE KEY uk_branchmedia (TenantId, BranchDetailId, Kind),
+    -- No FK onto branchdetail, matching user_tenants.branch_detail_id: retiring a
+    -- branch must not be blocked by the picture that used to be on its bills.
+    INDEX idx_branchmedia_branch (TenantId, BranchDetailId)
 );
 
 -- 4.14b pos_tax_setting — whether this tenant charges GST at all.

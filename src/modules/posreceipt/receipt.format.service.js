@@ -27,6 +27,7 @@ const MESSAGES = require('../../config/messages');
 const catalogue = require('./receipt.catalogue');
 const taxSettingRepository = require('../taxsetting/taxsetting.repository');
 const { taxModeOf } = require('../taxsetting/taxsetting.service');
+const posMedia = require('../posmedia/posmedia.service');
 
 const {
   DOCUMENTS, TAX_MODE, TAX_MODE_KEY,
@@ -34,9 +35,6 @@ const {
 } = catalogue;
 
 const KEY_PREFIX = 'receipt.';
-// The licence number itself, as opposed to whether it prints. Not a
-// branchdetail column, so it lives here beside the format that displays it.
-const FSSAI_KEY = 'receipt.shop.fssai';
 
 /**
  * The branch row every read here needs: its name, its address and its GSTIN.
@@ -48,11 +46,31 @@ const FSSAI_KEY = 'receipt.shop.fssai';
  */
 const readBranch = async (conn, branchId, tenantId) => {
   const [rows] = await conn.execute(
-    `SELECT b.BranchName, b.GSTIN,
-            CONCAT_WS(', ', NULLIF(a.AddressLine1, ''), NULLIF(a.City, ''),
-                            NULLIF(a.State, ''), NULLIF(a.Pincode, '')) AS Address
+    // FOUR records, ONE query.
+    //
+    // The masthead draws on the branch, its address, its contact and the
+    // organisation above it. A renderer that had to make four calls is a renderer
+    // that can print a bill with no shop name on it when the third one fails —
+    // the same reasoning that keeps shop{} inside the format response rather than
+    // leaving every screen to fetch it.
+    //
+    // AddressLine2 and Landmark join the printed address. They are placed after
+    // line 1 and before the city, which is how an address is read aloud; CONCAT_WS
+    // drops the NULLs, so a branch that filled in neither prints exactly what it
+    // used to.
+    `SELECT b.BranchName, b.GSTIN, b.PAN, b.TINNo, b.FSSAI,
+            CONCAT_WS(', ', NULLIF(a.AddressLine1, ''), NULLIF(a.AddressLine2, ''),
+                            NULLIF(a.Landmark, ''), NULLIF(a.City, ''),
+                            NULLIF(a.State, ''), NULLIF(a.Pincode, '')) AS Address,
+            c.FirstName, c.LastName, c.Email,
+            -- The mobile is the number a customer would ring; the landline is the
+            -- fallback, not a second line on the paper.
+            COALESCE(NULLIF(c.MobileNo, ''), NULLIF(c.Landline1, '')) AS Phone,
+            o.Name AS LegalName
        FROM branchdetail b
-       LEFT JOIN addressdetail a ON a.Id = b.AddressDetailId AND a.TenantId = b.TenantId
+       LEFT JOIN addressdetail a      ON a.Id = b.AddressDetailId      AND a.TenantId = b.TenantId
+       LEFT JOIN contactdetail c      ON c.Id = b.ContactDetailId      AND c.TenantId = b.TenantId
+       LEFT JOIN organizationdetail o ON o.Id = b.OrganizationDetailId AND o.TenantId = b.TenantId
       WHERE b.Id = ? AND b.TenantId = ? LIMIT 1`,
     [branchId, tenantId],
   );
@@ -81,22 +99,62 @@ const resolveTaxMode = (branch, stored, setting = null) => {
 };
 
 /**
- * The masthead — name, address, GSTIN, FSSAI.
+ * The masthead — every VALUE a document can print about the business.
  *
  * Returned WITH the format rather than fetched separately by every screen that
  * prints: the branch row is already open here for the tax mode, and a renderer
  * that has to make a second call is a renderer that can print a bill with no
  * shop name on it when that call fails.
  *
- * FSSAI is a branch setting because it is not a branchdetail column — every
- * other field here is.
+ * THE SEAM: this returns the values, the catalogue decides the visibility. A
+ * branch may hold an FSSAI number and print no FSSAI line, and both are correct.
+ * Nothing here knows or cares whether any of it appears.
+ *
+ * @param {Object} branch - A readBranch() row.
+ * @param {Set<string>} mediaKinds - Which images this branch holds.
+ * @param {string} branchId - For the media URLs.
+ * @returns {Object}
  */
-const shopOf = (branch, stored) => ({
-  name: branch.BranchName || '',
-  address: branch.Address || '',
-  gstin: String(branch.GSTIN || '').trim(),
-  fssai: stored[FSSAI_KEY] || '',
-});
+const shopOf = (branch, mediaKinds = new Set(), branchId = '') => {
+  const fullName = [branch.FirstName, branch.LastName]
+    .map((v) => String(v || '').trim()).filter(Boolean).join(' ');
+
+  // A PATH, not the bytes — and not something an <img> can load either.
+  //
+  // Inlining two images here would take this response from about two kilobytes to
+  // several hundred, and the till re-fetches it on every branch change and on every
+  // focus. So this says WHICH images the branch holds and when each last changed,
+  // and the client fetches the bytes once through the authenticated API client.
+  //
+  // It cannot be used as a src directly: the endpoint requires a bearer token and
+  // an <img> sends no Authorization header, it is a different origin from the app,
+  // and it answers a JSON envelope rather than image bytes. A src pointed here
+  // fails three ways over. The client treats it purely as the signal of which kinds
+  // exist — see useBranchMedia.
+  //
+  // `v` is the version. Without it a REPLACED image keeps an identical path, so
+  // nothing downstream can tell that the bytes behind it changed.
+  const mediaPath = (kind) => (mediaKinds.has(kind)
+    ? `/api/pos/media/${kind}?branchId=${encodeURIComponent(branchId)}&v=${mediaKinds.get(kind)}`
+    : '');
+
+  return {
+    name: branch.BranchName || '',
+    legalName: String(branch.LegalName || '').trim(),
+    address: branch.Address || '',
+    phone: String(branch.Phone || '').trim(),
+    email: String(branch.Email || '').trim(),
+    contactName: fullName,
+    gstin: String(branch.GSTIN || '').trim(),
+    // A real column since migration 001. It used to be read from a pos_setting key
+    // that nothing in the application could write, so it was always ''.
+    fssai: String(branch.FSSAI || '').trim(),
+    pan: String(branch.PAN || '').trim(),
+    tin: String(branch.TINNo || '').trim(),
+    logoUrl: mediaPath('logo'),
+    paymentQrUrl: mediaPath('paymentQr'),
+  };
+};
 
 /** Every `receipt.*` override a branch holds, as a flat map. */
 const readOverrides = async (conn, branchId, tenantId) => {
@@ -142,13 +200,15 @@ const resolveAll = (branchId, tenantId) =>
     const stored = await readOverrides(conn, branchId, tenantId);
     const branch = await readBranch(conn, branchId, tenantId);
     const setting = await taxSettingRepository.getTx(conn, tenantId);
+    // Which images exist, not the images themselves — see the note in shopOf.
+    const mediaKinds = await posMedia.kindsOf(branchId, tenantId, conn);
     const taxMode = resolveTaxMode(branch, stored, setting);
     const ctx = { taxMode };
 
     return {
       branchId,
       taxMode,
-      shop: shopOf(branch, stored),
+      shop: shopOf(branch, mediaKinds, branchId),
       documents: Object.fromEntries(
         Object.keys(DOCUMENTS).map((doc) => [doc, applyDoc(doc, stored, ctx)]),
       ),
@@ -177,6 +237,7 @@ const describe = (doc, branchId, tenantId) =>
     const stored = await readOverrides(conn, branchId, tenantId);
     const branch = await readBranch(conn, branchId, tenantId);
     const setting = await taxSettingRepository.getTx(conn, tenantId);
+    const mediaKinds = await posMedia.kindsOf(branchId, tenantId, conn);
     const taxMode = resolveTaxMode(branch, stored, setting);
     const ctx = { taxMode };
     const values = applyDoc(doc, stored, ctx);
@@ -187,7 +248,7 @@ const describe = (doc, branchId, tenantId) =>
       description: definition.description,
       branchId,
       taxMode,
-      shop: shopOf(branch, stored),
+      shop: shopOf(branch, mediaKinds, branchId),
       // Every document type, so the editor can render its tabs from one call.
       documents: Object.entries(DOCUMENTS).map(([key, d]) => ({ key, label: d.label })),
       sections: definition.sections.map((section) => ({

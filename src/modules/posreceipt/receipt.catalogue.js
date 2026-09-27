@@ -113,16 +113,52 @@ const DOCUMENTS = {
     description: 'What the customer walks away with.',
     sections: [
       { key: 'header', label: 'Header', fields: [
-        vis('logo', 'Logo', VISIBILITY.NEVER,
-          'Monochrome, max 384px wide. A thermal printer has one ink.'),
+        // THREE STATES, like every other field whose value depends on the branch
+        // rather than on a preference. A logo is the clearest case of the rule at
+        // the top of this file: "always" is wrong for a shop that has not uploaded
+        // one, "never" is wrong for a shop that has, and IF_PRESENT is what anyone
+        // actually means — print it when there is one.
+        //
+        // Still NEVER by default: a logo costs bytes over Bluetooth before the
+        // paper moves, and Business Profile → Branding promises in as many words
+        // that both images stay off until switched on. A default that printed one
+        // the moment it was uploaded would make that promise false.
+        conditional('logo', 'Logo', VISIBILITY.NEVER,
+          'Printed at the top of the bill. Monochrome, max 384px wide — a thermal printer has one ink. Upload it at Business Profile → Branding.'),
         vis('shopName', 'Shop name', VISIBILITY.ALWAYS,
           'Double width. The one line read across a counter.', { locked: ALWAYS_REQUIRED }),
+        // The organisation's name, as opposed to the outlet's. For years this was
+        // the first thing onboarding asked for and the one thing that never
+        // reached a customer: it labelled the tenancy in the admin directory and
+        // nothing else. A registered business trading under an outlet name needs
+        // both on the paper, so now it can have both.
+        conditional('legalName', 'Legal / group name', VISIBILITY.NEVER,
+          'Your registered company name, under the outlet name. Set at Business Profile → Business.'),
         vis('address', 'Address', VISIBILITY.ALWAYS,
           'From the branch record — never retyped here.'),
+        // IF_PRESENT, not ALWAYS: a branch with no number recorded must not print
+        // a bare "Phone" with nothing after it.
+        conditional('phone', 'Phone', VISIBILITY.NEVER,
+          'The branch mobile, or its landline. Set at Business Profile → Address & Contact.'),
+        conditional('email', 'Email', VISIBILITY.NEVER,
+          'Set at Business Profile → Address & Contact. Costs a line of paper on every bill.'),
+        conditional('contactName', 'Contact person', VISIBILITY.NEVER,
+          'Printed as “Contact: <name>”. The bill already names the cashier; this is who to call about it.'),
         vis('gstin', 'GSTIN', VISIBILITY.ALWAYS,
           'Mandatory on a tax invoice.', { locked: lockGstin }),
-        vis('fssai', 'FSSAI licence', VISIBILITY.ALWAYS,
-          'Display is a licence condition for most food businesses.'),
+        // DEFAULT CHANGED: was ALWAYS.
+        //
+        // It could only ever be ALWAYS safely because the value was unreachable —
+        // there was no way to store an FSSAI number, so `present()` skipped the
+        // line on every bill ever printed. Now that a licence number can exist,
+        // leaving the default at ALWAYS would add a line to every bill of every
+        // tenant on the day this deploys, unasked. A branch turns it on.
+        conditional('fssai', 'FSSAI licence', VISIBILITY.NEVER,
+          'Display is a licence condition for most food businesses. Set the number at Business Profile → Tax & Compliance.'),
+        conditional('pan', 'PAN', VISIBILITY.NEVER,
+          'Rarely wanted on a customer bill. Set at Business Profile → Tax & Compliance.'),
+        conditional('tin', 'TIN', VISIBILITY.NEVER,
+          'Pre-GST registration number. Set at Business Profile → Tax & Compliance.'),
         text('headerLine', 'Extra header line', '',
           'Free text. Blank prints nothing.'),
       ] },
@@ -202,8 +238,17 @@ const DOCUMENTS = {
         vis('compositionNote', 'Composition declaration', VISIBILITY.NEVER,
           'Composition taxable person, not eligible to collect tax on supplies.',
           { locked: lockCompositionNote }),
-        vis('upiQr', 'UPI QR code', VISIBILITY.NEVER,
-          'Prints the branch VPA as a scannable block.'),
+        // Repaired. This field has existed since the catalogue was written and
+        // described a VPA the application had nowhere to store and no code to
+        // render — switching it on did nothing, silently, and the settings screen
+        // reported success. It now prints the QR image uploaded at Business
+        // Profile → Branding.
+        //
+        // A STATIC code. A QR printed in the footer is composed before the total
+        // is known, so it says "pay this merchant" and the customer types the
+        // amount — which is what a bank- or PSP-issued restaurant QR is.
+        conditional('upiQr', 'Payment QR code', VISIBILITY.NEVER,
+          'A static UPI QR from your bank or PSP. Upload it at Business Profile → Branding.'),
         vis('signature', 'Signature line', VISIBILITY.NEVER),
       ] },
 
@@ -225,9 +270,28 @@ const DOCUMENTS = {
     description: 'Money going the other way. Must not look like a bill.',
     sections: [
       { key: 'header', label: 'Header', fields: [
+        conditional('logo', 'Logo', VISIBILITY.NEVER,
+          'Printed at the top of the note. Upload it at Business Profile → Branding.'),
         vis('shopName', 'Shop name', VISIBILITY.ALWAYS, null, { locked: ALWAYS_REQUIRED }),
+        conditional('legalName', 'Legal / group name', VISIBILITY.NEVER,
+          'Set at Business Profile → Business.'),
         vis('address', 'Address', VISIBILITY.ALWAYS),
+        conditional('phone', 'Phone', VISIBILITY.NEVER,
+          'Set at Business Profile → Address & Contact.'),
+        conditional('email', 'Email', VISIBILITY.NEVER,
+          'Set at Business Profile → Address & Contact.'),
+        conditional('contactName', 'Contact person', VISIBILITY.NEVER,
+          'Printed as “Contact: <name>”.'),
         vis('gstin', 'GSTIN', VISIBILITY.ALWAYS, null, { locked: lockGstin }),
+        // A credit note reverses a tax invoice, so it is a tax document and the
+        // licence condition applies to it exactly as it does to the bill. The
+        // field was simply missing here.
+        conditional('fssai', 'FSSAI licence', VISIBILITY.NEVER,
+          'Set the number at Business Profile → Tax & Compliance.'),
+        conditional('pan', 'PAN', VISIBILITY.NEVER,
+          'Set at Business Profile → Tax & Compliance.'),
+        conditional('tin', 'TIN', VISIBILITY.NEVER,
+          'Set at Business Profile → Tax & Compliance.'),
       ] },
       { key: 'identity', label: 'Identity', fields: [
         vis('documentNo', 'Credit note number', VISIBILITY.ALWAYS, null, { locked: ALWAYS_REQUIRED }),

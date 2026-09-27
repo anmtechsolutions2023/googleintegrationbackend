@@ -128,6 +128,7 @@ const VALID_UUID_BD = 'a1b2c3d4-1111-1111-1111-111111111111';
 describe('branchdetail — field validation', () => {
   const { createSchema: createBranchSchema, updateSchema: updateBranchSchema } =
     require('../../modules/branchdetail/branchdetail.schemas');
+const { maxOf } = require('../../utils/fieldLimits');
 
   describe('create schema — positive cases', () => {
     it('passes with BranchName', () => {
@@ -149,8 +150,28 @@ describe('branchdetail — field validation', () => {
     it('passes with CF fields as null', () => {
       expect(createBranchSchema.validate({ BranchName: 'HQ', CF1: null, CF2: null }).error).toBeUndefined();
     });
-    it('accepts BranchName at exactly 100 characters', () => {
-      expect(createBranchSchema.validate({ BranchName: 'x'.repeat(100) }).error).toBeUndefined();
+    // The COLUMN's width, read from the one place that records it.
+    //
+    // This test used to assert that 100 characters were accepted. branchdetail
+    // .BranchName is VARCHAR(50), so those 100 characters were a 500 and a
+    // rolled-back write on a strict server, or a silent truncation on a lax one —
+    // and the truncated name then printed on every bill. The limit is taken from
+    // utils/fieldLimits rather than written here, so this cannot drift from the
+    // schema the way the old literal did.
+    it('accepts BranchName at exactly the column width', () => {
+      const max = maxOf('branchdetail', 'BranchName');
+      expect(createBranchSchema.validate({ BranchName: 'x'.repeat(max) }).error).toBeUndefined();
+    });
+    it('refuses BranchName one character over the column width', () => {
+      const max = maxOf('branchdetail', 'BranchName');
+      expect(createBranchSchema.validate({ BranchName: 'x'.repeat(max + 1) }).error).toBeDefined();
+    });
+    it('accepts an FSSAI licence number, and refuses one too long for the column', () => {
+      const max = maxOf('branchdetail', 'FSSAI');
+      expect(createBranchSchema.validate({ BranchName: 'HQ', FSSAI: '11223344556677' }).error).toBeUndefined();
+      // Blank clears it; the column is nullable and nothing downstream requires it.
+      expect(createBranchSchema.validate({ BranchName: 'HQ', FSSAI: '' }).error).toBeUndefined();
+      expect(createBranchSchema.validate({ BranchName: 'HQ', FSSAI: 'x'.repeat(max + 1) }).error).toBeDefined();
     });
     it('defaults Active to true when omitted', () => {
       const { value } = createBranchSchema.validate({ BranchName: 'HQ' });

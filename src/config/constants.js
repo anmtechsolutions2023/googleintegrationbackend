@@ -477,9 +477,9 @@ module.exports = {
         LEFT JOIN contactaddresstype cat ON cd.ContactAddressTypeId = cat.Id AND cat.TenantId = cd.TenantId
         WHERE cd.Id = ? AND cd.TenantId = ?`,
       INSERT:
-        'INSERT INTO contactdetail (Id, TenantId, FirstName, LastName, MobileNo, AltMobileNo, Landline1, LandLine2, Ext1, Ext2, ContactAddressTypeId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO contactdetail (Id, TenantId, FirstName, LastName, Email, MobileNo, AltMobileNo, Landline1, LandLine2, Ext1, Ext2, ContactAddressTypeId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE contactdetail SET FirstName = ?, LastName = ?, MobileNo = ?, AltMobileNo = ?, Landline1 = ?, LandLine2 = ?, Ext1 = ?, Ext2 = ?, ContactAddressTypeId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE contactdetail SET FirstName = ?, LastName = ?, Email = ?, MobileNo = ?, AltMobileNo = ?, Landline1 = ?, LandLine2 = ?, Ext1 = ?, Ext2 = ?, ContactAddressTypeId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM contactdetail WHERE Id = ? AND TenantId = ?',
     },
 
@@ -570,9 +570,9 @@ module.exports = {
         LEFT JOIN addressdetail ad ON bd.AddressDetailId = ad.Id AND ad.TenantId = bd.TenantId
         WHERE bd.Id = ? AND bd.TenantId = ?`,
       INSERT:
-        'INSERT INTO branchdetail (Id, TenantId, OrganizationDetailId, ContactDetailId, AddressDetailId, TransactionTypeConfigId, BranchName, TINNo, GSTIN, PAN, CF1, CF2, CF3, CF4, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO branchdetail (Id, TenantId, OrganizationDetailId, ContactDetailId, AddressDetailId, TransactionTypeConfigId, BranchName, TINNo, GSTIN, PAN, FSSAI, CF1, CF2, CF3, CF4, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE branchdetail SET OrganizationDetailId = ?, ContactDetailId = ?, AddressDetailId = ?, TransactionTypeConfigId = ?, BranchName = ?, TINNo = ?, GSTIN = ?, PAN = ?, CF1 = ?, CF2 = ?, CF3 = ?, CF4 = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE branchdetail SET OrganizationDetailId = ?, ContactDetailId = ?, AddressDetailId = ?, TransactionTypeConfigId = ?, BranchName = ?, TINNo = ?, GSTIN = ?, PAN = ?, FSSAI = ?, CF1 = ?, CF2 = ?, CF3 = ?, CF4 = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM branchdetail WHERE Id = ? AND TenantId = ?',
     },
 
@@ -2165,6 +2165,46 @@ module.exports = {
         'SELECT Period, FiledOn, RecordedBy, RecordedOn FROM pos_gst_filing WHERE TenantId = ? AND BranchId = ? AND Period = ? LIMIT 1',
     },
 
+    // A branch's logo and payment QR. Bytes in the database — see the note on the
+    // table; there is no static file server and no object store here.
+    POS_BRANCH_MEDIA: {
+      // Metadata only. The bytes of two images are the largest thing this module
+      // moves, and the listing exists to answer "is there a logo" — a question
+      // that must not cost half a megabyte to ask.
+      SELECT_META_BY_BRANCH: `
+        SELECT Id, Kind, MimeType, Width, Height, ByteSize, UpdatedOn, UpdatedBy, CreatedOn, CreatedBy
+          FROM pos_branch_media
+         WHERE TenantId = ? AND BranchDetailId = ? AND Active = 1`,
+      SELECT_ONE: `
+        SELECT Id, Kind, MimeType, Width, Height, ByteSize, Bytes, UpdatedOn, UpdatedBy, CreatedOn, CreatedBy
+          FROM pos_branch_media
+         WHERE TenantId = ? AND BranchDetailId = ? AND Kind = ? AND Active = 1
+         LIMIT 1`,
+      // UNIQUE (TenantId, BranchDetailId, Kind) is what makes this an upsert. A
+      // branch has ONE logo; replacing it must not leave the old row behind for
+      // whichever the next query happens to return first.
+      UPSERT: `
+        INSERT INTO pos_branch_media
+          (Id, TenantId, BranchDetailId, Kind, MimeType, Width, Height, ByteSize, Bytes,
+           Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)
+        ON DUPLICATE KEY UPDATE
+          MimeType = VALUES(MimeType), Width = VALUES(Width), Height = VALUES(Height),
+          ByteSize = VALUES(ByteSize), Bytes = VALUES(Bytes), Active = 1,
+          UpdatedOn = NOW(), UpdatedBy = VALUES(UpdatedBy)`,
+      // A hard delete. A soft one would keep several kilobytes of blob per
+      // removed image forever, and "remove my logo" has no undo worth the row.
+      DELETE_ONE:
+        'DELETE FROM pos_branch_media WHERE TenantId = ? AND BranchDetailId = ? AND Kind = ?',
+      // Which kinds exist, for the receipt resolver. It needs to know whether to
+      // emit a URL, and must not read the bytes to find out.
+      // Which kinds exist AND when each last changed. The timestamp is what makes a
+      // REPLACED image reach the paper: the client keys its cached copy on the URL,
+      // and without a version a new logo at the same address is never re-fetched.
+      SELECT_KINDS:
+        'SELECT Kind, UpdatedOn, CreatedOn FROM pos_branch_media WHERE TenantId = ? AND BranchDetailId = ? AND Active = 1',
+    },
+
     POS_SETTING: {
       SELECT_ALL: 'SELECT * FROM pos_setting WHERE TenantId = ? ORDER BY BranchDetailId, SettingKey',
       SELECT_BY_BRANCH: 'SELECT SettingKey, SettingValue FROM pos_setting WHERE TenantId = ? AND BranchDetailId = ?',
@@ -2767,6 +2807,10 @@ module.exports = {
         'DELETE FROM pos_portal_listing_variant WHERE TenantId = ?',
         'DELETE FROM pos_portal_listing WHERE TenantId = ?',
         'DELETE FROM pos_setting WHERE TenantId = ?',
+        // The branch's logo and payment QR. Wave 1 and no foreign key, so its place
+        // here is free — but it MUST be swept: these are blobs, so a tenancy left
+        // behind is kilobytes per branch that nothing will ever read again.
+        'DELETE FROM pos_branch_media WHERE TenantId = ?',
         // The GST switch, its history and recorded filings. No foreign keys in or
         // out, so their place in the sweep is free.
         'DELETE FROM pos_tax_setting WHERE TenantId = ?',
@@ -4286,6 +4330,27 @@ module.exports = {
   // exemption.
   TAX_GROUP_DEFAULTS: {
     EXEMPT_NAME: 'Exempt (0%)',
+  },
+
+  // ── Branch media: the logo and payment QR a bill can carry ─────────────────
+  // Limits are deliberately small. A thermal printer has ONE ink and 384 dots
+  // across an 80mm roll, so detail beyond that is bytes spent on nothing — and
+  // these images travel to a till over Bluetooth LE, where a megabyte is a
+  // visible pause before the paper moves.
+  MEDIA: {
+    KINDS: ['logo', 'paymentQr'],
+    // 512KB decoded. Generous for a 384px monochrome logo; mean enough that a
+    // phone photo pasted in by mistake is refused with a message rather than
+    // stored and printed as a grey smear.
+    MAX_BYTES: 512 * 1024,
+    // The client downscales to PRINT_WIDTH_PX before uploading. These are the
+    // outer bounds the server enforces regardless, so a caller that skips the
+    // downscale is refused rather than obeyed.
+    MAX_WIDTH_PX: 1024,
+    MAX_HEIGHT_PX: 1024,
+    // 384 dots is the full width of an 80mm head; 58mm paper is 320. The client
+    // targets the larger and the renderer scales down for narrow paper.
+    PRINT_WIDTH_PX: 384,
   },
 
   IMPORT: {

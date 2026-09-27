@@ -35,6 +35,8 @@ const branchusergroupmapperRoutes = require('../modules/branchusergroupmapper/br
 const batchdetailRoutes = require('../modules/batchdetail/batchdetail.routes');
 const itemdetailRoutes = require('../modules/itemdetail/itemdetail.routes');
 const mastersetupRoutes = require('../modules/mastersetup/mastersetup.routes');
+const posmediaRoutes = require('../modules/posmedia/posmedia.routes');
+const businessprofileRoutes = require('../modules/businessprofile/businessprofile.routes');
 const importRoutes = require('../modules/import/import.routes');
 const pricingRoutes = require('../modules/pricing/pricing.routes');
 const ledgerRoutes = require('../modules/ledger/ledger.routes');
@@ -151,6 +153,10 @@ const registerRoutes = (app) => {
 
   // Master-data setup — first-time transactional bootstrap (org + branch + item)
   app.use('/api/master-data', mastersetupRoutes);
+  // Everything onboarding collected, in one read and one atomic write. A facade
+  // over four modules that each have their own CRUD: the point is that a business
+  // profile cannot be left half-saved, and that a tenant has ONE place to look.
+  app.use('/api/business-profile', businessprofileRoutes);
   // Bulk import. Its own prefix because one run writes across master data AND
   // the POS menu, so it belongs to neither — and a new mount cannot be
   // swallowed by a ':id' route in a router that already exists.
@@ -308,6 +314,10 @@ const registerRoutes = (app) => {
   // is — but its own module: the catalogue of printable fields, their legal
   // locks and their defaults is a different concern from token numbering.
   app.use('/api/pos/receipt-format', receiptFormatRoutes);
+  // A branch's logo and payment QR. Its own module rather than a field on the
+  // receipt format: the format owns WHETHER an image prints, this owns the bytes,
+  // and a branch may legitimately hold a logo it does not print.
+  app.use('/api/pos/media', posmediaRoutes);
   // Campaigns and the offers inside them. An offer is not a second way to price
   // a bill — the engine produces the same per-line discounts the till already
   // takes, so posbill.recomputeTotals stays the only pricing path.

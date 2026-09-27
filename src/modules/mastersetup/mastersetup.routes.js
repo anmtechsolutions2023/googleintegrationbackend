@@ -29,4 +29,15 @@ router.get(
   ...controller.getStatus
 );
 
+// The column widths every input's maxLength is set from.
+//
+// Served rather than mirrored in the frontend on purpose. A second copy of these
+// numbers is the bug this endpoint exists to prevent: the wizard accepted 200
+// characters for a VARCHAR(50) column, and a mirrored constant would drift the
+// same way the next time a column changes. One source, fetched at load.
+//
+// Authenticated but not scope-gated: these are column widths, not data. A user who
+// can open the wizard must be able to learn what it will accept.
+router.get('/field-limits', authenticateToken, ...controller.getFieldLimits);
+
 module.exports = router;

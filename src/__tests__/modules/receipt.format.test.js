@@ -33,6 +33,10 @@ const USER = 'admin@test.com';
  * @param {Object} over
  *   over.stored — { 'receipt.bill.token': 'never', … }
  *   over.gstin  — what branchdetail holds
+ *   over.fssai / over.pan / over.tin / over.legalName / over.phone / over.email
+ *               — the rest of the masthead, all now columns on the records the
+ *                 branch read joins
+ *   over.media  — which images the branch holds, e.g. ['logo']
  */
 const route = (over = {}) => {
   mockConn.execute.mockImplementation((sql) => {
@@ -42,12 +46,28 @@ const route = (over = {}) => {
         BranchName: over.branchName ?? 'Sarjapura Road',
         GSTIN: over.gstin ?? '29AABCS1429B1ZQ',
         Address: over.address ?? '142 Sarjapura Road, Bengaluru',
+        // Joined in from branchdetail / contactdetail / organizationdetail.
+        FSSAI: over.fssai ?? null,
+        PAN: over.pan ?? null,
+        TINNo: over.tin ?? null,
+        LegalName: over.legalName ?? null,
+        Phone: over.phone ?? null,
+        Email: over.email ?? null,
+        FirstName: over.firstName ?? null,
+        LastName: over.lastName ?? null,
       }]]);
     }
     if (/SettingKey LIKE CONCAT/i.test(q)) {
       return Promise.resolve([
         Object.entries(over.stored || {}).map(([SettingKey, SettingValue]) => ({ SettingKey, SettingValue })),
       ]);
+    }
+    // Which images this branch holds. Metadata only — the resolver must never
+    // read the blobs to decide whether to emit a URL.
+    if (/FROM pos_branch_media/i.test(q)) {
+      return Promise.resolve([(over.media || []).map((Kind) => ({
+        Kind, UpdatedOn: over.mediaUpdatedOn || null, CreatedOn: '2026-09-22T10:00:00.000Z',
+      }))]);
     }
     return Promise.resolve([{ affectedRows: 1 }]);
   });
@@ -101,17 +121,124 @@ describe('the masthead', () => {
     const out = await service.resolveAll(BRANCH, TENANT);
     expect(out.shop).toEqual({
       name: 'Sarjapura Road',
+      legalName: '',
       address: '142 Sarjapura Road, Bengaluru',
+      phone: '',
+      email: '',
+      contactName: '',
       gstin: '29AABCS1429B1ZQ',
       fssai: '',
+      pan: '',
+      tin: '',
+      logoUrl: '',
+      paymentQrUrl: '',
     });
   });
 
-  // Not a branchdetail column, so it lives beside the format that displays it.
-  it('carries the FSSAI licence from the branch settings', async () => {
-    route({ stored: { 'receipt.shop.fssai': '11223344556677' } });
+  // A branchdetail column since migration 001.
+  //
+  // It used to be read from pos_setting['receipt.shop.fssai'] — a key that NOTHING
+  // in the application could write. There was no endpoint, no screen and no
+  // migration behind it, so shop.fssai was '' on every read the system ever did,
+  // and the catalogue field that printed it could never fire. The read half of the
+  // feature existed and the write half did not.
+  it('carries the FSSAI licence from the branch record', async () => {
+    route({ fssai: '11223344556677' });
     const out = await service.resolveAll(BRANCH, TENANT);
     expect(out.shop.fssai).toBe('11223344556677');
+  });
+
+  it('carries the rest of the business identity the masthead can print', async () => {
+    route({
+      legalName: 'Sharma Hospitality Pvt Ltd',
+      pan: 'ABCDE1234F',
+      tin: '29070112345',
+      phone: '+919876543210',
+      email: 'hello@example.com',
+      firstName: 'Priya',
+      lastName: 'Raman',
+    });
+    const out = await service.resolveAll(BRANCH, TENANT);
+    expect(out.shop).toMatchObject({
+      legalName: 'Sharma Hospitality Pvt Ltd',
+      pan: 'ABCDE1234F',
+      tin: '29070112345',
+      phone: '+919876543210',
+      email: 'hello@example.com',
+      contactName: 'Priya Raman',
+    });
+  });
+
+  // A PATH rather than bytes: inlining two images would take this response from
+  // about two kilobytes to several hundred, and the till re-fetches it on every
+  // focus. The client fetches the bytes once, through the authenticated API client
+  // — this path is not loadable as an <img src> and is never used as one.
+  it('names an image only when the branch actually holds one', async () => {
+    route({ media: ['logo'] });
+    const out = await service.resolveAll(BRANCH, TENANT);
+    expect(out.shop.logoUrl).toContain(`/api/pos/media/logo?branchId=${BRANCH}`);
+    // Nothing uploaded, so nothing named. A renderer gates on this: an <img> with
+    // an empty src draws a broken-image icon, which on a bill reads as a fault.
+    expect(out.shop.paymentQrUrl).toBe('');
+  });
+
+  // THE VERSION IS LOAD-BEARING. Replacing a logo does not change its address, so
+  // without a stamp the client's cached copy is never invalidated and every open
+  // till goes on printing the old one until somebody reloads it.
+  it('stamps the path with when the image last changed', async () => {
+    route({ media: ['logo'] });
+    const first = await service.resolveAll(BRANCH, TENANT);
+
+    route({ media: ['logo'], mediaUpdatedOn: '2026-09-27T18:30:00.000Z' });
+    const second = await service.resolveAll(BRANCH, TENANT);
+
+    expect(first.shop.logoUrl).not.toBe(second.shop.logoUrl);
+    expect(second.shop.logoUrl).toMatch(/&v=\d+$/);
+  });
+});
+
+// Every field that names a business's identity starts OFF.
+//
+// This is load-bearing, not a preference. Each of these prints something a tenant
+// never asked to print, and the day the value became storable was the day the
+// default mattered: `fssai` shipped as ALWAYS for as long as its value was
+// unreachable, so it printed on nothing. Had it stayed ALWAYS through migration
+// 001, every tenant's bills would have gained an FSSAI line on deploy day.
+describe('what a new field defaults to', () => {
+  const OFF_BY_DEFAULT = [
+    'logo', 'legalName', 'phone', 'email', 'contactName',
+    'fssai', 'pan', 'tin', 'upiQr',
+  ];
+
+  it.each(OFF_BY_DEFAULT)('leaves %s off until a branch asks for it', async (key) => {
+    route({ gstin: '29AABCS1429B1ZQ' });
+    const out = await service.resolveAll(BRANCH, TENANT);
+    expect(out.documents.bill[key]).toBe(VISIBILITY.NEVER);
+  });
+
+  // A LOGO IS THE CLEAREST CASE FOR THE THIRD STATE.
+  //
+  // It offered only always/never, and both are wrong half the time: "always" on a
+  // branch with no logo uploaded, "never" on one that has just uploaded it. Neither
+  // is what anybody means, which is exactly the rule the catalogue opens with.
+  it.each(['bill', 'creditNote'])('offers %s a logo that prints when there is one', (doc) => {
+    const field = catalogue.fieldDef(doc, 'logo');
+    expect(field.states).toEqual([
+      VISIBILITY.ALWAYS, VISIBILITY.IF_PRESENT, VISIBILITY.NEVER,
+    ]);
+    // Still off until asked for: Business Profile → Branding says in as many words
+    // that both images stay off until switched on, and a default that printed one
+    // the moment it was uploaded would make that promise false.
+    expect(String(field.default)).toBe(VISIBILITY.NEVER);
+  });
+
+  // A credit note reverses a tax invoice, so the licence condition applies to it
+  // exactly as it does to the bill. The field was simply missing from it.
+  it('offers the same masthead on a credit note', async () => {
+    route({ gstin: '29AABCS1429B1ZQ' });
+    const out = await service.resolveAll(BRANCH, TENANT);
+    ['logo', 'legalName', 'phone', 'email', 'contactName', 'fssai', 'pan', 'tin']
+      .forEach((key) => expect(out.documents.creditNote[key]).toBe(VISIBILITY.NEVER));
   });
 });
 
@@ -191,20 +318,26 @@ describe('saving', () => {
   // Writing the defaults out would look identical right up until a default
   // changes, at which point every branch that never chose anything is silently
   // pinned to the old one.
+  //
+  // `address` rather than `fssai` as the vehicle. These two assert generic
+  // behaviour — store the difference, delete the sameness — and they used a field
+  // whose default has since deliberately moved, which made them fail for a reason
+  // that had nothing to do with what they test. `address` defaults to ALWAYS and
+  // carries no lock, and there is no reason that will ever change.
   it('stores only what differs from the default', async () => {
     route();
-    await service.save('bill', { fssai: VISIBILITY.NEVER }, BRANCH, TENANT, USER);
+    await service.save('bill', { address: VISIBILITY.NEVER }, BRANCH, TENANT, USER);
 
     expect(upserts()).toHaveLength(1);
-    expect(upserts()[0]).toEqual(expect.arrayContaining(['receipt.bill.fssai', VISIBILITY.NEVER]));
+    expect(upserts()[0]).toEqual(expect.arrayContaining(['receipt.bill.address', VISIBILITY.NEVER]));
   });
 
   it('DELETES the override when a field is set back to its default', async () => {
-    route({ stored: { 'receipt.bill.fssai': VISIBILITY.NEVER } });
-    await service.save('bill', { fssai: VISIBILITY.ALWAYS }, BRANCH, TENANT, USER);
+    route({ stored: { 'receipt.bill.address': VISIBILITY.NEVER } });
+    await service.save('bill', { address: VISIBILITY.ALWAYS }, BRANCH, TENANT, USER);
 
     expect(upserts()).toHaveLength(0);
-    expect(deletes()[0]).toEqual([TENANT, BRANCH, 'receipt.bill.fssai']);
+    expect(deletes()[0]).toEqual([TENANT, BRANCH, 'receipt.bill.address']);
   });
 
   // Silently ignoring a locked field means the editor shows one thing and the

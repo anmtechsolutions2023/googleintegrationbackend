@@ -3,6 +3,7 @@ const Joi = require('joi')
 const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { gstinField } = require('../../utils/gstinSchema');
+const { optionalStr, maxOf } = require('../../utils/fieldLimits');
 const { QUERIES } = require('../../config/constants');
 
 const createSchema = Joi.object({
@@ -12,9 +13,10 @@ const createSchema = Joi.object({
   // First in the literal, so the real rules below override any alias that is
   // also a genuine input.
   ...joinedEchoes(QUERIES.BRANCH_DETAIL),
-  BranchName: Joi.string().max(100).trim(),
+  // 50, from the column. This said 100 for a VARCHAR(50) — see utils/fieldLimits.
+  BranchName: Joi.string().max(maxOf('branchdetail', 'BranchName')).trim(),
   // legacy alias support: accept `Name` from older clients
-  Name: Joi.string().max(100).trim(),
+  Name: Joi.string().max(maxOf('branchdetail', 'BranchName')).trim(),
   AddressDetailId: optionalEntityId,
   ContactDetailId: optionalEntityId,
   OrganizationDetailId: optionalEntityId,
@@ -24,6 +26,9 @@ const createSchema = Joi.object({
   TINNo: Joi.string().optional().max(50).allow(null, ''),
   GSTIN: gstinField.optional(),
   PAN: Joi.string().optional().max(50).allow(null, ''),
+  // The FSSAI licence number, beside the GSTIN it belongs with. Printed on a bill
+  // only when the branch switches `fssai` on at Receipt Format.
+  FSSAI: optionalStr('branchdetail', 'FSSAI'),
   CF1: Joi.string().optional().max(50).allow(null, ''),
   CF2: Joi.string().optional().max(50).allow(null, ''),
   CF3: Joi.string().optional().max(50).allow(null, ''),
@@ -38,8 +43,8 @@ const updateSchema = Joi.object({
   // First in the literal, so the real rules below override any alias that is
   // also a genuine input.
   ...joinedEchoes(QUERIES.BRANCH_DETAIL),
-  BranchName: Joi.string().optional().max(100).trim(),
-  Name: Joi.string().optional().max(100).trim(),
+  BranchName: Joi.string().optional().max(maxOf('branchdetail', 'BranchName')).trim(),
+  Name: Joi.string().optional().max(maxOf('branchdetail', 'BranchName')).trim(),
   AddressDetailId: optionalEntityId,
   ContactDetailId: optionalEntityId,
   OrganizationDetailId: optionalEntityId,
@@ -49,6 +54,9 @@ const updateSchema = Joi.object({
   TINNo: Joi.string().optional().max(50).allow(null, ''),
   GSTIN: gstinField.optional(),
   PAN: Joi.string().optional().max(50).allow(null, ''),
+  // The FSSAI licence number, beside the GSTIN it belongs with. Printed on a bill
+  // only when the branch switches `fssai` on at Receipt Format.
+  FSSAI: optionalStr('branchdetail', 'FSSAI'),
   CF1: Joi.string().optional().max(50).allow(null, ''),
   CF2: Joi.string().optional().max(50).allow(null, ''),
   CF3: Joi.string().optional().max(50).allow(null, ''),

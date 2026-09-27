@@ -20,6 +20,7 @@
 
 const { withConnection } = require('../utils/dbHelper');
 const { logger } = require('../utils/logger');
+const { LIMITS } = require('../utils/fieldLimits');
 
 const REQUIRED_COLUMNS = {
   // Venue snapshot — where a round was served, frozen at the time.
@@ -51,6 +52,14 @@ const REQUIRED_COLUMNS = {
   itemdetail: ['SupplyType', 'SACCode'],
   // What the dish IS beyond its price, plus its own preparation time.
   pos_item_meta: ['ServesCount', 'PortionSize', 'MeatTypeId', 'PrepTimeMinutes'],
+  // Tenant profile (migration 001). A database without these fails every save on
+  // the Business Profile screen and every onboarding that fills an optional field.
+  // pos_branch_media is listed by a column rather than by existence because this
+  // map is keyed on table → columns; a missing TABLE reports all of them missing,
+  // which is the same loud outcome.
+  branchdetail: ['FSSAI'],
+  contactdetail: ['Email'],
+  pos_branch_media: ['Kind', 'MimeType', 'Bytes', 'ByteSize'],
   // Kitchen promise, customer instructions, and the coded rejection.
   pos_online_order: [
     'KptMinutes',
@@ -122,4 +131,81 @@ const assertSchemaIsCurrent = async () => {
   }
 };
 
-module.exports = { assertSchemaIsCurrent, findMissingColumns, REQUIRED_COLUMNS };
+/**
+ * Columns whose real width disagrees with utils/fieldLimits.js.
+ *
+ * fieldLimits is the source every Joi rule and every input's maxLength now reads
+ * from, and it is maintained BY HAND from 01-schema-definition.sql. A hand-kept
+ * mirror of the schema drifts, and the way it fails is the worst kind: a limit
+ * that is too high lets an over-length value reach MySQL, where it is either a
+ * 500 with a rolled-back transaction or — on a non-strict sql_mode — a silent
+ * truncation that then prints on every bill.
+ *
+ * So the mirror is checked against the real thing once, at boot.
+ *
+ * @returns {Promise<Array<{column:string, declared:number, actual:number}>>}
+ */
+const findLimitDrift = async () =>
+  withConnection(async (conn) => {
+    const tables = Object.keys(LIMITS);
+    const placeholders = tables.map(() => '?').join(', ');
+    const [rows] = await conn.execute(
+      `SELECT TABLE_NAME, COLUMN_NAME, CHARACTER_MAXIMUM_LENGTH AS len
+         FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME IN (${placeholders})
+          AND CHARACTER_MAXIMUM_LENGTH IS NOT NULL`,
+      tables,
+    );
+
+    const actual = new Map(
+      rows.map((r) => [`${r.TABLE_NAME}.${r.COLUMN_NAME}`, Number(r.len)]),
+    );
+
+    const drift = [];
+    Object.entries(LIMITS).forEach(([table, columns]) => {
+      Object.entries(columns).forEach(([column, declared]) => {
+        const key = `${table}.${column}`;
+        const real = actual.get(key);
+        // Absent means the column is missing, which findMissingColumns already
+        // reports for the tables it watches. Not this check's job to say twice.
+        if (real !== undefined && real !== declared) {
+          drift.push({ column: key, declared, actual: real });
+        }
+      });
+    });
+    return drift;
+  });
+
+/**
+ * Logs when fieldLimits and the database disagree. Never throws, for the same
+ * reason as assertSchemaIsCurrent.
+ */
+const assertLimitsMatchSchema = async () => {
+  try {
+    const drift = await findLimitDrift();
+    if (drift.length === 0) return true;
+
+    const detail = drift
+      .map((d) => `${d.column} declared ${d.declared}, column is ${d.actual}`)
+      .join(' | ');
+    logger.error(
+      'FIELD LIMITS DISAGREE WITH THE DATABASE — a limit above the real column '
+      + 'width lets an over-length value reach MySQL, which either 500s or '
+      + `truncates silently. Fix src/utils/fieldLimits.js → ${detail}`,
+      { drift },
+    );
+    return false;
+  } catch (err) {
+    logger.warn('Field-limit check could not run', { error: err.message });
+    return true;
+  }
+};
+
+module.exports = {
+  assertSchemaIsCurrent,
+  findMissingColumns,
+  REQUIRED_COLUMNS,
+  assertLimitsMatchSchema,
+  findLimitDrift,
+};

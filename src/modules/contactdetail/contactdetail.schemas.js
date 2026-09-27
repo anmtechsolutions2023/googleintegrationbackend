@@ -3,6 +3,7 @@ const Joi = require('joi');
 const { entityId, optionalEntityId } = require('../../utils/idSchema');
 const { joinedEchoes } = require('../../utils/joinedEchoes');
 const { QUERIES } = require('../../config/constants');
+const { maxOf } = require('../../utils/fieldLimits');
 
 const createSchema = Joi.object({
   // Every alias this module's SELECT joins in, accepted and dropped. An edit
@@ -11,8 +12,13 @@ const createSchema = Joi.object({
   // First in the literal, so the real rules below override any alias that is
   // also a genuine input.
   ...joinedEchoes(QUERIES.CONTACT_DETAIL),
-  FirstName: Joi.string().required().max(100).trim(),
-  LastName: Joi.string().required().max(100).trim(),
+  // 50, from the column. These said 100 for VARCHAR(50) — see utils/fieldLimits.
+  FirstName: Joi.string().required().max(maxOf('contactdetail', 'FirstName')).trim(),
+  LastName: Joi.string().required().max(maxOf('contactdetail', 'LastName')).trim(),
+  // The address the wizard has always collected and never had a column for.
+  Email: Joi.string().trim().email({ tlds: { allow: false } })
+    .max(maxOf('contactdetail', 'Email')).allow(null, '').optional()
+    .messages({ 'string.email': 'That does not look like an email address' }),
   MobileNo: Joi.string().optional().max(20).trim().allow(null, ''),
   AltMobileNo: Joi.string().optional().max(20).trim().allow(null, ''),
   Landline1: Joi.string().optional().max(20).trim().allow(null, ''),
@@ -30,8 +36,11 @@ const updateSchema = Joi.object({
   // First in the literal, so the real rules below override any alias that is
   // also a genuine input.
   ...joinedEchoes(QUERIES.CONTACT_DETAIL),
-  FirstName: Joi.string().optional().max(100).trim(),
-  LastName: Joi.string().optional().max(100).trim(),
+  FirstName: Joi.string().optional().max(maxOf('contactdetail', 'FirstName')).trim(),
+  LastName: Joi.string().optional().max(maxOf('contactdetail', 'LastName')).trim(),
+  Email: Joi.string().trim().email({ tlds: { allow: false } })
+    .max(maxOf('contactdetail', 'Email')).allow(null, '').optional()
+    .messages({ 'string.email': 'That does not look like an email address' }),
   MobileNo: Joi.string().optional().max(20).trim().allow(null, ''),
   AltMobileNo: Joi.string().optional().max(20).trim().allow(null, ''),
   Landline1: Joi.string().optional().max(20).trim().allow(null, ''),
