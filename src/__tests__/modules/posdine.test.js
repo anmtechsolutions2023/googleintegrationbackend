@@ -135,11 +135,27 @@ describe('dine.order — lines are rebuilt on the server', () => {
     expect(posOrderService.create).not.toHaveBeenCalled();
   });
 
-  it('maps a round\'s state to the four a guest understands', () => {
+  it('maps a round\'s state to the words a guest understands', () => {
     expect(orderService.statusOf({ Status: 'open', KotStatus: null })).toBe('waiting');
     expect(orderService.statusOf({ Status: 'fired', KotStatus: 'pending' })).toBe('kitchen');
     expect(orderService.statusOf({ Status: 'fired', KotStatus: 'ready' })).toBe('ready');
     expect(orderService.statusOf({ Status: 'cancelled', KotStatus: null })).toBe('rejected');
+  });
+
+  // A settled round KEEPS its kitchen status, so without a terminal state it
+  // fell through to 'ready' and the guest's phone went on saying "Ready, on its
+  // way" after they had paid and left.
+  it('a settled round is finished, whatever its ticket still says', () => {
+    expect(orderService.statusOf({ Status: 'closed', KotStatus: 'ready' })).toBe('served');
+    expect(orderService.statusOf({ Status: 'closed', KotStatus: 'served' })).toBe('served');
+    expect(orderService.statusOf({ Status: 'settled', KotStatus: 'completed' })).toBe('served');
+    // Closed before anything was cooked is still finished, not 'in the kitchen'.
+    expect(orderService.statusOf({ Status: 'closed', KotStatus: null })).toBe('served');
+  });
+
+  it('a rejected round still reads as rejected, not as finished', () => {
+    // 'cancelled' is in the till's CLOSED_STATUSES too, so order matters here.
+    expect(orderService.statusOf({ Status: 'cancelled', KotStatus: 'ready' })).toBe('rejected');
   });
 });
 
@@ -163,5 +179,60 @@ describe('dine.schemas — what a phone may send', () => {
     expect(schemas.requestCodeSchema.validate({ phone: '12345' }).error).toBeDefined();
     expect(schemas.tokenParamSchema.validate({ token: 'not-a-token' }).error).toBeDefined();
     expect(schemas.tokenParamSchema.validate({ token: 'a'.repeat(32) }).error).toBeUndefined();
+  });
+});
+
+// ── Paying ends the meal ─────────────────────────────────────────────────────
+// A diner token lives three hours with no server-side record, so before this a
+// guest who had paid and walked out could still place rounds on a table staff
+// considered finished.
+describe('dine.sessionend — settling the bill ends the session', () => {
+  const sessionEnd = require('../../modules/posdine/dine.sessionend.service');
+
+  const conn = () => ({ execute: jest.fn() });
+
+  it('stamps every table the bill\'s rounds sat at', async () => {
+    const c = conn();
+    c.execute
+      .mockResolvedValueOnce([[{ TableId: 't1' }, { TableId: 't2' }]])
+      .mockResolvedValueOnce([{ affectedRows: 2 }]);
+
+    expect(await sessionEnd.endForOrders(c, ['o1', 'o2'], 'ten', '+91')).toBe(2);
+    const [sql, params] = c.execute.mock.calls[1];
+    expect(sql).toMatch(/UPDATE pos_table SET DinerSessionsEndedOn = NOW\(\)/i);
+    expect(sql).toContain('IN (?, ?)');
+    expect(params).toEqual(['+91', 'ten', 't1', 't2']);
+  });
+
+  it('a counter sale has no table and nothing to end', async () => {
+    const c = conn();
+    c.execute.mockResolvedValueOnce([[]]);
+    expect(await sessionEnd.endForOrders(c, ['o1'], 'ten', '+91')).toBe(0);
+    expect(c.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('never fails the settle — a paid bill is paid', async () => {
+    const c = conn();
+    c.execute.mockRejectedValue(new Error('deadlock'));
+    await expect(sessionEnd.endForOrders(c, ['o1'], 'ten', '+91')).resolves.toBe(0);
+  });
+
+  it('a session opened BEFORE the settle is over', async () => {
+    const c = conn();
+    c.execute.mockResolvedValue([[{ DinerSessionsEndedOn: '2026-09-30T18:00:00Z' }]]);
+    expect(await sessionEnd.isEnded(c, 't1', 'ten', new Date('2026-09-30T17:30:00Z'))).toBe(true);
+  });
+
+  // The next party sits down at the same table and scans the same printed card.
+  it('a session opened AFTER it is live — the next party must not be locked out', async () => {
+    const c = conn();
+    c.execute.mockResolvedValue([[{ DinerSessionsEndedOn: '2026-09-30T18:00:00Z' }]]);
+    expect(await sessionEnd.isEnded(c, 't1', 'ten', new Date('2026-09-30T18:20:00Z'))).toBe(false);
+  });
+
+  it('a table that has never been settled ends nobody', async () => {
+    const c = conn();
+    c.execute.mockResolvedValue([[{ DinerSessionsEndedOn: null }]]);
+    expect(await sessionEnd.isEnded(c, 't1', 'ten', new Date())).toBe(false);
   });
 });

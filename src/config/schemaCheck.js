@@ -67,10 +67,14 @@ const REQUIRED_COLUMNS = {
   // inherits — a database missing it offers every tender at every counter.
   paymentmode: ['RequiresReference', 'EnabledByDefault'],
   // QR table ordering. Without these every diner code request fails on INSERT,
-  // and rejecting a guest's order fails on UPDATE. Fix: run
-  // database/migrations/2026-09-30-qr-table-ordering.sql.
+  // and rejecting a guest's order fails on UPDATE. Fix: recreate the database
+  // (`npm run db:reset -- --yes`) — this project deploys by recreating, and
+  // 01-schema-definition.sql carries all of it.
   auth_otp_challenge: ['context_ref', 'tenant_id'],
   pos_table_qr: ['Token', 'TableId', 'BranchDetailId'],
+  // Settling a bill ends the diner sessions at that table. Without the column
+  // a paid-up guest keeps a live session for the token's full three hours.
+  pos_table: ['DinerSessionsEndedOn'],
   pos_branch_payment_method: ['PaymentModeId', 'Enabled'],
   // Kitchen promise, customer instructions, and the coded rejection.
   pos_online_order: [

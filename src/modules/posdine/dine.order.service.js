@@ -21,6 +21,11 @@ const qrChannel = require('../posqr/posqr.channel');
 
 const Q = QUERIES.POS_DINE;
 
+// A round that has been billed. Mirrors posorder.service's CLOSED_STATUSES
+// minus 'cancelled', which statusOf answers before this is consulted because a
+// rejected round reads differently to a guest than a finished one.
+const SETTLED_STATUSES = new Set(['closed', 'settled']);
+
 const createdByOf = (diner) => `${QR_ORDERING.CREATED_BY_PREFIX}${diner.phone}`;
 
 /**
@@ -125,14 +130,23 @@ const place = async ({ items, cookingInstructions }, diner) => {
 };
 
 /**
- * Where a round stands, in the four words a guest understands.
+ * Where a round stands, in the words a guest understands.
  * open + no ticket → waiting for staff · ticket → kitchen · ticket ready/served
- * → ready · cancelled → rejected (with the reason staff gave).
+ * → ready · closed → served (terminal) · cancelled → rejected (with the reason
+ * staff gave).
+ *
+ * THE CLOSED CHECK COMES FIRST, and it is the whole reason this has five states
+ * rather than four. A settled round keeps its KOT status — 'ready' or 'served' —
+ * so without this it fell through to 'ready' and the guest's phone went on
+ * saying "Ready, on its way" after they had paid and left, for as long as the
+ * session lasted. A round that has been billed is finished, whatever its ticket
+ * still says.
  */
 const statusOf = (row) => {
   const status = String(row.Status || '').toLowerCase();
   const kot = String(row.KotStatus || '').toLowerCase();
   if (status === 'cancelled') return 'rejected';
+  if (SETTLED_STATUSES.has(status)) return 'served';
   if (!kot) return status === 'open' ? 'waiting' : 'kitchen';
   if (kot === 'ready' || kot === 'served' || kot === 'completed') return 'ready';
   return 'kitchen';

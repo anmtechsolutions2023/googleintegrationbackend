@@ -16,6 +16,7 @@ const { withConnection } = require('../../utils/dbHelper');
 const qrRepository = require('../posqr/posqr.repository');
 const qrSettings = require('../posqr/posqr.settings.service');
 const session = require('./dine.session');
+const sessionEnd = require('./dine.sessionend.service');
 
 const ended = () => new HttpError(MESSAGES.ERROR.QR_SESSION_ENDED, 401, 'DINER_SESSION_ENDED');
 
@@ -37,11 +38,19 @@ const authenticateDiner = async (req, res, next) => {
       throw ended();
     }
 
+    const startedAt = new Date(claims.iat * 1000);
+
     const live = await withConnection(async (conn) => {
       const qr = await qrRepository.findActiveByIdTx(conn, claims.qrId);
       if (!qr || qr.TenantId !== claims.tid || qr.TableId !== claims.tableId) return null;
       const settings = await qrSettings.getSettingsTx(conn, qr.BranchDetailId, qr.TenantId);
-      return settings.enabled ? { qr, settings } : null;
+      if (!settings.enabled) return null;
+      // PAYING ENDS THE MEAL. Checked on the same read as the code itself, for
+      // the same reason: a session has to stop the moment its table is settled,
+      // not whenever the token happens to expire. Otherwise a guest who has paid
+      // and left keeps ordering onto a table staff have finished with.
+      if (await sessionEnd.isEnded(conn, qr.TableId, qr.TenantId, startedAt)) return null;
+      return { qr, settings };
     });
     if (!live) throw ended();
 
@@ -52,7 +61,7 @@ const authenticateDiner = async (req, res, next) => {
       tableId: claims.tableId,
       qrId: claims.qrId,
       customerId: claims.customerId,
-      sessionStartedAt: new Date(claims.iat * 1000),
+      sessionStartedAt: startedAt,
       settings: live.settings,
     };
     return next();

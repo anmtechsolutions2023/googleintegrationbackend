@@ -28,6 +28,7 @@ const readBuyerTx = async (conn, posCustomerId, tenantId) => {
   return { gstin: normaliseGstin(row.GSTIN), legalName: row.LegalName || row.Name || null };
 };
 const ledgerService = require('../ledger/ledger.service');
+const dinerSessions = require('../posdine/dine.sessionend.service');
 // Campaign offers. The engine produces the same per-line discounts a cashier
 // types by hand, so nothing below this line had to change to support them.
 const offerEngine = require('../posoffer/offer.engine.service');
@@ -354,6 +355,12 @@ class PosBillService extends BaseCRUDService {
         id,
         tenantId,
       ]);
+
+      // ── The QR diner sessions at this table ────────────────────────────
+      // Paying ends the meal. On this transaction so a rolled-back sale cannot
+      // throw a guest off a table that is still theirs, and never throwing so a
+      // paid bill is never refused over a session.
+      await dinerSessions.endForOrders(connection, orderIds, tenantId, userPhone);
 
       // ── Counter token ──────────────────────────────────────────────────
       const token = await issueCounterTokenTx(

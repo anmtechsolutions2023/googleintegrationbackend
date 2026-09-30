@@ -844,6 +844,20 @@ module.exports = {
       DELETE: 'DELETE FROM paymentmode WHERE Id = ? AND TenantId = ?',
     },
 
+    // QR diner sessions, ended by settling the bill.
+    POS_DINER_SESSION: {
+      // Every table the bill's rounds sat at. A dine-in bill covers several
+      // rounds and — after a table transfer — they need not all be one table.
+      TABLES_FOR_ORDERS:
+        'SELECT DISTINCT TableId FROM pos_order WHERE TenantId = ? AND TableId IS NOT NULL AND Id IN (:ids)',
+      // A timestamp, not a flag: the next party scans the same printed code
+      // minutes later and their session must survive this.
+      END_SESSIONS:
+        'UPDATE pos_table SET DinerSessionsEndedOn = NOW(), UpdatedOn = NOW(), UpdatedBy = ? WHERE TenantId = ? AND Id IN (:ids)',
+      ENDED_AT:
+        'SELECT DinerSessionsEndedOn FROM pos_table WHERE Id = ? AND TenantId = ? LIMIT 1',
+    },
+
     // Which tenders each OUTLET accepts. The catalogue above is tenant-wide;
     // this is the per-branch override over it.
     POS_BRANCH_PAYMENT_METHOD: {

@@ -28,7 +28,8 @@ Status: **Implemented** · 2026-09-30 · Not yet committed.
   afterwards (tests: `otp.purpose.test.js`).
 - **The OTP layer is split by purpose:** `otp.policies.js` holds a staff policy
   and a diner policy, so `otp.service.js` is the same for every purpose.
-- **Existing databases:** `npm run db:migrate -- database/migrations/2026-09-30-qr-table-ordering.sql`.
+- **Getting the schema:** all of it lives in `database/01-schema-definition.sql`
+  and `02-seed-data.sql` (PART 14); `npm run db:reset -- --yes` applies both.
   Staff sign out and in again to pick up `POS_QR`.
 
 UI mockup and clickable workflow: https://claude.ai/artifact/1eEszs9hmaDTL5oZ5LLYe5

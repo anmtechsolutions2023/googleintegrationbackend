@@ -1469,6 +1469,19 @@ CREATE TABLE pos_table (
     Capacity        INT          NULL,
     Status          VARCHAR(20)  NOT NULL DEFAULT 'free',
     CurrentOrderId  VARCHAR(50)  NULL,
+    -- QR ORDERING: the moment every diner session at this table was ended.
+    --
+    -- Set to NOW() when a bill covering this table is settled. authenticateDiner
+    -- refuses any session token issued before it, which is what makes paying the
+    -- bill end the meal. Without it a diner token stayed valid for its full
+    -- three hours, so a guest who had paid and left could still place rounds on
+    -- a table staff considered finished — and their phone went on reporting the
+    -- meal as live.
+    --
+    -- A TIMESTAMP rather than a flag, because it must not end sessions opened
+    -- AFTER it: the next party sits down at the same table minutes later, scans
+    -- the same printed code, and their session has to work.
+    DinerSessionsEndedOn DATETIME NULL,
     BranchDetailId  VARCHAR(50)  NULL,
     TenantId        VARCHAR(50)  NOT NULL,
     Active          TINYINT(1)   NOT NULL,
