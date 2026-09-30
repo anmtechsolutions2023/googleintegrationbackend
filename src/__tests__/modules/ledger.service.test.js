@@ -98,6 +98,10 @@ const route = (over = {}) => {
       return Promise.resolve([[{
         Id: params[0],
         Type: isCard ? 'Card' : 'Cash',
+        // The reference rule is a property of the METHOD now, not of its name:
+        // the ledger reads this flag instead of matching Type against a
+        // hardcoded ['Card','UPI','Wallet'].
+        RequiresReference: isCard ? 1 : 0,
         // Where the money lands. `unmappedMode` drops it to prove a mode with
         // no account cannot silently take payments.
         DefaultAccountTypeBaseId: over.unmappedMode

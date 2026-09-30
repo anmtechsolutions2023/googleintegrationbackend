@@ -3,10 +3,45 @@
 
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
+const MESSAGES = require('../../config/messages');
+const { HttpError } = require('../../middleware/errorHandler');
+const { executeQuery } = require('../../utils/dbHelper');
+
+// A blank number is "no number", not a number that happens to be empty — two
+// customers with '' would otherwise collide on UNIQUE (Phone, TenantId).
+const phoneOrNull = (phone) => (phone ? phone : null);
 
 class PosCustomerService extends BaseCRUDService {
   constructor() {
     super('POS Customer', QUERIES.POS_CUSTOMER);
+  }
+
+  /**
+   * One number, one customer. Checked up front so the till gets a sentence it
+   * can show rather than a raw duplicate-key error — and so a number a diner
+   * already verified at a QR table is found, not duplicated.
+   */
+  async assertPhoneFree(phone, tenantId, exceptId = '') {
+    if (!phone) return;
+    const rows = await executeQuery(
+      this.queries.SELECT_ID_BY_PHONE_EXCEPT, [phone, tenantId, exceptId],
+    );
+    if (rows.length > 0) {
+      throw new HttpError(
+        `${MESSAGES.ERROR.CUSTOMER_PHONE_TAKEN} (${rows[0].Name})`,
+        MESSAGES.HTTP_STATUS.CONFLICT,
+      );
+    }
+  }
+
+  async create(data, tenantId, userPhone) {
+    await this.assertPhoneFree(phoneOrNull(data.Phone), tenantId);
+    return super.create(data, tenantId, userPhone);
+  }
+
+  async update(id, data, tenantId, userPhone) {
+    if (data.Phone !== undefined) await this.assertPhoneFree(phoneOrNull(data.Phone), tenantId, id);
+    return super.update(id, data, tenantId, userPhone);
   }
 
   prepareInsertParams(id, data, tenantId, userPhone) {
@@ -14,7 +49,7 @@ class PosCustomerService extends BaseCRUDService {
       id,
       tenantId,
       data.Name ?? null,
-      data.Phone ?? null,
+      phoneOrNull(data.Phone),
       data.Email ?? null,
       data.Visits !== undefined ? data.Visits : 0,
       data.TotalSpent !== undefined ? data.TotalSpent : 0,
@@ -31,7 +66,7 @@ class PosCustomerService extends BaseCRUDService {
   prepareUpdateParams(data, existing, userPhone, id, tenantId) {
     return [
       data.Name !== undefined ? data.Name : existing.Name,
-      data.Phone !== undefined ? data.Phone : existing.Phone,
+      data.Phone !== undefined ? phoneOrNull(data.Phone) : existing.Phone,
       data.Email !== undefined ? data.Email : existing.Email,
       data.Visits !== undefined ? data.Visits : existing.Visits,
       data.TotalSpent !== undefined ? data.TotalSpent : existing.TotalSpent,

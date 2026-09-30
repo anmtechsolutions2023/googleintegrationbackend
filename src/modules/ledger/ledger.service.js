@@ -58,8 +58,11 @@ const resolveTenderMode = async (conn, tender, tenantId) => {
   }
   const mode = modes[0];
 
-  // Card/UPI/Wallet must carry a reference or the takings cannot be reconciled.
-  if (LEDGER.REF_REQUIRED_MODES.includes(mode.Type) && !tender.refNo) {
+  // A method the tenant marked as needing one must carry a reference, or the
+  // takings cannot be reconciled. The METHOD says so, not its name: this was a
+  // match against a hardcoded ['Card','UPI','Wallet'], and a tenant who renamed
+  // Card, or added 'Amex', got no enforcement at all.
+  if (mode.RequiresReference && !tender.refNo) {
     throw new HttpError(
       MESSAGES.ERROR.LEDGER_REF_REQUIRED,
       MESSAGES.HTTP_STATUS.BAD_REQUEST,

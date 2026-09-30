@@ -31,6 +31,13 @@
       ]
     },
     {
+      "subject": "ORGANIZATION",
+      "group": "Setup",
+      "screens": [
+        "Business Profile"
+      ]
+    },
+    {
       "subject": "POS_BILLING",
       "group": "Finance",
       "screens": [
@@ -43,10 +50,17 @@
       "screens": [
         "Menu Master",
         "Food Types",
+        "Meat Types",
+        "Menu Tags",
+        "Category Hours",
+        "Add-on Groups",
+        "Add-ons",
         "Channels",
         "Portals",
+        "Rejection Reasons",
         "Variants",
         "Floors",
+        "Business Profile",
         "POS Settings",
         "Receipt Format",
         "Campaigns"
@@ -83,7 +97,16 @@
       "group": "Operations",
       "screens": [
         "Billing & KOT",
-        "Tables"
+        "Tables",
+        "QR Orders"
+      ]
+    },
+    {
+      "subject": "POS_QR",
+      "group": "Operations",
+      "screens": [
+        "QR Orders",
+        "QR Codes"
       ]
     },
     {

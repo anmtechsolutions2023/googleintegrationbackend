@@ -4,15 +4,18 @@
 // Two properties this file exists to guarantee:
 //
 //   1. A code can be spent ONCE. Not "usually once" — the consume is a
-//      compare-and-set on consumed_at inside the transaction that issues the
-//      token, so two verifies racing on one challenge produce one session.
+//      compare-and-set on consumed_at inside a transaction, so two verifies
+//      racing on one challenge produce one session.
 //
-//   2. Requesting a code COSTS MONEY. Every limit here is really a spend
-//      control wearing a security hat, and all of them are counted in the
-//      database rather than in memory: an in-process counter resets on deploy
-//      and is per-instance, which turns a cap into a suggestion.
+//   2. Requesting a code COSTS MONEY. Every limit is really a spend control
+//      wearing a security hat, and all of them are counted in the database
+//      rather than in memory.
 //
-// See WHATSAPP_IDENTITY_MIGRATION.md §7.2 and §9.
+// WHO may receive a code and WHICH limits apply differ by purpose (staff
+// sign-in vs a diner at a table); those decisions live in otp.policies.js so
+// this file stays the same for every purpose.
+//
+// See WHATSAPP_IDENTITY_MIGRATION.md §7.2, §9 and QR_TABLE_ORDERING_DESIGN.md §4.2.
 
 const { v4: uuidv4 } = require('uuid');
 const { withConnection, withTransaction } = require('../../utils/dbHelper');
@@ -23,97 +26,49 @@ const { HttpError } = require('../../middleware/errorHandler');
 const { logger } = require('../../utils/logger');
 const { toE164, maskForLog } = require('../../utils/phone');
 const { generateCode, hashCode, verifyCode, expiryFrom } = require('../../utils/otp');
-const appConfig = require('../appconfig/appconfig.service');
 const whatsapp = require('../whatsapp/whatsapp.client');
 const whatsappHealth = require('../whatsapp/whatsapp.health');
+const { PURPOSE, STAFF_PURPOSES, policyFor } = require('./otp.policies');
 
 const RATE_LIMITS = require('../../config/rateLimits');
 
 // Every throttle lives in rateLimits.js. `config.OTP` keeps only the PEPPER,
 // which is a secret rather than a limit.
 const OTP = config.OTP;
-const { OTP_REQUEST, OTP_VERIFY, COST } = RATE_LIMITS;
-
-const PURPOSE = { LOGIN: 'LOGIN', SIGNUP: 'SIGNUP' };
-
-/**
- * Does this number belong to somebody who can sign in?
- *
- * A membership, or a live invitation waiting to be claimed. The invitation case
- * is what lets an invited person's FIRST sign-in work: they have no membership
- * yet, and the OTP is what proves the number is theirs.
- */
-const isKnownNumber = async (conn, phone) => {
-  const [members] = await conn.execute(QUERIES.USER_TENANTS.SELECT, [phone]);
-  if (members.length > 0) return true;
-  const [invites] = await conn.execute(QUERIES.INVITATIONS.SELECT_CLAIMABLE, [phone]);
-  return invites.length > 0;
-};
-
-/** Every limit that stands between an open endpoint and your Meta invoice. */
-const assertWithinLimits = async (conn, phone, ip) => {
-  const [[daily]] = await conn.execute(QUERIES.AUTH_OTP.COUNT_SENT_TODAY);
-  if (Number(daily.n) >= COST.DAILY_SEND_CAP) {
-    // Deliberately loud: this is the circuit breaker tripping, and somebody
-    // needs to know whether it is growth or abuse before it trips again.
-    logger.error('OTP daily send cap reached — WhatsApp sign-in is suspended', {
-      cap: COST.DAILY_SEND_CAP,
-    });
-    throw new HttpError(MESSAGES.ERROR.OTP_UNAVAILABLE, 503);
-  }
-
-  const [[perPhone]] = await conn.execute(
-    QUERIES.AUTH_OTP.COUNT_RECENT_FOR_PHONE, [phone, OTP_REQUEST.WINDOW_SECONDS],
-  );
-  if (Number(perPhone.n) >= OTP_REQUEST.MAX_PER_PHONE) {
-    throw new HttpError(MESSAGES.ERROR.OTP_TOO_MANY, 429);
-  }
-
-  if (ip) {
-    const [[perIp]] = await conn.execute(
-      QUERIES.AUTH_OTP.COUNT_RECENT_FOR_IP, [ip, OTP_REQUEST.WINDOW_SECONDS],
-    );
-    if (Number(perIp.n) >= OTP_REQUEST.MAX_PER_IP) {
-      throw new HttpError(MESSAGES.ERROR.OTP_TOO_MANY, 429);
-    }
-  }
-
-  const [last] = await conn.execute(QUERIES.AUTH_OTP.SELECT_LAST_FOR_PHONE, [phone]);
-  if (last.length > 0) {
-    const since = (Date.now() - new Date(last[0].created_at).getTime()) / 1000;
-    if (since < OTP_REQUEST.RESEND_COOLDOWN_SECONDS) {
-      throw new HttpError(MESSAGES.ERROR.OTP_TOO_SOON, 429);
-    }
-  }
-};
+const { OTP_REQUEST, OTP_VERIFY } = RATE_LIMITS;
 
 /**
  * Issues a challenge and sends the code.
  *
- * The response is the SAME whether or not the number is registered — same
- * shape, same challenge id, same countdown. An unregistered number is recorded
- * and nothing is sent, which closes enumeration and removes the cheapest way to
- * run up the bill. The cost is that a typo waits out the countdown, which is
- * what the "sign in another way" escape hatch on the login screen is for.
+ * For staff sign-in the response is the SAME whether or not the number is
+ * registered — same shape, same challenge id, same countdown. An unregistered
+ * number is recorded and nothing is sent, which closes enumeration and removes
+ * the cheapest way to run up the bill.
  *
  * @param {Object} p
  * @param {string} p.phone - As typed. Normalised here.
- * @param {string} [p.purpose] - LOGIN (default) or SIGNUP.
+ * @param {string} [p.purpose] - LOGIN (default), SIGNUP or DINER.
  * @param {string} [p.ip]
+ * @param {string} [p.contextRef] - DINER: the QR code (pos_table_qr.Id) asked at.
+ * @param {string} [p.tenantId] - DINER: that code's tenant, for the restaurant cap.
  * @returns {Promise<{challengeId: string, expiresInSeconds: number, resendInSeconds: number}>}
  */
-const requestOtp = async ({ phone, purpose = PURPOSE.LOGIN, ip = null }) => {
+const requestOtp = async ({
+  phone, purpose = PURPOSE.LOGIN, ip = null, contextRef = null, tenantId = null,
+}) => {
   const e164 = toE164(phone);
   if (!e164) throw new HttpError(MESSAGES.ERROR.INVALID_PHONE, 400);
 
-  return withConnection(async (conn) => {
-    await assertWithinLimits(conn, e164, ip);
+  const policy = policyFor(purpose);
+  const ctx = { phone: e164, purpose, ip, contextRef, tenantId };
 
-    // SIGNUP is by definition an unknown number; LOGIN must already be someone.
+  return withConnection(async (conn) => {
+    await policy.assertWithinLimits(conn, ctx);
+
     // An unconfigured WhatsApp is a deployment fault, not a user's. Answer 503
     // rather than letting the client's configuration assertion surface as a
-    // 500 — and normally this is unreachable, because whatsapp.health stops the
-    // process at boot before anyone can reach a login screen.
+    // 500 — normally unreachable, because whatsapp.health stops the process at
+    // boot before anyone can reach a login screen.
     if (!whatsappHealth.isConfigured()) {
       logger.error('OTP requested while WhatsApp is unconfigured', {
         missing: whatsappHealth.missingKeys(),
@@ -121,30 +76,10 @@ const requestOtp = async ({ phone, purpose = PURPOSE.LOGIN, ip = null }) => {
       throw new HttpError(MESSAGES.ERROR.OTP_UNAVAILABLE, 503);
     }
 
-    // Who may receive a code.
-    //
-    // A known number always may — a membership, or a live invitation waiting to
-    // be claimed, which is how an invited person's FIRST sign-in works.
-    //
-    // An UNKNOWN number may when self-signup is enabled, because then the
-    // product's answer to "who is this stranger" is "a new tenant" rather than
-    // "nobody". The same switch already governs whether they are provisioned on
-    // the other side of the code, so gating the send on anything else lets the
-    // two disagree: either a code that arrives and leads nowhere, or a tenancy
-    // nobody can reach.
-    //
-    // The cost is real and deliberate: anyone with a SIM can start this, and
-    // every attempt is billed before a human sees it. OTP_DAILY_SEND_CAP bounds
-    // it, and the per-IP limit — which counts every request, sent or not —
-    // bounds the rate.
-    const selfSignupAllowed = await appConfig.isAutoApproveEnabled(conn);
-    const shouldSend =
-      purpose === PURPOSE.SIGNUP
-      || selfSignupAllowed
-      || (await isKnownNumber(conn, e164));
+    const shouldSend = await policy.shouldSend(conn, ctx);
 
-    // Only one code may ever be live for a number.
-    await conn.execute(QUERIES.AUTH_OTP.CONSUME_LIVE_FOR_PHONE, [e164]);
+    // Only one code may ever be live for a number and purpose.
+    await conn.execute(QUERIES.AUTH_OTP.CONSUME_LIVE_FOR_PHONE, [e164, purpose]);
 
     const id = uuidv4();
     const code = generateCode();
@@ -152,7 +87,7 @@ const requestOtp = async ({ phone, purpose = PURPOSE.LOGIN, ip = null }) => {
       id, e164, purpose,
       hashCode(code, OTP.PEPPER),
       expiryFrom(OTP_VERIFY.TTL_SECONDS),
-      ip,
+      ip, contextRef, tenantId,
     ]);
 
     if (!shouldSend) {
@@ -173,7 +108,7 @@ const requestOtp = async ({ phone, purpose = PURPOSE.LOGIN, ip = null }) => {
         // Everything else is our problem and must not read as "wrong number".
         if (!sent.transportError
             && !whatsapp.isInfrastructureFailure(sent.errorCode)) {
-          throw new HttpError(MESSAGES.ERROR.OTP_NO_WHATSAPP, 400);
+          throw new HttpError(policy.noWhatsappMessage, 400);
         }
         throw new HttpError(MESSAGES.ERROR.OTP_SEND_FAILED, 502);
       }
@@ -193,41 +128,72 @@ const requestOtp = async ({ phone, purpose = PURPOSE.LOGIN, ip = null }) => {
  * Returns the verified number. Issuing the session is the caller's job — this
  * function's only promise is that the number was proven, exactly once.
  *
- * @returns {Promise<{phone: string, purpose: string}>}
+ * FAILURES ARE COMMITTED, THEN THROWN. The attempt counter and the lock-out
+ * are writes, and withTransaction rolls back on a throw: throwing from inside
+ * the transaction undid the very write that counts the wrong guess, so the
+ * five-attempt ceiling never engaged. The transaction therefore returns an
+ * outcome, commits, and only then is the error raised.
+ *
+ * @param {Object} p
+ * @param {string} p.challengeId
+ * @param {string} p.code
+ * @param {string[]} [p.expectedPurposes] - Which purposes this caller may spend.
+ *        Defaults to staff sign-in, so no existing caller can spend a DINER code.
+ * @param {string} [p.contextRef] - When set, the challenge must have been
+ *        requested at this QR code (a code asked for at table 4 cannot open a
+ *        session at table 9).
+ * @returns {Promise<{phone: string, purpose: string, tenantId: string|null}>}
  */
-const verifyOtp = async ({ challengeId, code }) =>
-  withTransaction(async (conn) => {
+const verifyOtp = async ({
+  challengeId, code, expectedPurposes = STAFF_PURPOSES, contextRef = null,
+}) => {
+  const outcome = await withTransaction(async (conn) => {
     const [rows] = await conn.execute(
       QUERIES.AUTH_OTP.SELECT_LIVE_BY_ID, [String(challengeId || '')],
     );
-    // Consumed, expired or never existed — all one answer. Distinguishing them
-    // tells an attacker which challenge ids are real.
-    if (rows.length === 0) throw new HttpError(MESSAGES.ERROR.OTP_EXPIRED, 410);
-
+    // Consumed, expired, never existed, issued for another purpose or at
+    // another table — all one answer. Distinguishing them tells an attacker
+    // which challenge ids are real.
+    if (rows.length === 0) return { error: MESSAGES.ERROR.OTP_EXPIRED, status: 410 };
     const challenge = rows[0];
+    if (!expectedPurposes.includes(challenge.purpose)) {
+      return { error: MESSAGES.ERROR.OTP_EXPIRED, status: 410 };
+    }
+    if (contextRef && challenge.context_ref !== contextRef) {
+      return { error: MESSAGES.ERROR.OTP_EXPIRED, status: 410 };
+    }
 
     if (challenge.attempts >= OTP_VERIFY.MAX_ATTEMPTS) {
       await conn.execute(QUERIES.AUTH_OTP.CONSUME, [challenge.id]);
-      throw new HttpError(MESSAGES.ERROR.OTP_LOCKED, 429);
+      return { error: MESSAGES.ERROR.OTP_LOCKED, status: 429 };
     }
 
     if (!verifyCode(code, challenge.code_hash, OTP.PEPPER)) {
       await conn.execute(QUERIES.AUTH_OTP.BUMP_ATTEMPTS, [challenge.id]);
-      throw new HttpError(MESSAGES.ERROR.OTP_INVALID, 400);
+      return { error: MESSAGES.ERROR.OTP_INVALID, status: 400 };
     }
 
     // The compare-and-set. Two requests can both reach here with the same live
     // row; only the one whose UPDATE matches consumed_at IS NULL may proceed.
     const [consumed] = await conn.execute(QUERIES.AUTH_OTP.CONSUME, [challenge.id]);
     if (consumed.affectedRows !== 1) {
-      throw new HttpError(MESSAGES.ERROR.OTP_EXPIRED, 410);
+      return { error: MESSAGES.ERROR.OTP_EXPIRED, status: 410 };
     }
-
-    logger.info('OTP verified', {
-      phone: maskForLog(challenge.phone), purpose: challenge.purpose,
-    });
-    return { phone: challenge.phone, purpose: challenge.purpose };
+    return { challenge };
   });
+
+  if (outcome.error) throw new HttpError(outcome.error, outcome.status);
+
+  const { challenge } = outcome;
+  logger.info('OTP verified', {
+    phone: maskForLog(challenge.phone), purpose: challenge.purpose,
+  });
+  return {
+    phone: challenge.phone,
+    purpose: challenge.purpose,
+    tenantId: challenge.tenant_id ?? null,
+  };
+};
 
 /** Delivery receipts from the webhook. Advisory: never grants anything. */
 const recordDelivery = async (wamid, status, failureCode = null) =>
@@ -239,4 +205,6 @@ const recordDelivery = async (wamid, status, failureCode = null) =>
     return r.affectedRows > 0;
   });
 
-module.exports = { requestOtp, verifyOtp, recordDelivery, PURPOSE };
+module.exports = {
+  requestOtp, verifyOtp, recordDelivery, PURPOSE, STAFF_PURPOSES,
+};

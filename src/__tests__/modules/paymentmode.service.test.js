@@ -127,19 +127,45 @@ describe('paymentmode — field validation', () => {
   const { createSchema: createPaymentModeSchema, updateSchema: updatePaymentModeSchema } =
     require('../../modules/paymentmode/paymentmode.schemas');
 
+  // A tender says where money LANDS, so an account is not optional decoration:
+  // a method without one books nowhere and disappears from every report that
+  // groups by account. Every create case below therefore carries one.
+  const ACCOUNT = 'b0000001-ldgr-0000-0000-000000000002';
+
   describe('create schema — positive cases', () => {
     it('passes with a valid Type', () => {
-      expect(createPaymentModeSchema.validate({ Type: 'Cash' }).error).toBeUndefined();
+      expect(createPaymentModeSchema.validate({
+        Type: 'Cash', DefaultAccountTypeBaseId: ACCOUNT,
+      }).error).toBeUndefined();
     });
     it('passes with Type and Active false', () => {
-      expect(createPaymentModeSchema.validate({ Type: 'Card', Active: false }).error).toBeUndefined();
+      expect(createPaymentModeSchema.validate({
+        Type: 'Card', DefaultAccountTypeBaseId: ACCOUNT, Active: false,
+      }).error).toBeUndefined();
     });
     it('accepts Type at exactly 50 characters', () => {
-      expect(createPaymentModeSchema.validate({ Type: 'x'.repeat(50) }).error).toBeUndefined();
+      expect(createPaymentModeSchema.validate({
+        Type: 'x'.repeat(50), DefaultAccountTypeBaseId: ACCOUNT,
+      }).error).toBeUndefined();
     });
     it('defaults Active to true when omitted', () => {
-      const { value } = createPaymentModeSchema.validate({ Type: 'UPI' });
+      const { value } = createPaymentModeSchema.validate({
+        Type: 'UPI', DefaultAccountTypeBaseId: ACCOUNT,
+      });
       expect(value.Active).toBe(true);
+    });
+    it('defaults RequiresReference off and EnabledByDefault on', () => {
+      const { value } = createPaymentModeSchema.validate({
+        Type: 'Meal Voucher', DefaultAccountTypeBaseId: ACCOUNT,
+      });
+      expect(value.RequiresReference).toBe(false);
+      expect(value.EnabledByDefault).toBe(true);
+    });
+    it('strips SortOrder — it is assigned, never supplied', () => {
+      const { value } = createPaymentModeSchema.validate({
+        Type: 'Cheque', DefaultAccountTypeBaseId: ACCOUNT, SortOrder: 1,
+      });
+      expect(value.SortOrder).toBeUndefined();
     });
   });
 
@@ -147,14 +173,25 @@ describe('paymentmode — field validation', () => {
     it('fails when Type is missing', () => {
       expect(createPaymentModeSchema.validate({}).error).toBeDefined();
     });
+    // The hole this closes: the column existed and the list query joined its
+    // name, but no INSERT ever wrote it, so every method made through the API
+    // booked to nothing at all.
+    it('fails when the ledger account is missing', () => {
+      expect(createPaymentModeSchema.validate({ Type: 'Cash' }).error).toBeDefined();
+    });
+    it('refuses to clear the account on update', () => {
+      expect(updatePaymentModeSchema.validate({
+        DefaultAccountTypeBaseId: '',
+      }).error).toBeDefined();
+    });
     it('fails when Type exceeds 50 characters', () => {
-      expect(createPaymentModeSchema.validate({ Type: 'x'.repeat(51) }).error).toBeDefined();
+      expect(createPaymentModeSchema.validate({ Type: 'x'.repeat(51), DefaultAccountTypeBaseId: ACCOUNT }).error).toBeDefined();
     });
     it('fails when Type is a number', () => {
-      expect(createPaymentModeSchema.validate({ Type: 123 }).error).toBeDefined();
+      expect(createPaymentModeSchema.validate({ Type: 123, DefaultAccountTypeBaseId: ACCOUNT }).error).toBeDefined();
     });
     it('fails when Active is a string', () => {
-      expect(createPaymentModeSchema.validate({ Type: 'Cash', Active: 'yes' }).error).toBeDefined();
+      expect(createPaymentModeSchema.validate({ Type: 'Cash', DefaultAccountTypeBaseId: ACCOUNT, Active: 'yes' }).error).toBeDefined();
     });
   });
 

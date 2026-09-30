@@ -824,11 +824,18 @@ INSERT IGNORE INTO accounttypebase (Id, Name, Kind, Active, TenantId, CreatedOn,
 -- 11f) Tender types, each mapped to the account the money LANDS IN.
 -- Without this mapping every tender books to 'Sales' and no account means
 -- anything: cash sales and card sales become indistinguishable.
-INSERT IGNORE INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
-    ('m0000001-ldgr-0000-0000-000000000001', 'Cash',   'b0000001-ldgr-0000-0000-000000000002', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
-    ('m0000001-ldgr-0000-0000-000000000002', 'Card',   'b0000001-ldgr-0000-0000-000000000003', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
-    ('m0000001-ldgr-0000-0000-000000000003', 'UPI',    'b0000001-ldgr-0000-0000-000000000003', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
-    ('m0000001-ldgr-0000-0000-000000000004', 'Wallet', 'b0000001-ldgr-0000-0000-000000000004', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+-- Only Cash and UPI are EnabledByDefault. The rest exist, mapped to the right
+-- account, one toggle away per outlet — so switching Card on never requires
+-- anyone to know that card money lands in Bank.
+--
+-- SortOrder is explicit because CreatedOn cannot order these: it is a DATETIME
+-- and all four rows land inside the same NOW().
+-- (Id, Type, Account, RequiresReference, EnabledByDefault, SortOrder, …)
+INSERT IGNORE INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, RequiresReference, EnabledByDefault, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('m0000001-ldgr-0000-0000-000000000001', 'Cash',   'b0000001-ldgr-0000-0000-000000000002', 0, 1, 1, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000003', 'UPI',    'b0000001-ldgr-0000-0000-000000000003', 1, 1, 2, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000002', 'Card',   'b0000001-ldgr-0000-0000-000000000003', 1, 0, 3, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000004', 'Wallet', 'b0000001-ldgr-0000-0000-000000000004', 1, 0, 4, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
 
 -- 11g) How a receipt is classified
 INSERT IGNORE INTO paymentreceivedtype (Id, Type, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
@@ -877,10 +884,14 @@ INSERT IGNORE INTO accounttypebase (Id, Name, Kind, Active, TenantId, CreatedOn,
 
 -- One settlement tender per portal, not one shared "Aggregator" tender:
 -- reconciling a payout statement means answering what ONE portal owes us.
-INSERT IGNORE INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
-    ('m0000001-ldgr-0000-0000-000000000005', 'Zomato Settlement',   'b0000001-ldgr-0000-0000-000000000006', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
-    ('m0000001-ldgr-0000-0000-000000000006', 'Swiggy Settlement',   'b0000001-ldgr-0000-0000-000000000006', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
-    ('m0000001-ldgr-0000-0000-000000000007', 'District Settlement', 'b0000001-ldgr-0000-0000-000000000006', 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
+-- OFF at the counter and no reference number: a payout statement reconciles
+-- against the portal, not a number a cashier types. Costs portal settlement
+-- nothing — pos_portal.SettlementPaymentModeId names its tender directly and
+-- never consults the counter's list. Sorted after every counter tender.
+INSERT IGNORE INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, RequiresReference, EnabledByDefault, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES
+    ('m0000001-ldgr-0000-0000-000000000005', 'Zomato Settlement',   'b0000001-ldgr-0000-0000-000000000006', 0, 0, 5, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000006', 'Swiggy Settlement',   'b0000001-ldgr-0000-0000-000000000006', 0, 0, 6, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed'),
+    ('m0000001-ldgr-0000-0000-000000000007', 'District Settlement', 'b0000001-ldgr-0000-0000-000000000006', 0, 0, 7, 'e3845e08-dcc2-11f0-8e78-0242ac110002', 1, NOW(), 'system-seed', 'system-seed');
 
 -- The portals themselves, on the MANUAL adapter.
 --
@@ -1069,6 +1080,53 @@ SELECT UUID(), r.id, f.feature_id
      OR (f.feature_short_name IN ('POS_REPORTS','ORGANIZATION','AUDIT') AND f.scope = 'READ')
      OR (f.feature_short_name = 'EXPENSE' AND f.scope = 'APPROVE')
    );
+
+-- =============================================================================
+-- PART 14 — QR table ordering (POS_QR feature + role grants)
+-- =============================================================================
+-- POS_QR:READ  — see and print the table QR codes, and the queue of orders guests
+--                placed from their phones.
+-- POS_QR:WRITE — issue/rotate codes, switch QR ordering per branch, and accept or
+--                reject guests' orders.
+-- Floor staff who hold POS_ORDER:WRITE can already accept/reject (reviewing an
+-- order IS taking one — see SCOPE_SETS.POS_QR_ORDER_DECIDE); POS_QR is what a
+-- role needs to manage the codes themselves.
+--
+-- Granted by role NAME across every tenancy, not just the template: an existing
+-- tenancy's roles get the feature on re-seed, and a new tenancy copies the
+-- template's roles WITH their grants, so an invited user receives POS_QR with
+-- whichever role they are invited into. Idempotent: INSERT IGNORE on the feature
+-- id and on role_permissions.uq_role_feature.
+INSERT IGNORE INTO features
+    (feature_id, name, feature_short_name, scope, display_name, category, description, is_active)
+VALUES
+    ('f10000a8-pos0-0000-0000-000000000001',
+     'POS QR Read',  'POS_QR', 'READ',
+     'Front Desk — QR Ordering View', 'POS',
+     'See and print table QR codes, and the queue of orders guests placed from their phones.', 1),
+    ('f10000a8-pos0-0000-0000-000000000002',
+     'POS QR Write', 'POS_QR', 'WRITE',
+     'Front Desk — QR Ordering Manage', 'POS',
+     'Issue and rotate table QR codes, switch QR ordering per branch, and accept or reject guests\' orders.', 1);
+
+-- Full control: the admins, the POS manager and the owner-operator.
+INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
+SELECT UUID(), r.id, f.feature_id
+  FROM roles r
+ CROSS JOIN features f
+ WHERE r.name IN ('SUPER_ADMIN', 'TENANT_ADMIN', 'POS_MANAGER', 'OWNER_OPERATOR')
+   AND f.feature_short_name = 'POS_QR'
+   AND f.scope IN ('READ', 'WRITE');
+
+-- Read: cashiers and waiters see the codes and the queue. They decide orders
+-- through POS_ORDER:WRITE, which they already hold.
+INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
+SELECT UUID(), r.id, f.feature_id
+  FROM roles r
+ CROSS JOIN features f
+ WHERE r.name IN ('POS_CASHIER', 'POS_WAITER')
+   AND f.feature_short_name = 'POS_QR'
+   AND f.scope = 'READ';
 
 -- =============================================================================
 -- VERIFICATION QUERIES — run these manually after seeding to confirm correctness

@@ -10,6 +10,7 @@
 const { withConnection } = require('../../utils/dbHelper');
 const { QUERIES } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
+const { toE164 } = require('../../utils/phone');
 
 const num = (v) => Number(v || 0);
 
@@ -26,8 +27,15 @@ const num = (v) => Number(v || 0);
  */
 const search = (term, tenantId) =>
   withConnection(async (conn) => {
-    const like = `%${String(term || '').trim()}%`;
-    const exact = String(term || '').trim();
+    const raw = String(term || '').trim();
+    // Numbers are stored as E.164 (+919876543210). A cashier types them the
+    // way people say them — "98765 43210" — so a term that is only digits,
+    // spaces and a plus is matched on its digits, and an exact hit is the
+    // normalised number.
+    const looksLikePhone = /^[+\d\s-]{4,}$/.test(raw);
+    const digits = raw.replace(/\D/g, '');
+    const like = `%${looksLikePhone ? digits : raw}%`;
+    const exact = (looksLikePhone && toE164(raw)) || raw;
     const [rows] = await conn.execute(QUERIES.POS_CUSTOMER.SEARCH, [
       tenantId, like, like, exact,
     ]);

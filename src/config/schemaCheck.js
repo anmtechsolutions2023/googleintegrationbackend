@@ -24,7 +24,8 @@ const { LIMITS } = require('../utils/fieldLimits');
 
 const REQUIRED_COLUMNS = {
   // Venue snapshot — where a round was served, frozen at the time.
-  pos_order: ['TableName', 'FloorId', 'FloorName', 'TableCapacity', 'CookingInstructions', 'NoCutlery'],
+  // RejectionReasonId/RejectionNote: why staff refused a guest's QR order.
+  pos_order: ['TableName', 'FloorId', 'FloorName', 'TableCapacity', 'CookingInstructions', 'NoCutlery', 'RejectionReasonId', 'RejectionNote'],
   // Per-item discounts granted on a bill.
   pos_bill: ['LineDiscounts'],
   // What the customer asked the kitchen for, snapshotted onto the ticket.
@@ -60,6 +61,17 @@ const REQUIRED_COLUMNS = {
   branchdetail: ['FSSAI'],
   contactdetail: ['Email'],
   pos_branch_media: ['Kind', 'MimeType', 'Bytes', 'ByteSize'],
+  // Configurable payment methods. Without these the till falls back to nothing
+  // useful: RequiresReference drives the reference-number rule that used to be a
+  // hardcoded name match, and EnabledByDefault is what an unconfigured branch
+  // inherits — a database missing it offers every tender at every counter.
+  paymentmode: ['RequiresReference', 'EnabledByDefault'],
+  // QR table ordering. Without these every diner code request fails on INSERT,
+  // and rejecting a guest's order fails on UPDATE. Fix: run
+  // database/migrations/2026-09-30-qr-table-ordering.sql.
+  auth_otp_challenge: ['context_ref', 'tenant_id'],
+  pos_table_qr: ['Token', 'TableId', 'BranchDetailId'],
+  pos_branch_payment_method: ['PaymentModeId', 'Enabled'],
   // Kitchen promise, customer instructions, and the coded rejection.
   pos_online_order: [
     'KptMinutes',

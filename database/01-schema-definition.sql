@@ -207,7 +207,9 @@ CREATE TABLE audit_logs (
 CREATE TABLE auth_otp_challenge (
     id               CHAR(36)     NOT NULL,
     phone            VARCHAR(20)  NOT NULL COMMENT 'E.164, normalised before insert',
-    purpose          ENUM('LOGIN','SIGNUP')                              NOT NULL,
+    -- DINER: a guest at a QR table (QR_TABLE_ORDERING_DESIGN.md). Counted
+    -- against its OWN daily breaker, never the staff one.
+    purpose          ENUM('LOGIN','SIGNUP','DINER')                      NOT NULL,
     code_hash        CHAR(64)     NOT NULL COMMENT 'sha256(code + OTP_PEPPER)',
     expires_at       DATETIME     NOT NULL,
     attempts         TINYINT      NOT NULL DEFAULT 0,
@@ -223,6 +225,12 @@ CREATE TABLE auth_otp_challenge (
     -- account, and no amount of resending will change that.
     failure_code     VARCHAR(20)  NULL,
     request_ip       VARCHAR(45)  NULL,
+    -- DINER only: the QR code (pos_table_qr.Id) the code was asked for at.
+    -- Verify requires the same one, so a code requested at table 4 cannot open
+    -- a session at table 9; it is also what the per-table limit counts.
+    context_ref      VARCHAR(50)  NULL,
+    -- DINER only: that code's restaurant, for the per-restaurant daily cap.
+    tenant_id        VARCHAR(50)  NULL,
     created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     -- Serves both the live-challenge lookup and the per-number rate limit,
@@ -230,7 +238,9 @@ CREATE TABLE auth_otp_challenge (
     -- and holds across instances.
     INDEX idx_otp_live  (phone, consumed_at, expires_at),
     INDEX idx_otp_wamid (wa_message_id),
-    INDEX idx_otp_rate  (phone, created_at)
+    INDEX idx_otp_rate  (phone, created_at),
+    INDEX idx_otp_context (context_ref, created_at),
+    INDEX idx_otp_tenant_day (tenant_id, purpose, created_at)
 );
 
 -- =============================================================================
@@ -1225,6 +1235,28 @@ CREATE TABLE paymentmode (
     -- Held as data rather than a lookup table in code, so a tenant adding
     -- 'Meal Voucher' decides its account without a deployment.
     DefaultAccountTypeBaseId VARCHAR(50) NULL,
+    -- Whether this tender needs a reference number to be reconcilable.
+    -- Replaces a hardcoded ['card','upi','wallet'] match on the mode NAME in the
+    -- till, which stopped requiring one the moment anybody renamed a method.
+    RequiresReference TINYINT(1) NOT NULL DEFAULT 0,
+    -- What a branch that has never been configured does with this method.
+    --
+    -- THE RESOLVE RULE: no row in pos_branch_payment_method means "inherit this".
+    -- That is what lets a method added next year govern every existing branch
+    -- with no backfill, and a brand-new outlet take Cash and UPI having written
+    -- nothing at all. See that table's comment.
+    EnabledByDefault  TINYINT(1) NOT NULL DEFAULT 1,
+    -- The order the till offers them in, and so which tender a sale defaults to.
+    --
+    -- NOT user-editable — there is no UI for it and the API does not accept it.
+    -- It exists because ORDER BY CreatedOn is not deterministic here: CreatedOn
+    -- is a DATETIME (one-second resolution) and provisioning inserts every mode
+    -- inside the same second, so the seeded order was decided by whatever the
+    -- server felt like returning. The till takes the first row as its default
+    -- tender, which made the default arbitrary.
+    --
+    -- Assigned MAX+1 on create, so a method added later lands at the end.
+    SortOrder  INT          NOT NULL DEFAULT 0,
     TenantId   VARCHAR(50)  NOT NULL,
     Active     TINYINT(1)   NOT NULL,
     CreatedOn  DATETIME,
@@ -1395,6 +1427,7 @@ DROP TABLE IF EXISTS pos_menu_tag;
 DROP TABLE IF EXISTS pos_channel;
 DROP TABLE IF EXISTS pos_variant;
 DROP TABLE IF EXISTS pos_food_type;
+DROP TABLE IF EXISTS pos_table_qr;
 DROP TABLE IF EXISTS pos_table;
 DROP TABLE IF EXISTS pos_floor;
 DROP TABLE IF EXISTS pos_customer;
@@ -1408,6 +1441,7 @@ DROP TABLE IF EXISTS pos_tax_mode_history;
 DROP TABLE IF EXISTS pos_tax_setting;
 DROP TABLE IF EXISTS pos_setting;
 DROP TABLE IF EXISTS pos_branch_media;
+DROP TABLE IF EXISTS pos_branch_payment_method;
 DROP TABLE IF EXISTS pos_expense;
 DROP TABLE IF EXISTS pos_loyalty_ledger;
 
@@ -1446,6 +1480,37 @@ CREATE TABLE pos_table (
     UNIQUE (Name, FloorId, TenantId),
     FOREIGN KEY (FloorId)        REFERENCES pos_floor(Id),
     FOREIGN KEY (BranchDetailId) REFERENCES branchdetail(Id)
+);
+
+-- 4.2a pos_table_qr — the code printed on a table for QR ordering.
+--
+-- The Token is the ONLY thing inside the QR image. Tenant, branch and table are
+-- resolved from it server-side, so a guest cannot address another table by
+-- editing a URL, and a misused card is revoked by rotating its token (the row
+-- is updated in place; the old token simply stops resolving).
+--
+-- Issued lazily the first time a branch's QR sheet is opened, so table CRUD
+-- never has to know codes exist. BranchDetailId is denormalised: it lets the
+-- public resolve find the branch without walking table → floor, and survives a
+-- table being moved. See QR_TABLE_ORDERING_DESIGN.md §3.1.
+CREATE TABLE pos_table_qr (
+    Id              VARCHAR(50)  NOT NULL,
+    -- crypto.randomBytes(16) as hex: 128 bits.
+    Token           CHAR(32)     NOT NULL,
+    TableId         VARCHAR(50)  NOT NULL,
+    BranchDetailId  VARCHAR(50)  NOT NULL,
+    TenantId        VARCHAR(50)  NOT NULL,
+    Active          TINYINT(1)   NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE KEY uk_tableqr_token (Token),
+    -- One live code per table: rotate overwrites, "print" twice converges.
+    UNIQUE KEY uk_tableqr_table (TableId, TenantId),
+    INDEX idx_tableqr_branch (TenantId, BranchDetailId),
+    FOREIGN KEY (TableId) REFERENCES pos_table(Id)
 );
 
 -- 4.3 pos_channel — sales channels (dinein / online / takeaway) master
@@ -1903,6 +1968,12 @@ CREATE TABLE pos_order (
     -- the same reason pos_kot carries one: whoever packs the bag acts on it
     -- without reading the cooking instructions.
     NoCutlery       TINYINT(1)     NOT NULL DEFAULT 0,
+    -- WHY STAFF REFUSED a round a guest placed from a QR table. Set only by
+    -- POST /api/pos/qr/orders/:id/reject, which also cancels the round; the
+    -- guest's phone shows the reason. A coded reason from the house
+    -- vocabulary (pos_rejection_reason), plus an optional short note.
+    RejectionReasonId VARCHAR(50)  NULL,
+    RejectionNote   VARCHAR(200)   NULL,
     TenantId        VARCHAR(50)    NOT NULL,
     Active          TINYINT(1)     NOT NULL,
     CreatedOn       DATETIME,
@@ -2536,6 +2607,51 @@ CREATE TABLE pos_branch_media (
     -- No FK onto branchdetail, matching user_tenants.branch_detail_id: retiring a
     -- branch must not be blocked by the picture that used to be on its bills.
     INDEX idx_branchmedia_branch (TenantId, BranchDetailId)
+);
+
+-- 4.14a-ii pos_branch_payment_method — which tenders THIS outlet accepts.
+--
+-- The catalogue of methods is tenant-wide (paymentmode); whether each one is
+-- offered is not. One outlet takes cards, the one inside the food court does
+-- not, and both read the same catalogue.
+--
+-- ABSENCE MEANS INHERIT. No row here = use paymentmode.EnabledByDefault. This is
+-- the whole point of the table and the reason it is an OVERRIDE rather than a
+-- membership list:
+--
+--   * a brand-new branch offers Cash and UPI having written nothing;
+--   * a method added next year is governed by its own default at every existing
+--     branch, with no backfill pass — and this repository does not do backfills;
+--   * only a deliberate per-branch decision costs a row.
+--
+-- The corollary the save path honours: setting a branch back to the tenant
+-- default DELETES the row rather than storing it, so inheritance stays the
+-- resting state and this table only ever holds genuine exceptions.
+--
+-- Portal settlement is unaffected: pos_portal.SettlementPaymentModeId names its
+-- tender directly, so a settlement mode switched off at the counter still
+-- settles portal orders.
+CREATE TABLE pos_branch_payment_method (
+    Id              VARCHAR(50) NOT NULL,
+    TenantId        VARCHAR(50) NOT NULL,
+    BranchDetailId  VARCHAR(50) NOT NULL,
+    PaymentModeId   VARCHAR(50) NOT NULL,
+    Enabled         TINYINT(1)  NOT NULL,
+    Active          TINYINT(1)  NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    -- One decision per method per branch. This is what makes a save an upsert
+    -- rather than a second opinion.
+    UNIQUE KEY uk_branch_paymode (TenantId, BranchDetailId, PaymentModeId),
+    INDEX idx_bpm_branch (TenantId, BranchDetailId),
+    -- Deleting a method takes its overrides with it. An orphan override would
+    -- enable nothing and sit in the resolve join forever.
+    FOREIGN KEY (PaymentModeId) REFERENCES paymentmode(Id) ON DELETE CASCADE
+    -- No FK onto branchdetail, matching pos_branch_media and user_tenants:
+    -- retiring a branch must not be blocked by a settings row.
 );
 
 -- 4.14b pos_tax_setting — whether this tenant charges GST at all.

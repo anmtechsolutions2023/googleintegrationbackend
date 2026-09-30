@@ -16,11 +16,23 @@ const { POS_RETURN_REASONS, TAX_GROUP_DEFAULTS } = require('../../config/constan
 // Tender → the account the money LANDS IN. Without this mapping every tender
 // books to 'Sales' and no account means anything: cash sales and card sales
 // become indistinguishable, and cash flow cannot be computed at all.
+// [Type, account, enabledByDefault, requiresReference]
+//
+// ORDER IS LOAD-BEARING. paymentmode is read CreatedOn ASC, and the till defaults
+// its first tender to the first row — so Cash must be seeded first and UPI
+// second. Before this list was ordered, the default tender was whatever had been
+// created most recently, which for every provisioned tenant was
+// 'District Settlement': a tender booking to a receivable, leaving the cash
+// session short by the whole sale with nothing on screen to explain it.
+//
+// Only Cash and UPI start enabled. The rest exist, fully mapped to an account,
+// one toggle away — which is the point: turning Card on must not require anyone
+// to know that card money lands in Bank.
 const MODES = [
-  ['Cash', 'Cash'],
-  ['Card', 'Bank'],
-  ['UPI', 'Bank'],
-  ['Wallet', 'Wallet'],
+  ['Cash',   'Cash',   1, 0],
+  ['UPI',    'Bank',   1, 1],
+  ['Card',   'Bank',   0, 1],
+  ['Wallet', 'Wallet', 0, 1],
 ];
 // 'Payment' classifies money OUT — paymentbreakup.PaymentReceivedTypeId is NOT
 // NULL, and reusing 'Full' would make expenses look like receipts in reports.
@@ -57,6 +69,9 @@ const CHANNELS = [
   ['Dine In', 'DINEIN', 1],
   ['Takeaway', 'TAKEAWAY', 2],
   ['Online', 'ONLINE', 3],
+  // A guest ordering from the QR code on their table. Also ensured on first use
+  // by posqr.channel, for tenancies provisioned before QR ordering existed.
+  ['QR Table Order', 'QR', 4],
 ];
 
 // [Name, Code, ColorHex, ShortCode, CommissionPct] — the aggregators.
@@ -256,11 +271,14 @@ const provisionPosMasters = async (conn, { tenantId }, userPhone) => {
 
   // Tender types, each mapped to the account it lands in.
   const modeId = {};
-  for (const [Type, account] of MODES) {
+  // SortOrder is the INDEX in MODES, not a timestamp: CreatedOn is a DATETIME and
+  // every row below is inserted inside the same second, so ordering on it left
+  // the till's default tender to chance.
+  for (const [i, [Type, account, enabledByDefault, requiresReference]] of MODES.entries()) {
     modeId[Type] = await ensureByName(
       conn, 'paymentmode', 'Type', Type, tenantId,
-      'INSERT INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?, ?)',
-      (id) => [id, Type, accountId[account] ?? null, tenantId, by, by],
+      'INSERT INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, RequiresReference, EnabledByDefault, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)',
+      (id) => [id, Type, accountId[account] ?? null, requiresReference, enabledByDefault, i + 1, tenantId, by, by],
     );
   }
 
@@ -269,12 +287,18 @@ const provisionPosMasters = async (conn, { tenantId }, userPhone) => {
   // Per portal rather than one shared "Aggregator" tender because reconciling a
   // payout statement means answering "what does Swiggy owe us", and a single
   // tender would merge all three into one number nobody can check.
-  for (const [Name] of PORTALS) {
+  // Sorted after every counter tender (MODES.length + n), so they never lead the
+  // list even for a branch that switches one on.
+  for (const [n, [Name]] of PORTALS.entries()) {
     const Type = `${Name} Settlement`;
+    // OFF at the counter, and no reference number: a payout statement reconciles
+    // against the portal, not against a number a cashier types. Switching these
+    // off costs portal settlement nothing — pos_portal.SettlementPaymentModeId
+    // names its tender directly and never consults the counter's list.
     modeId[Type] = await ensureByName(
       conn, 'paymentmode', 'Type', Type, tenantId,
-      'INSERT INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?, ?)',
-      (id) => [id, Type, accountId['Aggregator Receivable'] ?? null, tenantId, by, by],
+      'INSERT INTO paymentmode (Id, Type, DefaultAccountTypeBaseId, RequiresReference, EnabledByDefault, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, 0, 0, ?, ?, 1, NOW(), ?, ?)',
+      (id) => [id, Type, accountId['Aggregator Receivable'] ?? null, MODES.length + n + 1, tenantId, by, by],
     );
   }
 

@@ -72,6 +72,29 @@ module.exports = {
     // trips, sign-in stops platform-wide and logs at ERROR.
     DAILY_SEND_CAP: num(process.env.OTP_DAILY_SEND_CAP, 500),
   },
+
+  // ── Diners (QR table ordering) ───────────────────────────────────────────
+  // Counted SEPARATELY from staff. COST.DAILY_SEND_CAP above counts LOGIN and
+  // SIGNUP only, so a busy dining room can never switch off staff sign-in —
+  // that breaker stops the POS, this one only stops ordering from a phone,
+  // and staff can always take the order at the till instead.
+  //
+  // The per-number, per-IP, cooldown, attempt and TTL rules above apply to
+  // diners unchanged; these are the limits only a diner needs.
+  // See QR_TABLE_ORDERING_DESIGN.md §4.2.1.
+  DINER: {
+    // Per printed QR code, per OTP_REQUEST.WINDOW_SECONDS. A photographed card
+    // cannot be used to walk a list of numbers.
+    MAX_PER_TABLE: num(process.env.DINER_MAX_PER_TABLE, 20),
+    // Per restaurant (tenant, every branch) per calendar day.
+    TENANT_DAILY_CAP: num(process.env.DINER_TENANT_DAILY_CAP, 500),
+    // Whole platform, diners only. Set from the Meta budget before go-live.
+    DAILY_SEND_CAP: num(process.env.DINER_DAILY_SEND_CAP, 5000),
+    // How long one verification lets a diner keep ordering at that table.
+    SESSION_TTL_SECONDS: num(process.env.DINER_SESSION_TTL_SECONDS, 3 * 60 * 60),
+    // Coarse per-IP guard on the public /api/dine router, like HTTP above.
+    HTTP_MAX_REQUESTS: num(process.env.DINER_HTTP_MAX_REQUESTS, 300),
+  },
 };
 
 // Not here, deliberately — these are concurrency and pagination bounds, not

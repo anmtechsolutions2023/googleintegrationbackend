@@ -943,15 +943,36 @@ const swaggerSpec = {
 
       // ─── PaymentMode ───────────────────────────────────────────────────────
       PaymentModeCreate: {
-        type: 'object', required: ['Type'],
+        type: 'object', required: ['Type', 'DefaultAccountTypeBaseId'],
         properties: {
-          Type:   { type: 'string', maxLength: 50, example: 'Cash' },
+          Type:   { type: 'string', maxLength: 50, example: 'Meal Voucher' },
+          DefaultAccountTypeBaseId: {
+            type: 'string', format: 'uuid',
+            description: 'REQUIRED. The account money tendered this way lands in. A tender exists to say where money goes; one with no account books nowhere and disappears from every report that groups by account.',
+          },
+          RequiresReference: {
+            type: 'boolean', default: false,
+            description: 'Whether the till and the ledger demand a reference number before the sale can be settled. A property of the METHOD, not of its name — this replaced a hardcoded match on Card/UPI/Wallet that stopped applying the moment a tenant renamed one.',
+          },
+          EnabledByDefault: {
+            type: 'boolean', default: true,
+            description: 'What an outlet that has never been configured does with this method. Outlets inherit it until they override it — see GET /api/pos/payment-methods.',
+          },
           Active: { type: 'boolean', default: true },
         },
       },
       PaymentModeUpdate: {
         type: 'object', minProperties: 1,
-        properties: { Type: { type: 'string', maxLength: 50 }, Active: { type: 'boolean' } },
+        properties: {
+          Type: { type: 'string', maxLength: 50 },
+          DefaultAccountTypeBaseId: {
+            type: 'string', format: 'uuid',
+            description: 'May be changed but not cleared: a blank is rejected rather than stored as NULL.',
+          },
+          RequiresReference: { type: 'boolean' },
+          EnabledByDefault: { type: 'boolean' },
+          Active: { type: 'boolean' },
+        },
       },
       PaymentMode: {
         type: 'object',
@@ -967,6 +988,56 @@ const swaggerSpec = {
             type: 'string', nullable: true, readOnly: true,
             enum: ['ASSET', 'LIABILITY', 'INCOME', 'EXPENSE'],
             description: 'Kind of the account above.',
+          },
+          RequiresReference: { type: 'boolean' },
+          EnabledByDefault: { type: 'boolean' },
+          SortOrder: {
+            type: 'integer', readOnly: true,
+            description: 'The order the till offers methods in, and so which tender a sale defaults to. Assigned on create (current maximum + 1); not accepted from the client.',
+          },
+        },
+      },
+
+      // ─── BranchPaymentMethod ───────────────────────────────────────────────
+      // The tenant-wide catalogue above, resolved for ONE outlet.
+      BranchPaymentMethod: {
+        type: 'object',
+        properties: {
+          paymentModeId: { type: 'string', format: 'uuid' },
+          type: { type: 'string', example: 'UPI' },
+          accountId: { type: 'string', format: 'uuid', nullable: true },
+          accountName: { type: 'string', nullable: true, example: 'Bank' },
+          accountKind: { type: 'string', nullable: true, enum: ['ASSET', 'LIABILITY', 'INCOME', 'EXPENSE'] },
+          requiresReference: { type: 'boolean' },
+          active: { type: 'boolean', description: 'From the catalogue. An inactive method is offered by no outlet, whatever the outlet says about it.' },
+          enabled: { type: 'boolean', description: 'The effective answer for THIS outlet — the branch override if there is one, otherwise enabledByDefault.' },
+          enabledByDefault: { type: 'boolean' },
+          source: {
+            type: 'string', enum: ['default', 'branch'],
+            description: '`default` — this outlet has made no decision and is inheriting. `branch` — decided here, and there is an override row to clear.',
+          },
+        },
+      },
+      BranchPaymentMethodList: {
+        type: 'object',
+        properties: {
+          branchId: { type: 'string', format: 'uuid' },
+          methods: { type: 'array', items: { $ref: '#/components/schemas/BranchPaymentMethod' } },
+        },
+      },
+      BranchPaymentMethodUpdate: {
+        type: 'object', required: ['methods'],
+        properties: {
+          methods: {
+            type: 'array', minItems: 1,
+            description: 'May name ONE method or every one. A method this list does not name is left exactly as it was, so a screen can save a single switch without restating the rest.',
+            items: {
+              type: 'object', required: ['paymentModeId', 'enabled'],
+              properties: {
+                paymentModeId: { type: 'string', format: 'uuid' },
+                enabled: { type: 'boolean' },
+              },
+            },
           },
         },
       },
@@ -2078,7 +2149,7 @@ const swaggerSpec = {
         type: 'object', required: ["Name"],
         properties: {
           Name: {"type":"string"},
-          Phone: {"type":"string"},
+          Phone: { type: 'string', nullable: true, example: '+919876543210', description: 'Mobile number. Accepted as typed ("98765 43210", "+91 98765 43210") and STORED normalised to E.164 (+91XXXXXXXXXX) — the same form a diner verifies with at a QR table, so the till and the phone find one customer. 400 if it is not a valid mobile number; 409 if another customer of this restaurant already uses it. Send null or "" for no number.' },
           Email: {"type":"string"},
           Visits: {"type":"integer"},
           TotalSpent: {"type":"number"},
@@ -2091,7 +2162,7 @@ const swaggerSpec = {
         type: 'object',
         properties: {
           Name: {"type":"string"},
-          Phone: {"type":"string"},
+          Phone: { type: 'string', nullable: true, example: '+919876543210', description: 'Mobile number. Accepted as typed ("98765 43210", "+91 98765 43210") and STORED normalised to E.164 (+91XXXXXXXXXX) — the same form a diner verifies with at a QR table, so the till and the phone find one customer. 400 if it is not a valid mobile number; 409 if another customer of this restaurant already uses it. Send null or "" for no number.' },
           Email: {"type":"string"},
           Visits: {"type":"integer"},
           TotalSpent: {"type":"number"},
@@ -5073,6 +5144,40 @@ const swaggerSpec = {
       },
     },
 
+    // ── Branch payment methods ─────────────────────────────────────────────
+    // WHICH TENDERS AN OUTLET ACCEPTS. The catalogue of methods is tenant-wide
+    // (/api/paymentmodes); this is the per-branch override over it, so one
+    // outlet can take cards and the one inside the food court need not.
+    //
+    // THE RESOLVE RULE: no override row means inherit EnabledByDefault. That is
+    // what lets a brand-new outlet take Cash and UPI having stored nothing, and
+    // a method added next year govern every existing outlet with no backfill.
+    '/api/pos/payment-methods': {
+      get: {
+        tags: ['PaymentMethods'],
+        summary: 'What this outlet accepts, and what it would accept',
+        description:
+          'Every method in the tenant catalogue with its effective state at one branch — including the ones switched OFF, because the configuration screen needs them in order to offer them. The till filters on `enabled` and `active`.\n\n`source` says whether the answer came from this outlet (`branch`) or from the tenant default (`default`).\n\nOpen to every scope that can operate a till, plus the master-data scopes: the person pressing Settle has to know what the counter takes, and a cashier holds no configuration scope. Audited.',
+        security,
+        parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { ...singleResponse('BranchPaymentMethodList'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+      put: {
+        tags: ['PaymentMethods'],
+        summary: 'Set which methods this outlet accepts',
+        description:
+          'Applies the named decisions in one transaction and answers with the outlet\'s resolved state.\n\n**Partial lists are normal.** A method this call does not name is untouched, so two people editing different switches do not overwrite each other.\n\n**Setting a method back to its tenant default REMOVES the override** rather than storing it. Storing "same as the default" would freeze the outlet against any later change of that default, which is the one thing inheritance is for.\n\n**409 if the save would leave the outlet with no way to take money.** A till that can accept nothing is not a state worth persisting, and the error is cheaper here than at a counter mid-sale.\n\nRequires POS_CONFIG:WRITE or MASTER_DATA:WRITE. Audited at WARN — it changes what a till can do.',
+        security,
+        parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/BranchPaymentMethodUpdate' } } } },
+        responses: {
+          ...singleResponse('BranchPaymentMethodList'),
+          409: { description: 'The save would leave this outlet unable to take any payment' },
+          ...responses.validation, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+
     // ── Receipt format ─────────────────────────────────────────────────────
     // Stored in pos_setting, the table branch preferences already live in — no
     // new table, and each outlet keeps its own format for free. READS are open
@@ -5386,5 +5491,14 @@ const swaggerSpec = {
     },
   },
 };
+
+// QR table ordering — staff (/api/pos/qr) and guest (/api/dine) surfaces, plus
+// the WhatsApp OTP endpoints they build on. Kept in their own module so this
+// file is not the only place a reviewer has to read to see that surface.
+const qrOrderingDocs = require('./swagger.qrOrdering');
+
+Object.assign(swaggerSpec.components.securitySchemes, qrOrderingDocs.securitySchemes);
+Object.assign(swaggerSpec.components.schemas, qrOrderingDocs.schemas);
+Object.assign(swaggerSpec.paths, qrOrderingDocs.paths);
 
 module.exports = swaggerSpec;

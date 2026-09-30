@@ -16,8 +16,12 @@ const controller = require('./paymentmode.controller');
 // section to reach one dropdown. Same reasoning as /api/pricing/quote and
 // /api/pos/branches, which already do this.
 //
-// WRITE stays with master data — deciding which tenders the business accepts is
-// a configuration decision, not a counter one.
+// WRITE stays out of the counter's hands — deciding which tenders the business
+// accepts is a configuration decision, not a till one. POS_CONFIG:WRITE is
+// admitted alongside MASTER_DATA:WRITE because the Front Desk → Payment Methods
+// screen creates methods as well as toggling them per outlet, and whoever
+// configures the POS should not need the whole Master Data section to add
+// 'Meal Voucher'.
 const READ = [
   SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
   SCOPES.MASTER_DATA_READ, SCOPES.MASTER_DATA_WRITE,
@@ -33,21 +37,24 @@ router.get('/:id', authenticateToken,
 router.post(
   '/',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.MASTER_DATA_WRITE, SCOPES.POS_CONFIG_WRITE),
   auditLogCrud('Payment Mode'),
   ...controller.create
 );
 router.put(
   '/:id',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.MASTER_DATA_WRITE, SCOPES.POS_CONFIG_WRITE),
   auditLogCrud('Payment Mode'),
   ...controller.update
 );
 router.delete(
   '/:id',
   authenticateToken,
-  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.MASTER_DATA_WRITE),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.MASTER_DATA_WRITE, SCOPES.POS_CONFIG_WRITE),
   auditLogCrud('Payment Mode'),
   ...controller.deleteById
 );

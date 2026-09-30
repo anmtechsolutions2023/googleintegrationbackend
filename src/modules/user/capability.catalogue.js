@@ -36,7 +36,7 @@ const SCREENS = Object.fromEntries(
 // on feature_short_name — the half of the scope before the colon.
 const GROUPS = [
   { key: 'front-desk', label: 'Front Desk',
-    members: ['POS_ORDER', 'POS_BILLING', 'POS_KITCHEN', 'POS_OPS', 'POS_CRM', 'POS_CONFIG', 'POS_REPORTS'] },
+    members: ['POS_ORDER', 'POS_BILLING', 'POS_KITCHEN', 'POS_OPS', 'POS_CRM', 'POS_CONFIG', 'POS_QR', 'POS_REPORTS'] },
   { key: 'money', label: 'Money',
     members: ['TRANSACTIONS', 'PAYMENTS', 'EXPENSE'] },
   { key: 'catalogue', label: 'Catalogue & stock',
@@ -55,6 +55,7 @@ const NAMES = {
   POS_BILLING:  'Cash drawer',
   POS_CONFIG:   'Menu & setup',
   POS_CRM:      'Customers',
+  POS_QR:       'QR table ordering',
   POS_REPORTS:  'Front desk reports',
   TRANSACTIONS: 'Books',
   ASSET:        'Assets',

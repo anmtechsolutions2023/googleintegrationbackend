@@ -144,6 +144,23 @@ module.exports = {
       'We could not send your code just now. Please try again in a moment.',
     OTP_UNAVAILABLE:
       'Sign-in by WhatsApp is temporarily unavailable. Please contact your administrator.',
+    // ── QR table ordering (diner-facing unless noted) ───────────────────
+    // A guest is never told WHY a code is inactive — unknown, rotated and
+    // switched off read the same, so nobody can probe which codes exist.
+    QR_NOT_AVAILABLE: 'This QR code isn\'t active. Please ask a staff member to take your order.',
+    QR_DINER_CODES_PAUSED: 'We can\'t send codes right now. Your server will take your order.',
+    QR_NO_WHATSAPP: 'That number isn\'t on WhatsApp. The code is sent on WhatsApp, so try a number that has it.',
+    QR_SESSION_ENDED: 'Your session has ended. Scan the QR code on your table again to keep ordering.',
+    QR_MENU_ONLY: 'Ordering from your phone is off here. Please order with your server.',
+    QR_ITEM_NOT_AT_BRANCH: 'Something in your order is not on this restaurant\'s menu. Refresh the menu and try again.',
+    QR_EMPTY_ORDER: 'Add at least one dish before placing your order.',
+    // Staff-facing.
+    QR_ORDER_NOT_PENDING: 'This order was already accepted or rejected by someone else. Refresh the list.',
+    QR_ORDER_NOT_QR: 'Only orders placed from a table QR code can be accepted or rejected here.',
+    QR_REJECTION_REASON_UNKNOWN: 'Choose a reason from the list.',
+    QR_TABLE_NOT_FOUND: 'That table does not exist or has been retired.',
+    QR_TABLE_NO_BRANCH: 'This table is not on a branch floor yet. Put it on a floor before printing its code.',
+    CUSTOMER_PHONE_TAKEN: 'Another customer already uses this mobile number.',
     INVITE_NOT_PENDING: 'No pending invitation found.',
     SELF_ROLE_CHANGE_FORBIDDEN: 'You cannot change your own roles. Ask another administrator in this tenancy.',
     SELF_DEMOTE_FORBIDDEN: 'You cannot remove your own administrator access — you would lose the ability to restore it.',

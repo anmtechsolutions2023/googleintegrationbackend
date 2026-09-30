@@ -36,6 +36,7 @@ const batchdetailRoutes = require('../modules/batchdetail/batchdetail.routes');
 const itemdetailRoutes = require('../modules/itemdetail/itemdetail.routes');
 const mastersetupRoutes = require('../modules/mastersetup/mastersetup.routes');
 const posmediaRoutes = require('../modules/posmedia/posmedia.routes');
+const pospaymentmethodRoutes = require('../modules/pospaymentmethod/pospaymentmethod.routes');
 const businessprofileRoutes = require('../modules/businessprofile/businessprofile.routes');
 const importRoutes = require('../modules/import/import.routes');
 const pricingRoutes = require('../modules/pricing/pricing.routes');
@@ -83,6 +84,9 @@ const poswebhookRoutes = require('../modules/poswebhook/poswebhook.routes');
 // Also unauthenticated by necessity — Meta has no user either. Verified by an
 // HMAC over the raw body; see whatsapp.webhook.controller.
 const whatsappRoutes = require('../modules/whatsapp/whatsapp.routes');
+// QR table ordering — staff side (scope-gated) and guest side (public).
+const posqrRoutes = require('../modules/posqr/posqr.routes');
+const dineRoutes = require('../modules/posdine/dine.routes');
 const posfeedbackRoutes = require('../modules/posfeedback/posfeedback.routes');
 const postokenRoutes = require('../modules/postoken/postoken.routes');
 const possettingRoutes = require('../modules/possetting/possetting.routes');
@@ -305,6 +309,14 @@ const registerRoutes = (app) => {
   // WhatsApp delivery receipts. Purely observability: it can mark a code
   // delivered or failed, and can never issue or consume one.
   app.use('/api/webhooks/whatsapp', whatsappRoutes);
+  // QR table ordering, staff side: table codes, the branch switch and the
+  // review queue of orders guests placed. Scope-gated like every POS router.
+  app.use('/api/pos/qr', posqrRoutes);
+  // QR table ordering, guest side. The THIRD router outside authenticateToken:
+  // a guest has no staff account. Anonymous routes are keyed on the scanned QR
+  // token; the rest use a diner session signed with a different key from staff
+  // tokens, so neither kind of token opens the other side. See dine.routes.js.
+  app.use('/api/dine', dineRoutes);
   app.use('/api/pos/feedback', posfeedbackRoutes);
   app.use('/api/pos/tokens', postokenRoutes);
   app.use('/api/pos/settings', possettingRoutes);
@@ -318,6 +330,9 @@ const registerRoutes = (app) => {
   // receipt format: the format owns WHETHER an image prints, this owns the bytes,
   // and a branch may legitimately hold a logo it does not print.
   app.use('/api/pos/media', posmediaRoutes);
+  // Which tenders THIS outlet accepts. The tenant-wide catalogue of methods
+  // stays at /api/paymentmodes; this is the per-branch override over it.
+  app.use('/api/pos/payment-methods', pospaymentmethodRoutes);
   // Campaigns and the offers inside them. An offer is not a second way to price
   // a bill — the engine produces the same per-line discounts the till already
   // takes, so posbill.recomputeTotals stays the only pricing path.

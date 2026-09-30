@@ -43,7 +43,7 @@ describe('provisionPosMasters', () => {
     expect(countBy(conn.inserted, 'expense_category')).toBe(7);
     expect(countBy(conn.inserted, 'asset_category')).toBe(5);
     expect(countBy(conn.inserted, 'pos_food_type')).toBe(3);        // Veg/Vegan/Non-Veg
-    expect(countBy(conn.inserted, 'pos_channel')).toBe(3);          // Dine In/Takeaway/Online
+    expect(countBy(conn.inserted, 'pos_channel')).toBe(4);          // Dine In/Takeaway/Online/QR Table Order
     expect(countBy(conn.inserted, 'pos_portal')).toBe(3);           // Zomato/Swiggy/District
     // One numbering series per document type: sales, expenses, orders, KOTs,
     // bills, counter tokens, credit notes.

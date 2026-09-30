@@ -89,7 +89,12 @@ const verifyOtp = async (req, res, next) => {
   try {
     const { challengeId, code, name } = validate(verifySchema, req.body);
 
-    const { phone } = await otpService.verifyOtp({ challengeId, code });
+    // Staff purposes only. A code a diner was sent at a table proves the same
+    // number, but it was issued under diner limits for a diner session and must
+    // not be spendable here.
+    const { phone } = await otpService.verifyOtp({
+      challengeId, code, expectedPurposes: otpService.STAFF_PURPOSES,
+    });
 
     const userPermissions = await authService.findAndGetPermissions(req, {
       phone,

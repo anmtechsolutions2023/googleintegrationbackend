@@ -11,10 +11,13 @@ const gstinField = Joi.string().trim().uppercase().pattern(GSTIN_PATTERN)
   .allow(null, '').optional()
   .messages({ 'string.pattern.base': 'GSTIN must be 15 characters in the GST format.' });
 const { entityId, optionalEntityId } = require('../../utils/idSchema');
+const { phoneField } = require('../../utils/phoneSchema');
 
 const createSchema = Joi.object({
   Name: Joi.string().required().max(100).allow(null).trim(),
-  Phone: Joi.string().optional().max(20).allow(null, '').trim(),
+  // Validated AND normalised to E.164 (+91XXXXXXXXXX) — the same form a diner
+  // verifies with at a QR table, so the till and the phone find ONE customer.
+  Phone: phoneField().allow(null, '').optional(),
   Email: Joi.string().optional().max(100).allow(null, '').trim(),
   Visits: Joi.number().integer().optional().default(0).allow(null),
   TotalSpent: Joi.number().optional().default(0).allow(null),
@@ -27,7 +30,7 @@ const createSchema = Joi.object({
 
 const updateSchema = Joi.object({
   Name: Joi.string().optional().max(100).allow(null, '').trim(),
-  Phone: Joi.string().optional().max(20).allow(null, '').trim(),
+  Phone: phoneField().allow(null, '').optional(),
   Email: Joi.string().optional().max(100).allow(null, '').trim(),
   Visits: Joi.number().integer().optional().allow(null),
   TotalSpent: Joi.number().optional().allow(null),

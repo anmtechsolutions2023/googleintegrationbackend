@@ -816,19 +816,66 @@ module.exports = {
       // settled to 'Zomato Settlement' — that books to Aggregator Receivable,
       // money we are owed for weeks, and leaves the cash session short by the
       // whole sale with nothing on screen to explain it.
+      // ORDER BY SortOrder, NOT CreatedOn. The till takes the first row as its
+      // default tender, and CreatedOn is a DATETIME every provisioned mode shares
+      // to the second — so this used to be DESC and the default tender was
+      // whatever was created last. Id breaks any remaining tie so a page of
+      // results is stable across requests.
       SELECT_ALL: `SELECT pm.*,
           a.Name AS AccountName, a.Kind AS AccountKind
         FROM paymentmode pm
         LEFT JOIN accounttypebase a
           ON a.Id = pm.DefaultAccountTypeBaseId AND a.TenantId = pm.TenantId
-        WHERE pm.TenantId = ? ORDER BY pm.CreatedOn DESC`,
+        WHERE pm.TenantId = ? ORDER BY pm.SortOrder ASC, pm.Id ASC`,
       COUNT: 'SELECT COUNT(*) as total FROM paymentmode WHERE TenantId = ?',
       SELECT_BY_ID: 'SELECT * FROM paymentmode WHERE Id = ? AND TenantId = ?',
+      // Where a newly created method sorts: after everything that exists. NULL
+      // (no rows yet) coalesces to 0, so the first method a tenant creates is 1.
+      NEXT_SORT_ORDER:
+        'SELECT COALESCE(MAX(SortOrder), 0) + 1 AS nextSortOrder FROM paymentmode WHERE TenantId = ?',
+      // DefaultAccountTypeBaseId is written here for the first time. It has been
+      // a column since the ledger shipped and the SELECT above has always joined
+      // its name — but no INSERT or UPDATE ever set it, so every method created
+      // through the API booked to no account at all.
       INSERT:
-        'INSERT INTO paymentmode (Id, TenantId, Type, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, NOW(), ?, ?)',
+        'INSERT INTO paymentmode (Id, TenantId, Type, DefaultAccountTypeBaseId, RequiresReference, EnabledByDefault, SortOrder, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
       UPDATE:
-        'UPDATE paymentmode SET Type = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+        'UPDATE paymentmode SET Type = ?, DefaultAccountTypeBaseId = ?, RequiresReference = ?, EnabledByDefault = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM paymentmode WHERE Id = ? AND TenantId = ?',
+    },
+
+    // Which tenders each OUTLET accepts. The catalogue above is tenant-wide;
+    // this is the per-branch override over it.
+    POS_BRANCH_PAYMENT_METHOD: {
+      // The resolve query. BranchEnabled is NULL exactly when this branch has
+      // made no decision, which is the signal the service turns into "inherit
+      // EnabledByDefault" — see the table comment in 01-schema-definition.sql.
+      //
+      // Ordered by SortOrder so the till's first offered tender, and therefore
+      // the tender a sale defaults to, is the same on every request.
+      SELECT_RESOLVED: `SELECT pm.Id, pm.Type, pm.Active, pm.SortOrder,
+          pm.RequiresReference, pm.EnabledByDefault,
+          pm.DefaultAccountTypeBaseId AS AccountId,
+          a.Name AS AccountName, a.Kind AS AccountKind,
+          bpm.Enabled AS BranchEnabled
+        FROM paymentmode pm
+        LEFT JOIN accounttypebase a
+          ON a.Id = pm.DefaultAccountTypeBaseId AND a.TenantId = pm.TenantId
+        LEFT JOIN pos_branch_payment_method bpm
+          ON bpm.PaymentModeId = pm.Id AND bpm.TenantId = pm.TenantId
+         AND bpm.BranchDetailId = ? AND bpm.Active = 1
+        WHERE pm.TenantId = ?
+        ORDER BY pm.SortOrder ASC, pm.Id ASC`,
+      // `:ids` is replaced with one bound placeholder per id by the repository.
+      // The ids themselves are always bound, never interpolated.
+      SELECT_MODES_BY_IDS:
+        'SELECT Id, Type, Active, EnabledByDefault FROM paymentmode WHERE TenantId = ? AND Id IN (:ids)',
+      UPSERT:
+        'INSERT INTO pos_branch_payment_method (Id, TenantId, BranchDetailId, PaymentModeId, Enabled, Active, CreatedOn, CreatedBy, UpdatedBy) '
+        + 'VALUES (?, ?, ?, ?, ?, 1, NOW(), ?, ?) '
+        + 'ON DUPLICATE KEY UPDATE Enabled = VALUES(Enabled), Active = 1, UpdatedOn = NOW(), UpdatedBy = VALUES(UpdatedBy)',
+      DELETE_ONE:
+        'DELETE FROM pos_branch_payment_method WHERE TenantId = ? AND BranchDetailId = ? AND PaymentModeId = ?',
     },
 
     // Payment Mode Transaction Detail Queries
@@ -1355,6 +1402,13 @@ module.exports = {
          ORDER BY (Phone = ?) DESC, LastVisitAt DESC, Name ASC
          LIMIT 10`,
       SELECT_BY_PHONE: 'SELECT * FROM pos_customer WHERE Phone = ? AND TenantId = ? LIMIT 1',
+      // One number, one customer. The id is excluded so an update that keeps
+      // its own number is not refused as a clash with itself.
+      SELECT_ID_BY_PHONE_EXCEPT:
+        'SELECT Id, Name FROM pos_customer WHERE Phone = ? AND TenantId = ? AND Id <> ? LIMIT 1',
+      // A diner naming themselves after a first visit saved them as a guest.
+      SET_NAME:
+        'UPDATE pos_customer SET Name = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
 
       // The CRM projection, incremented on the settle path. See
       // poscustomer.stats.service for why this increments rather than
@@ -2228,6 +2282,175 @@ module.exports = {
         "SELECT SettingKey, SettingValue FROM pos_setting WHERE TenantId = ? AND BranchDetailId = ? AND SettingKey LIKE CONCAT(?, '%')",
     },
 
+    // ── QR table ordering ─────────────────────────────────────────────────
+    // One printed code per table. The Token is the ONLY thing in the QR image;
+    // tenant, branch and table are resolved from it server-side, never taken
+    // from the URL. See QR_TABLE_ORDERING_DESIGN.md §3.1.
+    POS_TABLE_QR: {
+      // Every live table in one branch, with its code when it has one. A table's
+      // branch is its own, or its floor's — pos_table.BranchDetailId is nullable
+      // and older rows only carry the floor.
+      SELECT_BRANCH_TABLES: `
+        SELECT t.Id AS TableId, t.Name AS TableName, t.Capacity, t.FloorId,
+               f.Name AS FloorName,
+               COALESCE(t.BranchDetailId, f.BranchDetailId) AS BranchDetailId,
+               q.Id AS QrId, q.Token, q.CreatedOn AS IssuedOn, q.UpdatedOn AS RotatedOn
+          FROM pos_table t
+          LEFT JOIN pos_floor f ON f.Id = t.FloorId AND f.TenantId = t.TenantId
+          LEFT JOIN pos_table_qr q ON q.TableId = t.Id AND q.TenantId = t.TenantId AND q.Active = 1
+         WHERE t.TenantId = ? AND t.Active = 1
+           AND COALESCE(t.BranchDetailId, f.BranchDetailId) = ?
+         ORDER BY f.Name, t.Name`,
+      SELECT_TABLE: `
+        SELECT t.Id AS TableId, t.Name AS TableName,
+               COALESCE(t.BranchDetailId, f.BranchDetailId) AS BranchDetailId
+          FROM pos_table t
+          LEFT JOIN pos_floor f ON f.Id = t.FloorId AND f.TenantId = t.TenantId
+         WHERE t.Id = ? AND t.TenantId = ? AND t.Active = 1
+         LIMIT 1`,
+      // UNIQUE (TableId, TenantId): two people pressing "print" at once converge
+      // on one code instead of the second failing.
+      INSERT: `
+        INSERT INTO pos_table_qr
+          (Id, Token, TableId, BranchDetailId, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, 1, NOW(), ?, ?)
+        ON DUPLICATE KEY UPDATE Id = Id`,
+      // Rotating overwrites the token in place: the printed card stops resolving
+      // at once, and every diner session opened with it fails its next request.
+      ROTATE: `
+        UPDATE pos_table_qr
+           SET Token = ?, BranchDetailId = ?, Active = 1, UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE TableId = ? AND TenantId = ?`,
+      // The public resolve. Unknown, rotated and retired all miss the same way.
+      SELECT_BY_TOKEN: `
+        SELECT q.Id AS QrId, q.TenantId, q.BranchDetailId, q.TableId,
+               t.Name AS TableName, f.Name AS FloorName,
+               b.BranchName, o.Name AS BusinessName
+          FROM pos_table_qr q
+          JOIN pos_table t ON t.Id = q.TableId AND t.TenantId = q.TenantId AND t.Active = 1
+          LEFT JOIN pos_floor f ON f.Id = t.FloorId AND f.TenantId = t.TenantId
+          LEFT JOIN branchdetail b ON b.Id = q.BranchDetailId AND b.TenantId = q.TenantId
+          LEFT JOIN organizationdetail o ON o.Id = b.OrganizationDetailId AND o.TenantId = b.TenantId
+         WHERE q.Token = ? AND q.Active = 1
+         LIMIT 1`,
+      // What a diner session re-checks on every request.
+      SELECT_ACTIVE_BY_ID: `
+        SELECT q.Id AS QrId, q.TenantId, q.BranchDetailId, q.TableId
+          FROM pos_table_qr q
+          JOIN pos_table t ON t.Id = q.TableId AND t.TenantId = q.TenantId AND t.Active = 1
+         WHERE q.Id = ? AND q.Active = 1
+         LIMIT 1`,
+    },
+
+    // What a diner may read and do. Everything is keyed on values from the
+    // diner's SESSION (tenant, branch, table, customer), never on the request.
+    POS_DINE: {
+      CHANNEL_BY_CODE:
+        'SELECT Id FROM pos_channel WHERE TenantId = ? AND Code = ? LIMIT 1',
+      INSERT_CHANNEL: `
+        INSERT INTO pos_channel (Id, Name, Code, Description, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?)
+        ON DUPLICATE KEY UPDATE Id = Id`,
+      // The branch's menu. Unpaginated on purpose: one branch's menu is read
+      // whole by one screen, and a page boundary would hide dishes from guests.
+      MENU_FOR_BRANCH: `
+        SELECT im.Id, im.CostInfoId, im.PortionSize, im.ServesCount, im.PrepTimeMinutes,
+               idt.Name AS ItemName, idt.Description,
+               cat.Id AS CategoryId, cat.Name AS CategoryName,
+               ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg,
+               (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c
+                 WHERE c.ItemMetaId = im.Id AND c.Active = 1) AS ChannelIds
+          FROM pos_item_meta im
+          JOIN itemdetail idt ON idt.Id = im.ItemDetailId AND idt.TenantId = im.TenantId
+          LEFT JOIN categorydetail cat ON cat.Id = idt.CategoryId AND cat.TenantId = im.TenantId
+          LEFT JOIN pos_food_type ft ON ft.Id = im.FoodTypeId
+         WHERE im.TenantId = ? AND im.BranchDetailId = ? AND im.Active = 1
+         ORDER BY cat.Name, idt.Name`,
+      VARIANTS_FOR_ITEMS: `
+        SELECT l.ItemMetaId, v.Id, v.Name, v.Price
+          FROM pos_item_meta_variant l
+          JOIN pos_variant v ON v.Id = l.VariantId AND v.TenantId = l.TenantId AND v.Active = 1
+         WHERE l.TenantId = ? AND l.Active = 1 AND l.ItemMetaId IN (:ids)
+         ORDER BY v.SortOrder, v.Name`,
+      ADDONS_FOR_ITEMS: `
+        SELECT l.ItemMetaId, g.Id AS GroupId, g.Name AS GroupName,
+               g.MinSelection, g.MaxSelection,
+               a.Id AS AddonId, a.Name AS AddonName, a.Price
+          FROM pos_item_meta_addon_group l
+          JOIN pos_addon_group g ON g.Id = l.AddonGroupId AND g.TenantId = l.TenantId AND g.Active = 1
+          JOIN pos_addon a ON a.AddonGroupId = g.Id AND a.TenantId = g.TenantId AND a.Active = 1
+         WHERE l.TenantId = ? AND l.Active = 1 AND l.ItemMetaId IN (:ids)
+         ORDER BY l.SortOrder, g.SortOrder, a.SortOrder, a.Name`,
+      // Which of these menu rows belong to THIS branch and are on sale. The
+      // order service checks tenant, not branch; a diner at one outlet must not
+      // order another outlet's dish by id. The NAME comes back too: it is what
+      // prints on the kitchen ticket, so it is taken from the catalogue and
+      // never from what a phone sent.
+      ITEMS_ON_BRANCH: `
+        SELECT im.Id, idt.Name
+          FROM pos_item_meta im
+          JOIN itemdetail idt ON idt.Id = im.ItemDetailId AND idt.TenantId = im.TenantId
+         WHERE im.TenantId = ? AND im.BranchDetailId = ? AND im.Active = 1 AND im.Id IN (:ids)`,
+      // One diner's rounds at one table, from this session on.
+      ORDERS_FOR_DINER: `
+        SELECT o.Id, o.OrderNo, o.Status, o.Items, o.SubTotal, o.TaxAmount, o.Total,
+               o.CookingInstructions, o.CreatedOn, o.RejectionNote,
+               rr.Name AS RejectionReason,
+               (SELECT k.Status FROM pos_kot k
+                 WHERE k.OrderId = o.Id AND k.TenantId = o.TenantId
+                   AND LOWER(k.Status) <> 'cancelled'
+                 ORDER BY k.CreatedOn DESC LIMIT 1) AS KotStatus
+          FROM pos_order o
+          LEFT JOIN pos_rejection_reason rr ON rr.Id = o.RejectionReasonId AND rr.TenantId = o.TenantId
+         WHERE o.TenantId = ? AND o.TableId = ? AND o.CustomerId = ? AND o.CreatedOn >= ?
+         ORDER BY o.CreatedOn DESC
+         LIMIT 20`,
+    },
+
+    // The staff side of a QR round: the review queue, accept and reject.
+    POS_QR_ORDER: {
+      // Placed from a phone, still open, and never sent to the kitchen. A round
+      // with a live ticket has been accepted; a cancelled one was rejected.
+      // `? IS NULL OR` lets one query serve "this branch" and "every branch".
+      SELECT_PENDING: `
+        SELECT o.Id, o.OrderNo, o.TableId, o.TableName, o.FloorName, o.BranchDetailId,
+               o.Items, o.SubTotal, o.TaxAmount, o.Total, o.CookingInstructions, o.CreatedOn,
+               c.Id AS CustomerId, c.Name AS CustomerName, c.Phone AS CustomerPhone,
+               c.Visits, c.TotalSpent, c.LastVisitAt
+          FROM pos_order o
+          JOIN pos_channel ch ON ch.Id = o.ChannelId AND ch.TenantId = o.TenantId AND ch.Code = ?
+          LEFT JOIN pos_customer c ON c.Id = o.CustomerId AND c.TenantId = o.TenantId
+         WHERE o.TenantId = ? AND LOWER(o.Status) = 'open'
+           AND (? IS NULL OR o.BranchDetailId = ?)
+           AND NOT EXISTS (SELECT 1 FROM pos_kot k
+                            WHERE k.OrderId = o.Id AND k.TenantId = o.TenantId
+                              AND LOWER(k.Status) <> 'cancelled')
+         ORDER BY o.CreatedOn ASC`,
+      // Locked for the decision: two staff pressing Accept and Reject at once
+      // must produce one outcome.
+      SELECT_FOR_DECISION: `
+        SELECT o.Id, o.Status, o.TableId, o.ChannelId, ch.Code AS ChannelCode,
+               (SELECT COUNT(*) FROM pos_kot k
+                 WHERE k.OrderId = o.Id AND k.TenantId = o.TenantId
+                   AND LOWER(k.Status) <> 'cancelled') AS LiveKots
+          FROM pos_order o
+          LEFT JOIN pos_channel ch ON ch.Id = o.ChannelId AND ch.TenantId = o.TenantId
+         WHERE o.Id = ? AND o.TenantId = ?
+         FOR UPDATE`,
+      REJECT: `
+        UPDATE pos_order
+           SET Status = 'cancelled', RejectionReasonId = ?, RejectionNote = ?,
+               UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE Id = ? AND TenantId = ? AND LOWER(Status) = 'open'`,
+      // House reasons only: a portal's own reasons mean nothing to a diner.
+      REJECTION_REASONS: `
+        SELECT Id, Name, Code FROM pos_rejection_reason
+         WHERE TenantId = ? AND Active = 1 AND PortalId IS NULL
+         ORDER BY Name`,
+      REJECTION_REASON_BY_ID:
+        'SELECT Id FROM pos_rejection_reason WHERE Id = ? AND TenantId = ? AND Active = 1 AND PortalId IS NULL LIMIT 1',
+    },
+
     // Everything hanging off ONE round: the token handed for it, its kitchen
     // tickets, and the invoice it was billed on. Assembled server-side so every
     // screen that links an order number opens the same view of it.
@@ -2382,15 +2605,19 @@ module.exports = {
     // an in-process counter resets on every deploy and is per-instance, and
     // both of those turn a spend limit into a suggestion.
     AUTH_OTP: {
+      // context_ref / tenant_id are NULL for staff sign-in. A DINER challenge
+      // carries the QR code it was requested at and that code's tenant: the
+      // first binds the code to one table, the second is what the per-
+      // restaurant daily cap counts.
       INSERT: `
         INSERT INTO auth_otp_challenge
-               (id, phone, purpose, code_hash, expires_at, request_ip, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+               (id, phone, purpose, code_hash, expires_at, request_ip, context_ref, tenant_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
 
       // The one challenge a verify may act on. Expiry and single-use are both
       // applied in SQL so a consumed or lapsed row simply is not found.
       SELECT_LIVE_BY_ID: `
-        SELECT id, phone, purpose, code_hash, attempts, expires_at
+        SELECT id, phone, purpose, code_hash, attempts, expires_at, context_ref, tenant_id
           FROM auth_otp_challenge
          WHERE id = ?
            AND consumed_at IS NULL
@@ -2409,10 +2636,13 @@ module.exports = {
 
       // A new request invalidates any earlier live code for that number, so
       // only one is ever valid and an old message cannot be replayed.
+      // Scoped to the PURPOSE: a diner asking for a code at a table must not
+      // burn a staff sign-in code the same person is halfway through typing on
+      // the till, and the reverse.
       CONSUME_LIVE_FOR_PHONE: `
         UPDATE auth_otp_challenge
            SET consumed_at = NOW()
-         WHERE phone = ? AND consumed_at IS NULL AND expires_at > NOW()`,
+         WHERE phone = ? AND purpose = ? AND consumed_at IS NULL AND expires_at > NOW()`,
 
       // Counts only what was actually SENT. A request for an unregistered
       // number records a row and sends nothing — it floods no handset and
@@ -2431,9 +2661,31 @@ module.exports = {
 
       // The cost circuit breaker. Counts what was actually SENT — a row that
       // never reached Meta cost nothing and must not consume the day's budget.
+      //
+      // STAFF ONLY. Diner codes are counted by COUNT_DINER_SENT_TODAY below and
+      // never reach this breaker — when it trips, the POS stops letting anyone
+      // sign in, and a busy dining room must not be able to cause that.
       COUNT_SENT_TODAY: `
         SELECT COUNT(*) AS n FROM auth_otp_challenge
-         WHERE created_at >= CURDATE() AND delivery_status <> 'PENDING'`,
+         WHERE created_at >= CURDATE() AND delivery_status <> 'PENDING'
+           AND purpose IN ('LOGIN', 'SIGNUP')`,
+
+      // ── Diner limits (QR table ordering) ────────────────────────────────
+      // The platform-wide diner breaker. Separate count, separate cap.
+      COUNT_DINER_SENT_TODAY: `
+        SELECT COUNT(*) AS n FROM auth_otp_challenge
+         WHERE created_at >= CURDATE() AND delivery_status <> 'PENDING'
+           AND purpose = 'DINER'`,
+      // One restaurant's share of the day, across all of its branches.
+      COUNT_DINER_SENT_TODAY_FOR_TENANT: `
+        SELECT COUNT(*) AS n FROM auth_otp_challenge
+         WHERE tenant_id = ? AND purpose = 'DINER'
+           AND created_at >= CURDATE() AND delivery_status <> 'PENDING'`,
+      // Per printed QR code. Counts every REQUEST, sent or not: this is the
+      // limit that stops a photographed card being used to walk a number list.
+      COUNT_RECENT_FOR_CONTEXT: `
+        SELECT COUNT(*) AS n FROM auth_otp_challenge
+         WHERE context_ref = ? AND created_at > (NOW() - INTERVAL ? SECOND)`,
 
       // The most recent SENT challenge, for the resend cooldown. Same reason
       // as above: there is nothing to wait for after a message that never left.
@@ -2778,6 +3030,9 @@ module.exports = {
         //   tenant_invitation_roles: removed by ON DELETE CASCADE
         'DELETE FROM asset WHERE TenantId = ?',
         'DELETE FROM audit_logs WHERE tenant_id = ?',
+        // Diner OTP challenges carry the restaurant they were sent for; staff
+        // ones carry none (tenant_id NULL) and are untouched.
+        'DELETE FROM auth_otp_challenge WHERE tenant_id = ?',
         'DELETE FROM batchdetail WHERE TenantId = ?',
         'DELETE FROM branchusergroupmapper WHERE TenantId = ?',
         'DELETE FROM notification_outbox WHERE TenantId = ?',
@@ -2811,6 +3066,13 @@ module.exports = {
         // here is free — but it MUST be swept: these are blobs, so a tenancy left
         // behind is kilobytes per branch that nothing will ever read again.
         'DELETE FROM pos_branch_media WHERE TenantId = ?',
+        // Before pos_table (wave 4): a table's QR code references it RESTRICT.
+        'DELETE FROM pos_table_qr WHERE TenantId = ?',
+        // Which tenders each outlet accepts. MUST precede paymentmode in Wave 2:
+        // the FK onto it is ON DELETE CASCADE, so MySQL would cope either way —
+        // but the sweep does not rely on cascades anywhere else, and a row left
+        // to a cascade is a row nobody counted.
+        'DELETE FROM pos_branch_payment_method WHERE TenantId = ?',
         // The GST switch, its history and recorded filings. No foreign keys in or
         // out, so their place in the sweep is free.
         'DELETE FROM pos_tax_setting WHERE TenantId = ?',
@@ -3063,8 +3325,12 @@ module.exports = {
         'SELECT Id FROM paymentreceivedtype WHERE Type = ? AND TenantId = ? AND Active = 1 LIMIT 1',
       // DefaultAccountTypeBaseId is what turns a tender into a cash movement:
       // it says which account the money landed in.
+      // RequiresReference rides along: the reference rule is a property of the
+      // METHOD, not of its name. It used to be enforced by matching Type against
+      // a hardcoded ['Card','UPI','Wallet'], so renaming 'Card' to 'Credit Card'
+      // silently stopped the ledger requiring one.
       SELECT_PAYMENT_MODE:
-        'SELECT Id, Type, DefaultAccountTypeBaseId FROM paymentmode WHERE Id = ? AND TenantId = ? AND Active = 1 LIMIT 1',
+        'SELECT Id, Type, DefaultAccountTypeBaseId, RequiresReference FROM paymentmode WHERE Id = ? AND TenantId = ? AND Active = 1 LIMIT 1',
 
       // Status machine: a move is legal only if the whitelist permits it, and
       // every move taken is recorded.
@@ -3942,6 +4208,34 @@ module.exports = {
   // does not stay live indefinitely.
   INVITATION: { EXPIRY_DAYS: 14 },
 
+  // QR table ordering. See QR_TABLE_ORDERING_DESIGN.md.
+  QR_ORDERING: {
+    // The sales channel a diner's round is recorded under. How the front desk
+    // tells a phone order from a till order, and how reports split the revenue.
+    CHANNEL: {
+      CODE: 'QR',
+      NAME: 'QR Table Order',
+      DESCRIPTION: 'Placed by a guest from the QR code on their table.',
+      SORT_ORDER: 4,
+    },
+    // Until a restaurant links dishes to the QR channel, the dine-in menu is
+    // what a guest at a table sees — so switching the feature on needs no setup.
+    FALLBACK_CHANNEL_CODE: 'DINEIN',
+    // Per branch, in pos_setting. No row = the default below.
+    SETTING_KEYS: { ENABLED: 'qr.ordering.enabled', MODE: 'qr.ordering.mode' },
+    MODES: { MENU: 'menu', ORDER: 'order' },
+    DEFAULTS: { ENABLED: false, MODE: 'order' },
+    // 128 bits: the only thing between the internet and a table's order queue.
+    TOKEN_BYTES: 16,
+    SESSION_AUDIENCE: 'diner',
+    // CreatedBy on a diner's round. Fits pos_order.CreatedBy (VARCHAR 50).
+    CREATED_BY_PREFIX: 'diner:',
+    GUEST_NAME: 'Guest',
+    // A cart larger than this is not a table's order.
+    MAX_LINES: 40,
+    MAX_QUANTITY: 50,
+  },
+
   LOYALTY: {
     // Fallback only. A tenant's own rate lives in pos_setting under
     // 'loyalty.rupees_per_point' — the same per-branch mechanism token
@@ -4197,8 +4491,6 @@ module.exports = {
     RECEIVED_PAYMENT:     'Payment',
     // A settled document is never edited — corrections happen by reversal.
     IMMUTABLE_STATUSES:   ['SETTLED', 'PARTIALLY_PAID', 'REFUNDED', 'CANCELLED'],
-    // Modes that must carry a reference number for reconciliation.
-    REF_REQUIRED_MODES:   ['Card', 'UPI', 'Wallet'],
 
     // ── Returns ────────────────────────────────────────────────────────────
     //
@@ -4405,6 +4697,13 @@ module.exports = {
     POS_OPS_READ: 'POS_OPS:READ',
     POS_OPS_WRITE: 'POS_OPS:WRITE',
     POS_REPORTS_READ: 'POS_REPORTS:READ',
+    // QR table ordering. READ sees the table codes and the queue of orders
+    // guests placed from their phones; WRITE issues, prints and rotates codes,
+    // switches the feature per branch, and accepts or rejects those orders.
+    // A feature row like every POS_* scope, so it is granted through roles and
+    // reaches an invited user with the role they are invited into.
+    POS_QR_READ: 'POS_QR:READ',
+    POS_QR_WRITE: 'POS_QR:WRITE',
     // Approving an expense commits money, so it is deliberately separate from
     // POS_OPS:WRITE — the person who raises a claim should not approve it.
     EXPENSE_APPROVE: 'EXPENSE:APPROVE',
@@ -4453,6 +4752,9 @@ module.exports.SCOPE_SETS = {
     SCOPES.POS_OPS_READ, SCOPES.POS_OPS_WRITE,
     SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE,
     SCOPES.POS_REPORTS_READ,
+    // The QR codes screen needs the branch picker and the floor plan to draw
+    // itself, like every other Front Desk screen.
+    SCOPES.POS_QR_READ, SCOPES.POS_QR_WRITE,
     SCOPES.TRANSACTIONS_READ, SCOPES.TRANSACTIONS_WRITE,
     SCOPES.ASSET_READ, SCOPES.ASSET_WRITE,
     SCOPES.ORGANIZATION_READ, SCOPES.ORGANIZATION_WRITE,
@@ -4489,5 +4791,39 @@ module.exports.SCOPE_SETS = {
     SCOPES.POS_CRM_READ, SCOPES.POS_CRM_WRITE,
     SCOPES.POS_ORDER_READ, SCOPES.POS_ORDER_WRITE,
     SCOPES.POS_BILLING_READ, SCOPES.POS_BILLING_WRITE,
+  ],
+
+  /**
+   * QR table ordering — the printed codes and the branch switch.
+   *
+   * READ lists and prints the codes; MANAGE issues a new one, rotates one or
+   * turns the feature on and off. Both belong to POS_QR alone: a code is a
+   * public door into the branch's order queue, so opening one is not something
+   * menu setup (POS_CONFIG) should grant by accident.
+   */
+  POS_QR_CODES_READ: [
+    SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.POS_QR_READ, SCOPES.POS_QR_WRITE,
+  ],
+  POS_QR_MANAGE: [
+    SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.POS_QR_WRITE,
+  ],
+
+  /**
+   * The orders guests placed from their phones.
+   *
+   * Reviewing one IS taking an order — accepting fires the kitchen ticket — so
+   * the floor staff who already hold POS_ORDER can see and decide them without a
+   * second grant. POS_QR admits the same, for a role built around QR service.
+   */
+  POS_QR_ORDER_READ: [
+    SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.POS_QR_READ, SCOPES.POS_QR_WRITE,
+    SCOPES.POS_ORDER_READ, SCOPES.POS_ORDER_WRITE,
+  ],
+  POS_QR_ORDER_DECIDE: [
+    SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.POS_QR_WRITE, SCOPES.POS_ORDER_WRITE,
   ],
 };
