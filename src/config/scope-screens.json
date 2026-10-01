@@ -1,74 +1,108 @@
 {
-  "generatedFrom": "src/config/navigation.js",
+  "generatedFrom": "src/config/workspaces.js",
   "subjects": [
     {
       "subject": "admin",
-      "group": "Analytics & Admin",
+      "group": "Admin",
       "screens": [
-        "People & Access"
+        "People & Access",
+        "Audit Logs"
       ]
     },
     {
       "subject": "ASSET",
-      "group": "Setup",
+      "group": "Money",
       "screens": [
-        "Asset Categories",
-        "Asset Register"
+        "Asset Register",
+        "Asset Categories"
+      ]
+    },
+    {
+      "subject": "AUDIT",
+      "group": "Admin",
+      "screens": [
+        "Audit Logs"
       ]
     },
     {
       "subject": "EXPENSE",
-      "group": "Setup",
+      "group": "Money",
       "screens": [
         "Expense Categories"
       ]
     },
     {
       "subject": "INVENTORY",
-      "group": "Setup",
+      "group": "Menu",
       "screens": [
-        "Inventory"
+        "Inventory",
+        "Batch Details"
+      ]
+    },
+    {
+      "subject": "MASTER_DATA",
+      "group": "Menu",
+      "screens": [
+        "Categories",
+        "Units of Measure",
+        "UOM Factors",
+        "Payment methods (per branch)",
+        "Tax Types",
+        "Tax Groups",
+        "Tax Group Mappers"
       ]
     },
     {
       "subject": "ORGANIZATION",
-      "group": "Setup",
+      "group": "Outlet",
       "screens": [
-        "Business Profile"
+        "Business Profile",
+        "Branches",
+        "Organizations"
+      ]
+    },
+    {
+      "subject": "PAYMENTS",
+      "group": "Outlet",
+      "screens": [
+        "Payment Modes",
+        "Received Types"
       ]
     },
     {
       "subject": "POS_BILLING",
-      "group": "Finance",
+      "group": "Money",
       "screens": [
         "Cash Sessions"
       ]
     },
     {
       "subject": "POS_CONFIG",
-      "group": "Setup",
+      "group": "Menu",
       "screens": [
         "Menu Master",
+        "Category Hours",
+        "Variants",
+        "Add-on Groups",
+        "Add-ons",
         "Food Types",
         "Meat Types",
         "Menu Tags",
-        "Category Hours",
-        "Add-on Groups",
-        "Add-ons",
         "Channels",
         "Portals",
         "Rejection Reasons",
-        "Variants",
-        "Floors",
         "Business Profile",
+        "Floors",
         "POS Settings",
         "Receipt Format",
+        "Payment methods (per branch)",
+        "GST Switch",
         "Campaigns"
       ]
     },
     {
       "subject": "POS_CRM",
-      "group": "CRM",
+      "group": "Guests",
       "screens": [
         "Customers",
         "Feedback"
@@ -76,53 +110,55 @@
     },
     {
       "subject": "POS_KITCHEN",
-      "group": "Operations",
+      "group": "Service",
       "screens": [
         "Kitchen (KDS)"
       ]
     },
     {
       "subject": "POS_OPS",
-      "group": "Operations",
+      "group": "Service",
       "screens": [
         "Token Queue",
         "Online Orders",
         "Live Tracking",
-        "Expense Categories",
-        "Expenses"
+        "Expenses",
+        "Expense Categories"
       ]
     },
     {
       "subject": "POS_ORDER",
-      "group": "Operations",
+      "group": "Service",
       "screens": [
         "Billing & KOT",
         "Tables",
-        "QR Orders"
+        "QR inbox"
       ]
     },
     {
       "subject": "POS_QR",
-      "group": "Operations",
+      "group": "Service",
       "screens": [
-        "QR Orders",
+        "QR inbox",
         "QR Codes"
       ]
     },
     {
       "subject": "POS_REPORTS",
-      "group": "Analytics & Admin",
+      "group": "Insights",
       "screens": [
-        "Reports"
+        "Front desk today"
       ]
     },
     {
       "subject": "TRANSACTIONS",
-      "group": "Finance",
+      "group": "Outlet",
       "screens": [
+        "Numbering",
         "Finance",
+        "Ledger",
         "Returns",
-        "Ledger"
+        "GST filing"
       ]
     }
   ]
