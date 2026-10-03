@@ -2,6 +2,8 @@
 // Bill ↔ orders link, and the priced line snapshots a bill is recomputed from.
 
 const { QUERIES } = require('../../config/constants');
+const MESSAGES = require('../../config/messages');
+const { HttpError } = require('../../middleware/errorHandler');
 const { quantityOf } = require('../../utils/orderLine');
 const { lineNoteOf } = require('../posorder/kitchenNotes');
 
@@ -32,6 +34,30 @@ const setBillOrdersTx = async (conn, billId, orderIds, tenantId, userPhone) => {
     await conn.execute(QUERIES.POS_BILL_ORDER.INSERT, [
       uuidv4(), billId, orderId, tenantId, userPhone,
     ]);
+  }
+};
+
+/**
+ * Refuses rounds that are already on another bill that has been invoiced.
+ *
+ * @param {Object} conn
+ * @param {string} billId - The bill being settled (its own rounds are fine).
+ * @param {string[]} orderIds
+ * @param {string} tenantId
+ * @throws {HttpError} 409 naming the round and the invoice it is already on.
+ */
+const assertNotInvoicedElsewhereTx = async (conn, billId, orderIds, tenantId) => {
+  const ids = [...new Set((orderIds || []).filter(Boolean))];
+  if (ids.length === 0) return;
+  const sql = expandIds(QUERIES.POS_BILL_ORDER.SELECT_POSTED_ELSEWHERE, ids.length);
+  const [rows] = await conn.execute(sql, [tenantId, billId, ...ids]);
+  const hit = Array.isArray(rows) ? rows.find((r) => r && r.TransactionNo) : null;
+  if (hit) {
+    throw new HttpError(
+      `${hit.OrderNo || 'This round'} ${MESSAGES.ERROR.POS_BILL_ORDER_ALREADY_INVOICED} ${hit.TransactionNo}. `
+      + 'Collect any balance from Money → Dues instead of settling it again.',
+      MESSAGES.HTTP_STATUS.CONFLICT,
+    );
   }
 };
 
@@ -235,6 +261,7 @@ const getSessionCustomerIdTx = async (conn, orderIds, tenantId) => {
 module.exports = {
   setBillOrdersTx,
   getBillOrderIdsTx,
+  assertNotInvoicedElsewhereTx,
   getOrdersMetaTx,
   getOrderLinesTx,
   toLedgerLinesTx,

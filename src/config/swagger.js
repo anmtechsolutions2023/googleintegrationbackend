@@ -2321,7 +2321,7 @@ const swaggerSpec = {
       PosBillSettle: {
         type: 'object',
         description:
-          'Settling posts the bill to the accounting ledger: a numbered Sale document with lines, tax, customer and a tender-by-tender settlement.\n\nDiscount is applied BEFORE tax; round-off to the nearest rupee is automatic. Tendering less than the payable leaves the bill PARTIALLY_PAID rather than failing.',
+          'Settling posts the bill to the accounting ledger: a numbered Sale document with lines, tax, customer and a tender-by-tender settlement.\n\nDiscount is applied BEFORE tax; round-off to the nearest rupee is automatic. Tendering less than the payable leaves the bill PARTIALLY_PAID rather than failing — but then someone must be named as owing the rest: either a guest is attached to the table, or `Debtor.Name` is sent (400 otherwise). The balance is collected later with `POST /api/ledger/documents/{id}/payments`.\n\nA round already on another invoiced bill is refused (409), so the same food can never be invoiced twice.',
         properties: {
           Tenders: {
             type: 'array', minItems: 1, maxItems: 20,
@@ -2338,6 +2338,14 @@ const swaggerSpec = {
           },
           Payments: { type: 'array', description: 'Legacy blob — still accepted and mapped to a single tender.', items: { type: 'object' } },
           Discount: { type: 'number', description: 'Applied before tax.' },
+          Debtor: {
+            type: 'object', nullable: true, required: ['Name'],
+            description: 'Who owes the balance when the tenders fall short. Required in that case unless a guest is attached to the table; written to the invoice\'s customer snapshot only.',
+            properties: {
+              Name: { type: 'string', maxLength: 150, example: 'Rahul M.' },
+              Mobile: { type: 'string', maxLength: 50, nullable: true, example: '98765 43210' },
+            },
+          },
         },
       },
       PosBillCreate: {
@@ -4128,6 +4136,144 @@ const swaggerSpec = {
       },
     },
 
+
+    // ── Collecting a balance ──────────────────────────────────────────────
+    // A sale saved short is PARTIALLY_PAID. These take the rest, give it up,
+    // or say who owes it — and list everything still owed.
+    '/api/ledger/dues': {
+      get: {
+        tags: ['Ledger'],
+        summary: 'Every sale still owed money, oldest first',
+        description:
+          'The Dues worklist. Due = Gross − Returns − Collected − Written off. The `summary` covers ALL dues whatever the filters, so "₹1,486 outstanding" does not change when the list is narrowed.\n\nAge buckets: today (0 days), week (1–7), month (8–30), older (31+). Requires TRANSACTIONS:READ/WRITE or POS_BILLING:READ/WRITE.',
+        security,
+        parameters: [
+          { name: 'branchId', in: 'query', schema: { type: 'string', format: 'uuid' } },
+          { name: 'age', in: 'query', schema: { type: 'string', enum: ['today', 'week', 'month', 'older'] } },
+          { name: 'search', in: 'query', description: 'Invoice no., customer, mobile or table', schema: { type: 'string', maxLength: 100 } },
+        ],
+        responses: {
+          200: {
+            description: 'Dues',
+            content: { 'application/json': { schema: { type: 'object', properties: {
+              success: { type: 'boolean' }, message: { type: 'string' },
+              data: { type: 'object', properties: {
+                summary: { type: 'object', properties: {
+                  outstanding: { type: 'number', example: 1486 },
+                  count: { type: 'integer', example: 5 },
+                  oldestDays: { type: 'integer', example: 23 },
+                  oldestNo: { type: 'string', example: 'INV-0412' },
+                  oldestName: { type: 'string', nullable: true },
+                  buckets: { type: 'object', properties: {
+                    all: { type: 'integer' }, today: { type: 'integer' }, week: { type: 'integer' },
+                    month: { type: 'integer' }, older: { type: 'integer' },
+                  } },
+                } },
+                documents: { type: 'array', items: { type: 'object', properties: {
+                  Id: { type: 'string' }, TransactionNo: { type: 'string', example: 'INV-0002' },
+                  TransactionDate: { type: 'string', format: 'date' },
+                  CustomerName: { type: 'string', nullable: true }, CustomerMobile: { type: 'string', nullable: true },
+                  GrossAmount: { type: 'number', example: 288 }, Collected: { type: 'number', example: 200 },
+                  Returned: { type: 'number', example: 0 }, Due: { type: 'number', example: 88 },
+                  AgeDays: { type: 'integer', example: 0 }, AgeBucket: { type: 'string', example: 'today' },
+                  Source: { type: 'object', properties: { kind: { type: 'string', enum: ['token', 'table', 'none'] }, label: { type: 'string', nullable: true } } },
+                } } },
+              } },
+            } } } },
+          },
+          ...responses.validation, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/ledger/documents/{id}/payments': {
+      post: {
+        tags: ['Ledger'],
+        summary: 'Collect (part of) the balance on a part-paid sale',
+        description:
+          'Records a NEW payment against the sale, dated now — the first payment is never edited. Cash collected lands in the cash session open now; the sale keeps its own date.\n\n**Over-tender:** only cash may exceed the due; the excess is returned as `change` and not recorded. A card/UPI amount above the due is refused (400). A method marked "requires reference" needs `refNo`.\n\nWhen the due reaches ₹0 the sale moves PARTIALLY_PAID → SETTLED and the POS bill becomes `paid`. Requires POS_BILLING:WRITE or TRANSACTIONS:WRITE.',
+        security,
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['Tenders'], properties: {
+            Tenders: { type: 'array', minItems: 1, maxItems: 10, items: { type: 'object', required: ['paymentModeId', 'amount'], properties: {
+              paymentModeId: { type: 'string', format: 'uuid' },
+              amount: { type: 'number', example: 88 },
+              refNo: { type: 'string', maxLength: 50, example: '427199301185' },
+              comment: { type: 'string', maxLength: 100 },
+            } } },
+          } } } },
+        },
+        responses: {
+          201: {
+            description: 'Payment recorded (or invoice settled)',
+            content: { 'application/json': { schema: { type: 'object', properties: {
+              success: { type: 'boolean' }, message: { type: 'string', example: 'Invoice settled' },
+              data: { type: 'object', properties: {
+                transactionNo: { type: 'string', example: 'INV-0002' },
+                collected: { type: 'number', example: 88 }, change: { type: 'number', example: 0 },
+                dueBefore: { type: 'number', example: 88 }, due: { type: 'number', example: 0 },
+                status: { type: 'string', enum: ['PARTIALLY_PAID', 'SETTLED'] },
+              } },
+            } } } },
+          },
+          400: { description: 'Not a sale, ₹0 amount, non-cash over the due, or missing reference' },
+          409: { description: 'Nothing is due on this invoice' },
+          ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/ledger/documents/{id}/write-off': {
+      post: {
+        tags: ['Ledger'],
+        summary: 'Write off the balance on a part-paid sale and close it',
+        description:
+          'Writes off EXACTLY what is due at the moment the invoice is locked — the amount is never sent. Not a payment and not a discount: it is stored as WriteOffAmount and reported as its own figure (`WrittenOff` in the sales summary). Moves the sale to SETTLED. `Note` is required when `Reason` is OTHER. **Admins only.**',
+        security,
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['Reason'], properties: {
+            Reason: { type: 'string', enum: ['CUSTOMER_LEFT', 'DISPUTED', 'STAFF_GUEST', 'OTHER'] },
+            Note: { type: 'string', maxLength: 500 },
+          } } } },
+        },
+        responses: {
+          200: { description: 'Written off', content: { 'application/json': { schema: { type: 'object', properties: {
+            success: { type: 'boolean' }, message: { type: 'string' },
+            data: { type: 'object', properties: {
+              transactionNo: { type: 'string' }, writtenOff: { type: 'number', example: 38 },
+              reason: { type: 'string' }, reasonLabel: { type: 'string' }, status: { type: 'string', example: 'SETTLED' },
+            } },
+          } } } } },
+          400: { description: 'Unknown reason, or Other without a note' },
+          409: { description: 'Nothing is due on this invoice' },
+          ...responses.notFound, ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/ledger/documents/{id}/debtor': {
+      put: {
+        tags: ['Ledger'],
+        summary: 'Name who owes the balance on a sale saved without one',
+        description:
+          'Sets the invoice\'s customer snapshot (CustomerName, CustomerMobile). Allowed only while the sale is PARTIALLY_PAID with a balance due and no linked guest — a guest\'s invoice already says who they are. Requires POS_BILLING:WRITE or TRANSACTIONS:WRITE.',
+        security,
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['Name'], properties: {
+            Name: { type: 'string', maxLength: 150, example: 'Rahul M.' },
+            Mobile: { type: 'string', maxLength: 50 },
+          } } } },
+        },
+        responses: {
+          ...responses.success, ...responses.validation, ...responses.notFound,
+          409: { description: 'Paid in full, or linked to a guest' },
+          ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
     // ── Finance reports ───────────────────────────────────────────────────
     // Nine cuts of the same ledger, one query contract. Gated on TRANSACTIONS
     // read/write, not on the POS scopes: a ledger document IS the transaction

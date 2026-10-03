@@ -11,6 +11,7 @@
 const { withConnection } = require('../../utils/dbHelper');
 const { QUERIES } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
+const { dueOf } = require('../ledger/ledger.due');
 
 const asArray = (v) => {
   if (Array.isArray(v)) return v;
@@ -37,6 +38,30 @@ const sourceOf = (row) => {
 };
 
 /**
+ * Paid and owed on the invoice a round was billed on.
+ *
+ * Same rule as the ledger (ledger.due.js), so the order and the invoice can
+ * never disagree about what is still due.
+ */
+const withBalance = (row) => {
+  if (!row.TransactionDetailLogId) return { ...row, Paid: 0, Due: 0 };
+  const paid = Number(row.Collected || 0);
+  return {
+    ...row,
+    InvoiceTotal: Number(row.InvoiceTotal || 0),
+    Paid: paid,
+    Returned: Number(row.Returned || 0),
+    WrittenOff: Number(row.WriteOffAmount || 0),
+    Due: dueOf({
+      gross: row.InvoiceTotal,
+      collected: paid,
+      returned: row.Returned,
+      writtenOff: row.WriteOffAmount,
+    }),
+  };
+};
+
+/**
  * Full detail for one round.
  *
  * @param {string} id - Order id.
@@ -51,6 +76,15 @@ const getOrderDetail = (id, tenantId) =>
 
     const [kots] = await conn.execute(QUERIES.POS_ORDER_DETAIL.KOTS, [id, tenantId]);
     const [bills] = await conn.execute(QUERIES.POS_ORDER_DETAIL.BILL, [id, tenantId]);
+    const bill = bills[0] ? withBalance(bills[0]) : null;
+    // Every payment against the invoice, so the order can show what was taken,
+    // when and how — the at-the-till payment and any balance collected later.
+    if (bill && bill.TransactionDetailLogId) {
+      const [tenders] = await conn.execute(
+        QUERIES.LEDGER.SELECT_TENDERS_BY_LOG, [bill.TransactionDetailLogId, tenantId],
+      );
+      bill.Payments = (tenders || []).filter((t) => Number(t.Amount) > 0);
+    }
 
     return {
       Order: {
@@ -84,7 +118,7 @@ const getOrderDetail = (id, tenantId) =>
         ServedAt: row.ServedAt,
       } : null,
       Kots: kots,
-      Bill: bills[0] || null,
+      Bill: bill,
       Source: sourceOf(row),
     };
   });

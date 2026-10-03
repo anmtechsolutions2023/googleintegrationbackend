@@ -97,6 +97,19 @@ const route = (over = {}) => {
       return Promise.resolve([[{ Id: 'cfg-return', StartCounterNo: '1', CurrentCounterNo: 0, Prefix: 'CN-', Format: 'CN-{0000}' }]]);
     }
     if (/FROM transactiontypebaseconversion/i.test(q)) return Promise.resolve([[{ Id: 'conv-1' }]]);
+    // What the customer has paid and not had back. By default the sale was
+    // paid in full and every earlier return refunded, which is what makes a
+    // return on a paid-up sale refund exactly its own value.
+    if (/AS netPaid/i.test(q)) {
+      const sale = (over.sale || SALE())[0];
+      const back = Number(over.returnedTotal?.returned || 0);
+      return Promise.resolve([[{ netPaid: over.netPaid ?? Number(sale.GrossAmount) - back }]]);
+    }
+    // Every payment taken against the sale.
+    if (/AS collected/i.test(q)) {
+      const sale = (over.sale || SALE())[0];
+      return Promise.resolve([[{ collected: over.collected ?? Number(sale.GrossAmount) }]]);
+    }
     if (/FROM paymentdetail/i.test(q)) return Promise.resolve([over.paymentDetail || [{ Id: 'pd-1' }]]);
     if (/FROM paymentbreakup b/i.test(q) && /GROUP BY/i.test(q)) {
       return Promise.resolve([over.tenders || [
@@ -369,5 +382,90 @@ describe('refundState — derived, never stored', () => {
   // remainder would be wrong on the screen and wrong in the report.
   it('treats a sub-paisa remainder as fully refunded', () => {
     expect(returns.refundState(1180, 1179.995)).toBe(LEDGER.REFUND_STATE.FULL);
+  });
+});
+
+// A sale paid short. Returns clear what is still OWED before any money goes
+// back — otherwise the outlet hands back cash it never received.
+describe('a return on a part-paid sale', () => {
+  // ₹1,180 invoice, ₹1,000 paid at the till, ₹180 still owed.
+  const PART_PAID = (collected) => ({
+    sale: SALE({ StatusName: 'PARTIALLY_PAID', TransactionTypeStatusId: 'st-part' }),
+    collected,
+    netPaid: collected,
+    tenders: [{ PaymentModeId: CASH, AccountTypeBaseId: CASH_ACCT, ModeType: 'Cash', NetAmount: collected }],
+  });
+
+  it('clears the due first and refunds only the rest', async () => {
+    route(PART_PAID(1000));
+    const r = await returns.createReturnTx(mockConn, {
+      saleLogId: 'log-1', lines: [{ lineId: 'line-dosa', quantity: 1 }],
+    }, TENANT, USER);
+
+    // The note is worth the whole dosa…
+    expect(r.grossAmount).toBe(236);
+    // …₹180 of it clears the due, ₹56 goes back in cash.
+    expect(r.appliedToDue).toBe(180);
+    expect(r.refundedAmount).toBe(56);
+    expect(breakups()).toHaveLength(1);
+    expect(breakups()[0][6]).toBe(-56);
+    // What actually left is what the note's payment row says.
+    expect(firstCall(/INSERT INTO paymentdetail/i)[1][6]).toBe(56);
+  });
+
+  it('settles the sale when the return clears the due', async () => {
+    route(PART_PAID(1000));
+    const r = await returns.createReturnTx(mockConn, {
+      saleLogId: 'log-1', lines: [{ lineId: 'line-dosa', quantity: 1 }],
+    }, TENANT, USER);
+
+    expect(r.saleSettled).toBe(true);
+    expect(r.dueAfter).toBe(0);
+    const saleMoves = calls(/UPDATE transactiondetaillog SET TransactionTypeStatusId/i)
+      .filter(([, p]) => p[3] === 'log-1');
+    expect(saleMoves).toHaveLength(1);
+    expect(saleMoves[0][1][0]).toBe('st-settled');
+  });
+
+  it('moves no money when the return is smaller than the due', async () => {
+    route(PART_PAID(680));
+    const r = await returns.createReturnTx(mockConn, {
+      saleLogId: 'log-1', lines: [{ lineId: 'line-dosa', quantity: 1 }],
+    }, TENANT, USER);
+
+    expect(r.refundedAmount).toBe(0);
+    expect(r.dueAfter).toBe(264);
+    expect(r.saleSettled).toBe(false);
+    // No ₹0 row in the tender mix.
+    expect(breakups()).toHaveLength(0);
+  });
+
+  it('keeps the POS bill part-paid while money is still owed', async () => {
+    route({ ...PART_PAID(680), billCustomer: [{ BillId: 'bill-1', CustomerId: null }] });
+    const note = await returns.createReturnTx(mockConn, {
+      saleLogId: 'log-1', lines: [{ lineId: 'line-dosa', quantity: 1 }],
+    }, TENANT, USER);
+    await returns.applyDownstreamTx(mockConn, note, TENANT, USER);
+
+    // The unconditional update the returns path makes, not the settle step's.
+    const [, p] = calls(/UPDATE pos_bill SET Status/i).find(([sql]) => !/AND Status = \?/i.test(sql));
+    expect(p[0]).toBe('partially_paid');
+  });
+
+  it('can be returned even when nothing was paid at the till', async () => {
+    route({ ...PART_PAID(0), paymentDetail: [] });
+    const r = await returns.createReturnTx(mockConn, {
+      saleLogId: 'log-1', lines: [{ lineId: 'line-dosa', quantity: 1 }],
+    }, TENANT, USER);
+    expect(r.refundedAmount).toBe(0);
+    expect(r.dueAfter).toBe(944);
+  });
+
+  it('returning everything gives back exactly what was paid', async () => {
+    route(PART_PAID(1000));
+    const r = await returns.createReturnTx(mockConn, { saleLogId: 'log-1', lines: [] }, TENANT, USER);
+    expect(r.grossAmount).toBe(1180);
+    expect(r.refundedAmount).toBe(1000);
+    expect(breakups().reduce((s, b) => s + b[6], 0)).toBe(-1000);
   });
 });

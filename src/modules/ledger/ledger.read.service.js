@@ -11,6 +11,8 @@ const MESSAGES = require('../../config/messages');
 // One implementation of "how refunded is this sale" — a second would eventually
 // disagree with the first.
 const { refundState } = require('./ledger.returns.service');
+// One rule for "what is still owed", shared with the collect and return paths.
+const { dueOf } = require('./ledger.due');
 const {
   calculatePagination,
   getPaginationMetadata,
@@ -54,6 +56,28 @@ const describeSourceRow = (row) =>
   sourceOf(row.TokenLabels || null, row.TableNames || null, splitList(row.OrderNos));
 
 /**
+ * Paid, owed and written off on one document.
+ *
+ * Only a SALE can owe money. An expense or a credit note reports what was paid
+ * against it and a due of zero, so no screen ever offers to collect on one.
+ *
+ * @param {Object} row - Needs GrossAmount, Collected, WriteOffAmount, TypeName.
+ * @param {number} returned - SUM of credit notes against it.
+ */
+const balanceOf = (row, returned) => {
+  const paid = Number(row.Collected || 0);
+  const writtenOff = Number(row.WriteOffAmount || 0);
+  const isSale = row.TypeName === LEDGER.TYPE_POS_SALE;
+  return {
+    Paid: paid,
+    WrittenOff: writtenOff,
+    Due: isSale
+      ? dueOf({ gross: row.GrossAmount, collected: paid, returned, writtenOff })
+      : 0,
+  };
+};
+
+/**
  * Lists ledger documents, newest first.
  * @param {Object} filters - { status, fromDate, toDate, contactDetailId, search }
  */
@@ -86,6 +110,12 @@ const listDocuments = (filters, page, limit, tenantId) =>
       where.push(`(SELECT COALESCE(SUM(cn.GrossAmount), 0) FROM transactiondetaillog cn
                     WHERE cn.ReversesLogId = l.Id AND cn.TenantId = l.TenantId AND cn.Active = 1)
                   >= l.GrossAmount - 0.01`);
+    }
+    // Sales still owed money. Same expression the Dues worklist and the
+    // Outstanding figure use, so the three can never disagree on what is due.
+    if (filters.dues) {
+      where.push(`s.Name = ? AND ${QUERIES.LEDGER.DUE_EXPR} > 0.01`);
+      params.push(LEDGER.STATUS_PARTIALLY_PAID);
     }
     if (filters.search) {
       where.push('(l.TransactionNo LIKE ? OR l.CustomerName LIKE ? OR l.CustomerMobile LIKE ?)');
@@ -140,6 +170,9 @@ const listDocuments = (filters, page, limit, tenantId) =>
           ReturnCount: back.noteCount,
           NetOfReturns: Number((Number(r.GrossAmount || 0) - back.returned).toFixed(2)),
           RefundState: refundState(r.GrossAmount, back.returned),
+          // Paid and owed, so a part-paid sale can be spotted — and collected —
+          // straight from the list.
+          ...balanceOf(r, back.returned),
         };
       }),
       pagination: getPaginationMetadata(total, pageNum, limitNum),
@@ -160,6 +193,11 @@ const getDocument = (id, tenantId) =>
 
     const [lines] = await conn.execute(QUERIES.LEDGER.SELECT_LINES_BY_LOG, [id, tenantId]);
     const [tenders] = await conn.execute(QUERIES.LEDGER.SELECT_TENDERS_BY_LOG, [id, tenantId]);
+    // Every payment taken against it — one at the till, more if a balance was
+    // collected later — totalled for Paid and Due.
+    const [[collectedRow]] = await conn.execute(
+      QUERIES.LEDGER.SELECT_COLLECTED_TOTAL, [id, tenantId],
+    );
     const [history] = await conn.execute(QUERIES.LEDGER.SELECT_TRANSITION_HISTORY, [id, tenantId]);
     // The rounds behind this invoice, and the token each was handed for. An
     // expense document has no POS bill, so this is legitimately empty rather
@@ -222,6 +260,11 @@ const getDocument = (id, tenantId) =>
       Source: describeSource(orders),
       // Null on a sale — only a credit note carries a reason.
       IsFault: log.ReturnReasonId ? !!log.IsFault : null,
+      // ── The balance ──────────────────────────────────────────────────────
+      // What has been paid, what is still owed, and what was given up on — the
+      // figures behind the progress bar and the Collect button.
+      ...balanceOf({ ...log, Collected: collectedRow?.collected }, returnedAmount),
+      WriteOffReasonLabel: (LEDGER.WRITE_OFF_REASONS.find(([c]) => c === log.WriteOffReason) || [])[1] || null,
       // Drives whether the UI offers any action at all.
       IsImmutable: LEDGER.IMMUTABLE_STATUSES.includes(log.StatusName),
     };

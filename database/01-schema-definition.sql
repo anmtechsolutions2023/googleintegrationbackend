@@ -1072,6 +1072,21 @@ CREATE TABLE transactiondetaillog (
     -- Remarks alongside it rather than instead of it.
     ReturnReasonId           VARCHAR(50)   NULL,
     Remarks                  VARCHAR(500)  NULL,
+    -- The part of a sale's balance the business has given up collecting.
+    --
+    -- NOT a payment and NOT a discount. Booked as a payment it would count as
+    -- money collected and leave the cash flow and the tender mix lying; booked
+    -- as a discount it would shrink the sale and hide the loss. So it sits on
+    -- the sale as its own figure: Due = Gross − Returns − Collected − WriteOff,
+    -- and Finance reports it on a line of its own. One per sale, because a
+    -- write-off is what closes the invoice.
+    WriteOffAmount           DECIMAL(18,4) NOT NULL DEFAULT 0,
+    -- Coded (LEDGER.WRITE_OFF_REASONS) so write-offs can be grouped; the note
+    -- rides alongside it rather than instead of it.
+    WriteOffReason           VARCHAR(30)   NULL,
+    WriteOffNote             VARCHAR(500)  NULL,
+    WrittenOffAt             DATETIME      NULL,
+    WrittenOffBy             VARCHAR(50)   NULL,
     Active                   TINYINT(1)    NOT NULL,
     CreatedOn                DATETIME,
     CreatedBy                VARCHAR(50),

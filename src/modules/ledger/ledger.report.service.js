@@ -134,7 +134,7 @@ const salesReport = (query, tenantId) =>
 
     const summaryOut = numeric(summary || {}, [
       'Documents', 'NetAmount', 'TaxAmount', 'DiscountAmount',
-      'RoundOff', 'GrossAmount', 'Collected', 'Outstanding',
+      'RoundOff', 'GrossAmount', 'Collected', 'Outstanding', 'WrittenOff',
     ]);
     // Picked explicitly, NOT spread. `numeric` returns the whole row with the
     // named fields coerced, so spreading it here would let any column the

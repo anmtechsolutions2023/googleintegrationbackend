@@ -18,6 +18,14 @@ const READ = [
 ];
 const WRITE = [SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.TRANSACTIONS_WRITE];
 
+// Collecting a balance is taking money, which is the cashier's job — so it is
+// offered to anyone who can take payment at the till, not only to those who may
+// write to the books. Seeing what is owed follows the same reasoning.
+const COLLECT = [...WRITE, SCOPES.POS_BILLING_WRITE];
+const DUES_READ = [...READ, SCOPES.POS_BILLING_READ, SCOPES.POS_BILLING_WRITE];
+// Giving money up is a management decision. Admins only.
+const WRITE_OFF = [SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN];
+
 // ── Reports ──────────────────────────────────────────────────────────────────
 // Declared BEFORE /documents/:id so no report path can be swallowed by the id
 // route. Read-only aggregates over the same documents, gated on the same scopes.
@@ -57,6 +65,9 @@ router.get('/reports/customers', authenticateToken, checkScope(...READ), ...cont
 router.get('/reports/visit-pattern', authenticateToken, checkScope(...READ), ...controller.visitPatternReport);
 router.get('/reports/lapsed', authenticateToken, checkScope(...READ), ...controller.lapsedReport);
 
+/** Every sale still owed money, oldest first, with a summary over all of them. */
+router.get('/dues', authenticateToken, checkScope(...DUES_READ), ...controller.dues);
+
 router.get('/documents', authenticateToken, checkScope(...READ), ...controller.list);
 router.get('/documents/:id', authenticateToken, checkScope(...READ), ...controller.getOne);
 router.post(
@@ -81,6 +92,36 @@ router.post(
   checkScope(...WRITE),
   auditLog(AUDIT_CATEGORIES.PAYMENTS, 'WARN', 'Partial return recorded'),
   ...controller.createReturn,
+);
+
+/**
+ * POST /documents/:id/payments — collect (part of) what a sale still owes.
+ * Settles the invoice when the balance reaches ₹0.
+ */
+router.post(
+  '/documents/:id/payments',
+  authenticateToken,
+  checkScope(...COLLECT),
+  auditLog(AUDIT_CATEGORIES.PAYMENTS, 'INFO', 'Balance collected'),
+  ...controller.collect,
+);
+
+/** POST /documents/:id/write-off — give up on the balance and close the sale. */
+router.post(
+  '/documents/:id/write-off',
+  authenticateToken,
+  checkScope(...WRITE_OFF),
+  auditLog(AUDIT_CATEGORIES.PAYMENTS, 'WARN', 'Balance written off'),
+  ...controller.writeOff,
+);
+
+/** PUT /documents/:id/debtor — name who owes a balance saved without one. */
+router.put(
+  '/documents/:id/debtor',
+  authenticateToken,
+  checkScope(...COLLECT),
+  auditLog(AUDIT_CATEGORIES.PAYMENTS, 'INFO', 'Debtor name added'),
+  ...controller.setDebtor,
 );
 
 /** Every credit note against one sale — the detail drawer's linked documents. */

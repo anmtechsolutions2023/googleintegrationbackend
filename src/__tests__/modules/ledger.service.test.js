@@ -135,6 +135,13 @@ const route = (over = {}) => {
       return Promise.resolve([over.duplicateNote || []]);
     }
     if (/FROM transactionitemdetail t/i.test(q)) return Promise.resolve([SALE_LINES(over.saleLines || [])]);
+    // Paid and not had back; by default the ₹118 sale was paid in full and any
+    // earlier return was refunded.
+    if (/AS netPaid/i.test(q)) {
+      const back = Number(over.returnedTotal?.returned || 0);
+      return Promise.resolve([[{ netPaid: over.netPaid ?? 118 - back }]]);
+    }
+    if (/AS collected/i.test(q)) return Promise.resolve([[{ collected: over.collected ?? 118 }]]);
     if (/FROM paymentdetail/i.test(q)) return Promise.resolve([over.paymentDetail || [{ Id: 'pd-1' }]]);
     // tenderCapacity: what each mode still has left to give back.
     if (/FROM paymentbreakup b/i.test(q) && /GROUP BY/i.test(q)) {
@@ -154,6 +161,8 @@ const route = (over = {}) => {
 
 const calls = (re) => mockConn.execute.mock.calls.filter(([sql]) => re.test(String(sql)));
 const firstCall = (re) => calls(re)[0];
+// Column names of an INSERT, so a bind is asserted by name rather than position.
+const columnsOf = (sql) => sql.slice(sql.indexOf('('), sql.indexOf(')')).replace(/[()\s]/g, '').split(',');
 
 const BILL = (over = {}) => ({
   billId: 'bill-1',
@@ -162,6 +171,8 @@ const BILL = (over = {}) => ({
   tenders: [{ paymentModeId: CASH_MODE, amount: 118 }],
   posCustomerId: null,
   branchId: 'branch-1',
+  // Who owes the rest if the tenders fall short — required by the ledger now.
+  debtor: { name: 'Rahul M.', mobile: '98765 43210' },
   ...over,
 });
 
@@ -349,6 +360,47 @@ describe('partial settlement', () => {
 
     expect(r.status).toBe('PARTIALLY_PAID');
     expect(r.balanceDue).toBe(68);
+  });
+
+  it('refuses a short payment with nobody named as owing the rest', async () => {
+    route();
+    await expect(ledger.postSaleFromBill(mockConn, BILL({
+      tenders: [{ paymentModeId: CASH_MODE, amount: 50 }],
+      debtor: null,
+    }), TENANT, USER)).rejects.toMatchObject({ statusCode: 400 });
+    // Refused before a number is taken or anything is written.
+    expect(calls(/INSERT INTO transactiondetaillog/i)).toHaveLength(0);
+  });
+
+  it('puts the name of whoever owes the rest on the invoice', async () => {
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL({
+      tenders: [{ paymentModeId: CASH_MODE, amount: 50 }],
+    }), TENANT, USER);
+
+    const [sql, params] = firstCall(/INSERT INTO transactiondetaillog/i);
+    const cols = columnsOf(sql);
+    expect(params[cols.indexOf('CustomerName')]).toBe('Rahul M.');
+    expect(params[cols.indexOf('CustomerMobile')]).toBe('98765 43210');
+  });
+
+  it('a guest already on the table is enough — no name needed', async () => {
+    route({ posCustomer: [{ Id: 'pc-1', Name: 'Aarti', Phone: '99999', ContactDetailId: 'c-1' }] });
+    await ledger.postSaleFromBill(mockConn, BILL({
+      tenders: [{ paymentModeId: CASH_MODE, amount: 50 }],
+      posCustomerId: 'pc-1',
+      debtor: null,
+    }), TENANT, USER);
+
+    const [sql, params] = firstCall(/INSERT INTO transactiondetaillog/i);
+    expect(params[columnsOf(sql).indexOf('CustomerName')]).toBe('Aarti');
+  });
+
+  it('a sale paid in full never takes the debtor name', async () => {
+    route();
+    await ledger.postSaleFromBill(mockConn, BILL(), TENANT, USER);
+    const [sql, params] = firstCall(/INSERT INTO transactiondetaillog/i);
+    expect(params[columnsOf(sql).indexOf('CustomerName')]).toBeNull();
   });
 
   it('records only the payable share when over-tendered — change is not revenue', async () => {

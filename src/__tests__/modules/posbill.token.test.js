@@ -18,6 +18,7 @@ jest.mock('../../utils/dbHelper', () => ({
 
 jest.mock('../../modules/posbill/posbill.repository', () => ({
   getBillOrderIdsTx: jest.fn(async () => ['o1']),
+  assertNotInvoicedElsewhereTx: jest.fn(async () => {}),
   getOrdersMetaTx: jest.fn(async () => []),
   getOrderLinesTx: jest.fn(async () => [{
     orderId: 'o1', unitAmount: 100, quantity: 1, isTaxIncluded: false, components: [],

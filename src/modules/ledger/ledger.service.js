@@ -118,6 +118,7 @@ const sellerGstinTx = async (conn, branchId, taxMode, tenantId) => {
 const postSaleFromBill = async (conn, input, tenantId, userPhone) => {
   const {
     billId, totals, lines, tenders = [], posCustomerId, branchId, taxMode = 'gst', buyer = null,
+    debtor = null,
   } = input;
 
   // ── Idempotency: a posted bill must never issue a second invoice ──────────
@@ -149,6 +150,23 @@ const postSaleFromBill = async (conn, input, tenantId, userPhone) => {
     conn, posCustomerId, tenantId, userPhone,
   );
 
+  // ── Who owes the rest ────────────────────────────────────────────────────
+  // A sale paid short leaves money owed, and a balance with no name on it is
+  // one nobody can chase. So a partial settle must say who owes it: the guest
+  // on the table when there is one, otherwise the name the cashier typed. The
+  // name lands on the invoice's customer snapshot only — no CRM record is made.
+  const shortPaid = tenders.reduce((sum, t) => sum + toMinor(t.amount), 0) < toMinor(roundedGross);
+  const debtorName = debtor?.name ? String(debtor.name).trim().slice(0, 150) : null;
+  const debtorMobile = debtor?.mobile ? String(debtor.mobile).trim().slice(0, 50) : null;
+  if (shortPaid && !customer.name && !debtorName) {
+    throw new HttpError(
+      MESSAGES.ERROR.LEDGER_DEBTOR_REQUIRED,
+      MESSAGES.HTTP_STATUS.BAD_REQUEST,
+    );
+  }
+  const customerName = customer.name || (shortPaid ? debtorName : null);
+  const customerMobile = customer.mobile || (shortPaid ? debtorMobile : null);
+
   // ── Seller ───────────────────────────────────────────────────────────────
   const sellerGstin = await sellerGstinTx(conn, branchId, taxMode, tenantId);
 
@@ -161,7 +179,7 @@ const postSaleFromBill = async (conn, input, tenantId, userPhone) => {
     businessDate(),
     totals.SubTotal ?? 0, totals.TaxAmount ?? 0, totals.Discount ?? 0,
     roundOff, roundedGross, toJson(totals.TaxByComponent || []),
-    customer.contactDetailId, customer.name, customer.mobile,
+    customer.contactDetailId, customerName, customerMobile,
     // Snapshots: how the document was issued, and to which business. Neither
     // is re-read later — a reprint and a GST return both read what was issued.
     taxMode, buyer?.gstin ?? null, buyer?.legalName ?? null,
@@ -327,7 +345,10 @@ const refundSale = async (conn, logId, reason, tenantId, userPhone) => {
     // The credit note that actually carries the reversal.
     creditNoteId: result.transactionDetailLogId,
     creditNoteNo: result.transactionNo,
-    refundedAmount: result.grossAmount,
+    // What actually went back. On a part-paid sale the return clears the
+    // balance due first, so this can be less than the note's value.
+    refundedAmount: result.refundedAmount ?? result.grossAmount,
+    creditNoteAmount: result.grossAmount,
     refundState: result.refundState,
   };
 };

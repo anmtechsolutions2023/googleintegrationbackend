@@ -235,6 +235,12 @@ class PosBillService extends BaseCRUDService {
       // reduces the taxable base.
       const orderIds = await repository.getBillOrderIdsTx(connection, id, tenantId);
 
+      // A round already invoiced on another bill must not be invoiced again.
+      // This is what a part-paid table used to do: the till left it open, a
+      // second Settle built a new bill over the same rounds, and the same food
+      // was invoiced twice. The balance is collected from Dues instead.
+      await repository.assertNotInvoicedElsewhereTx(connection, id, orderIds, tenantId);
+
       // Resolved once and used THREE times: the ledger records WHO bought (as a
       // contact), the CRM records THAT they bought (as a visit), and a
       // per-customer offer cap needs to know whether this person has already
@@ -309,6 +315,11 @@ class PosBillService extends BaseCRUDService {
           branchId: existing.BranchDetailId,
           taxMode,
           buyer,
+          // Who owes the balance when the bill is paid short. Required by the
+          // ledger in that case unless a guest is already on the table.
+          debtor: data.Debtor
+            ? { name: data.Debtor.Name, mobile: data.Debtor.Mobile }
+            : null,
         },
         tenantId,
         userPhone,

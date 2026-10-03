@@ -7,7 +7,9 @@ const { validateQuery, validateBody, validateParams } = require('../../middlewar
 const {
   listQuerySchema, returnsListQuerySchema, refundSchema, returnSchema, settlementSchema,
   reportQuerySchema, uuidParamSchema,
+  collectSchema, writeOffSchema, debtorSchema, duesQuerySchema,
 } = require('./ledger.schemas');
+const paymentsService = require('./ledger.payments.service');
 const { withTransaction } = require('../../utils/dbHelper');
 const reportService = require('./ledger.report.service');
 const returnsService = require('./ledger.returns.service');
@@ -102,6 +104,47 @@ const setSettlement = asyncHandler(async (req, res) => {
   successResponse(res, 'Refund settlement updated', data);
 });
 
+// ── Collecting a balance ─────────────────────────────────────────────────────
+
+/** Takes a payment against what a part-paid sale still owes. */
+const collect = asyncHandler(async (req, res) => {
+  const result = await withTransaction((conn) =>
+    paymentsService.collectPaymentTx(
+      conn,
+      { saleLogId: req.params.id, tenders: req.validatedBody.Tenders },
+      req.user.tid, req.user.phone,
+    ));
+  createdResponse(res, result.status === 'SETTLED' ? 'Invoice settled' : 'Payment recorded', result);
+});
+
+/** Gives up on what a sale still owes and closes it. Admin-only at the route. */
+const writeOff = asyncHandler(async (req, res) => {
+  const result = await withTransaction((conn) =>
+    paymentsService.writeOffTx(
+      conn,
+      { saleLogId: req.params.id, reason: req.validatedBody.Reason, note: req.validatedBody.Note },
+      req.user.tid, req.user.phone,
+    ));
+  successResponse(res, 'Balance written off', result);
+});
+
+/** Names who owes the balance on a sale saved short without one. */
+const setDebtor = asyncHandler(async (req, res) => {
+  const result = await withTransaction((conn) =>
+    paymentsService.setDebtorTx(
+      conn,
+      { saleLogId: req.params.id, name: req.validatedBody.Name, mobile: req.validatedBody.Mobile },
+      req.user.tid, req.user.phone,
+    ));
+  successResponse(res, 'Name added', result);
+});
+
+/** Every sale still owed money — the Dues worklist. */
+const dues = asyncHandler(async (req, res) => {
+  const data = await paymentsService.listDues(req.validatedQuery, req.user.tid);
+  successResponse(res, 'Dues retrieved', data);
+});
+
 // ── Reports ──────────────────────────────────────────────────────────────────
 // Every one takes the same query contract, so the timeframe handling is written
 // once. `report` builds the handler; the exported arrays only differ in which
@@ -121,6 +164,10 @@ module.exports = {
   returnsRegister: [validateQuery(returnsListQuerySchema), listReturns_],
   settlementQueue: [settlementQueue],
   setSettlement: [validateParams(uuidParamSchema), validateBody(settlementSchema), setSettlement],
+  collect: [validateParams(uuidParamSchema), validateBody(collectSchema), collect],
+  writeOff: [validateParams(uuidParamSchema), validateBody(writeOffSchema), writeOff],
+  setDebtor: [validateParams(uuidParamSchema), validateBody(debtorSchema), setDebtor],
+  dues: [validateQuery(duesQuerySchema), dues],
   returnReasonsReport: [validateQuery(reportQuerySchema), report(reportService.returnReasonsReport, 'Return reasons report retrieved')],
   returnProductReport: [validateQuery(reportQuerySchema), report(reportService.returnProductReport, 'Product return report retrieved')],
 

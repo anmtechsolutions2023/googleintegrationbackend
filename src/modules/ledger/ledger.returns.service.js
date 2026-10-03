@@ -45,6 +45,8 @@ const {
 const customerStats = require('../poscustomer/poscustomer.stats.service');
 const loyalty = require('../loyalty/loyalty.service');
 const outbox = require('../notification/notification.outbox');
+const { dueOf, refundableMinor } = require('./ledger.due');
+const { settleSaleTx } = require('./ledger.settle');
 
 const toJson = (v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
 
@@ -410,6 +412,34 @@ const createReturnTx = async (conn, input, tenantId, userPhone) => {
     );
   }
 
+  // ── 5b. How much goes back as money ──────────────────────────────────────
+  // A return clears what is still OWED before anything is handed back. On a
+  // sale paid in full the two are the same thing, so nothing changes there;
+  // on one paid ₹200 of ₹288, returning a ₹149 dish clears the ₹88 due and
+  // refunds ₹61 — not ₹149, which the outlet never received.
+  //
+  // The credit note still carries the FULL value of what came back: it is the
+  // record of goods returned, and the sale's figures net against it.
+  const [[netPaidRow]] = await conn.execute(
+    QUERIES.LEDGER.SELECT_NET_PAID, [tenantId, tenantId, saleLogId, saleLogId],
+  );
+  const [[collectedRow]] = await conn.execute(
+    QUERIES.LEDGER.SELECT_COLLECTED_TOTAL, [saleLogId, tenantId],
+  );
+  const returnedAfter = fromMinor(wouldTotalMinor);
+  const refundMinor = refundableMinor({
+    gross: sale.GrossAmount,
+    returnedAfter,
+    netPaid: Number(netPaidRow?.netPaid || 0),
+    noteGross: priced.totals.gross,
+  });
+  const dueAfter = dueOf({
+    gross: sale.GrossAmount,
+    collected: Number(collectedRow?.collected || 0),
+    returned: returnedAfter,
+    writtenOff: sale.WriteOffAmount,
+  });
+
   // ── 6. Masters + number ──────────────────────────────────────────────────
   const returnType = await requireMaster(
     conn, QUERIES.LEDGER.SELECT_TYPE_BY_NAME, LEDGER.TYPE_POS_RETURN, tenantId, 'transaction type',
@@ -479,15 +509,20 @@ const createReturnTx = async (conn, input, tenantId, userPhone) => {
   }
 
   // ── 8. Money out ─────────────────────────────────────────────────────────
+  // TotalAmount is what actually leaves: the full note on a paid-up sale, less
+  // (or nothing) when part of the return only cleared a balance still owed.
   const paymentDetailId = uuidv4();
   await conn.execute(QUERIES.LEDGER.INSERT_PAYMENT_DETAIL, [
     paymentDetailId, tenantId, salesAccount.Id, noteId,
-    priced.totals.discount, 0, priced.totals.gross,
+    priced.totals.discount, 0, fromMinor(refundMinor),
     priced.totals.tax, priced.totals.net,
     null, userPhone, userPhone,
   ]);
 
-  if (destination === LEDGER.REFUND_DESTINATION.STORE_CREDIT) {
+  if (refundMinor <= 0) {
+    // The whole return went against the balance due. No money moves, so no
+    // breakup is written — a ₹0 refund row would show up in the tender mix.
+  } else if (destination === LEDGER.REFUND_DESTINATION.STORE_CREDIT) {
     // Nothing leaves the drawer. Booking this as a cash refund would make the
     // till short by an amount that never moved, so it books to a LIABILITY.
     const creditAccount = await requireMaster(
@@ -500,7 +535,7 @@ const createReturnTx = async (conn, input, tenantId, userPhone) => {
     ]);
     await conn.execute(QUERIES.LEDGER.INSERT_BREAKUP, [
       uuidv4(), tenantId, creditAccount.Id, paymentDetailId, pmtdId,
-      refundType.Id, -priced.totals.gross, null, userPhone, userPhone,
+      refundType.Id, -fromMinor(refundMinor), null, userPhone, userPhone,
     ]);
   } else {
     // Back to the modes it arrived on, cash first, never more than each
@@ -519,7 +554,7 @@ const createReturnTx = async (conn, input, tenantId, userPhone) => {
       );
     }
     const capacity = await tenderCapacity(conn, saleLogId, tenantId);
-    const splits = apportionRefund(capacity, priced.grossMinor);
+    const splits = apportionRefund(capacity, refundMinor);
 
     for (const split of splits) {
       const pmtdId = uuidv4();
@@ -548,6 +583,11 @@ const createReturnTx = async (conn, input, tenantId, userPhone) => {
     tenantId, userPhone,
   );
 
+  // A part-paid sale whose balance this return cleared is now settled. Same
+  // transition, same bill update, as collecting the balance in money.
+  const saleSettled = sale.StatusName === LEDGER.STATUS_PARTIALLY_PAID && dueAfter <= 0;
+  if (saleSettled) await settleSaleTx(conn, sale, tenantId, userPhone);
+
   const totalReturnedMinor = wouldTotalMinor;
   const state = refundState(sale.GrossAmount, fromMinor(totalReturnedMinor));
 
@@ -566,10 +606,16 @@ const createReturnTx = async (conn, input, tenantId, userPhone) => {
     refundState: state,
     totalReturned: fromMinor(totalReturnedMinor),
     saleGross: Number(sale.GrossAmount),
+    // The money (or store credit) that actually went back, and the part of the
+    // note that only cleared what was still owed. They add up to grossAmount.
+    refundedAmount: fromMinor(refundMinor),
+    appliedToDue: fromMinor(priced.grossMinor - refundMinor),
+    dueAfter,
+    saleSettled,
     duplicate: false,
     // Carried out for the caller to finish the downstream work — see
     // applyDownstreamTx. Kept separate so the money half is testable alone.
-    _context: { sale, state, returnedNow: priced.totals.gross },
+    _context: { sale, state, returnedNow: priced.totals.gross, dueAfter },
   };
 };
 
@@ -581,7 +627,7 @@ const createReturnTx = async (conn, input, tenantId, userPhone) => {
  * rolls back keeps the points it was about to take.
  */
 const applyDownstreamTx = async (conn, result, tenantId, userPhone) => {
-  const { sale, state, returnedNow } = result._context;
+  const { sale, state, returnedNow, dueAfter = 0 } = result._context;
 
   const [bills] = await conn.execute(
     QUERIES.LEDGER.SELECT_BILL_CUSTOMER_BY_LOG, [sale.Id, tenantId],
@@ -589,12 +635,15 @@ const applyDownstreamTx = async (conn, result, tenantId, userPhone) => {
   const bill = bills[0];
 
   // The POS side must not go on claiming 'paid' for a document the ledger has
-  // partly reversed. Same transaction, so the two can never disagree.
+  // partly reversed. Same transaction, so the two can never disagree. A sale
+  // that STILL has a balance owed stays 'partially_paid' — that is the thing
+  // somebody has to act on, and the returns are visible on the invoice anyway.
+  let posBillStatus = state === LEDGER.REFUND_STATE.FULL
+    ? POS_BILL_STATUS.REFUNDED
+    : POS_BILL_STATUS.PARTIALLY_REFUNDED;
+  if (dueAfter > 0) posBillStatus = POS_BILL_STATUS.PARTIALLY_PAID;
   await conn.execute(QUERIES.LEDGER.UPDATE_BILL_STATUS_BY_LOG, [
-    state === LEDGER.REFUND_STATE.FULL
-      ? POS_BILL_STATUS.REFUNDED
-      : POS_BILL_STATUS.PARTIALLY_REFUNDED,
-    userPhone, sale.Id, tenantId,
+    posBillStatus, userPhone, sale.Id, tenantId,
   ]);
 
   let pointsReversed = 0;
@@ -634,6 +683,7 @@ const applyDownstreamTx = async (conn, result, tenantId, userPhone) => {
       creditNoteNo: result.transactionNo,
       invoiceNo: sale.TransactionNo,
       amount: returnedNow,
+      refundedAmount: result.refundedAmount ?? returnedNow,
       customerName: sale.CustomerName,
       customerMobile: sale.CustomerMobile,
       refundState: state,

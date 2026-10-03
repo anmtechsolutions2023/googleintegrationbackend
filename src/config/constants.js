@@ -56,6 +56,54 @@ const APPORTIONED_SALE_ROUNDS_SQL = `
     AND l.TransactionDate BETWEEN ? AND ?
     AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`;
 
+/**
+ * What has been COLLECTED on a document: every payment row against it.
+ *
+ * A sale paid short and topped up later has one paymentdetail per payment, so
+ * this is a SUM, never a join — a join would fan the document out once per
+ * payment and multiply every figure beside it. Requires `transactiondetaillog l`.
+ */
+const COLLECTED_SQL = `(SELECT COALESCE(SUM(pdx.TotalAmount), 0) FROM paymentdetail pdx
+    WHERE pdx.TransactionDetailLogId = l.Id AND pdx.TenantId = l.TenantId)`;
+
+/** What has come BACK on a sale: every credit note against it. Requires `l`. */
+const RETURNED_SQL = `(SELECT COALESCE(SUM(cnx.GrossAmount), 0) FROM transactiondetaillog cnx
+    WHERE cnx.ReversesLogId = l.Id AND cnx.TenantId = l.TenantId AND cnx.Active = 1)`;
+
+/**
+ * What is still OWED on a sale.
+ *
+ *   Due = Gross − Returns − Collected − Written off, never below zero.
+ *
+ * Returns come off the due first: a guest who paid ₹200 of ₹288 and sends back
+ * a ₹149 dish owes nothing and is owed ₹61, not ₹149. The same rule is applied
+ * in Node by ledger.due.js — this is its SQL twin, for filters and sums.
+ */
+const DUE_SQL = `GREATEST(0, ROUND(l.GrossAmount - ${RETURNED_SQL} - ${COLLECTED_SQL}
+    - COALESCE(l.WriteOffAmount, 0), 2))`;
+
+/**
+ * The token or table a document was served at, and its rounds — correlated
+ * subqueries rather than joins, so a bill covering three rounds does not fan
+ * the row out three times. Requires `transactiondetaillog l`.
+ */
+const DOC_SOURCE_COLUMNS_SQL = `
+               (SELECT GROUP_CONCAT(DISTINCT tk.TokenLabel ORDER BY tk.TokenNumber SEPARATOR ', ')
+                  FROM pos_bill b
+                  JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
+                  JOIN pos_token tk      ON tk.OrderId = bo.OrderId AND tk.TenantId = bo.TenantId
+                 WHERE b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId) AS TokenLabels,
+               (SELECT GROUP_CONCAT(DISTINCT o.TableName ORDER BY o.TableName SEPARATOR ', ')
+                  FROM pos_bill b
+                  JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
+                  JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+                 WHERE b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId) AS TableNames,
+               (SELECT GROUP_CONCAT(DISTINCT o.OrderNo ORDER BY o.OrderNo SEPARATOR ', ')
+                  FROM pos_bill b
+                  JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
+                  JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+                 WHERE b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId) AS OrderNos`;
+
 /** The apportioned money columns every report over the above shares. */
 const APPORTIONED_MONEY_SQL = `
   COUNT(DISTINCT o.Id)                          AS Orders,
@@ -1450,6 +1498,17 @@ module.exports = {
       // The priced line snapshots of every round on the bill, in one query.
       SELECT_ORDER_ITEMS:
         'SELECT Id, Items FROM pos_order WHERE TenantId = ? AND Id IN (:ids)',
+      // Rounds that are already on ANOTHER bill that has been invoiced. Settling
+      // them again would issue a second invoice for the same food — which is
+      // exactly what happened when a part-paid table was settled a second time.
+      SELECT_POSTED_ELSEWHERE: `
+        SELECT o.OrderNo, l.TransactionNo
+          FROM pos_bill_order bo
+          JOIN pos_bill b  ON b.Id = bo.BillId AND b.TenantId = bo.TenantId
+          JOIN pos_order o ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
+          JOIN transactiondetaillog l ON l.Id = b.TransactionDetailLogId AND l.TenantId = b.TenantId
+         WHERE bo.TenantId = ? AND bo.BillId <> ? AND bo.OrderId IN (:ids)
+         LIMIT 1`,
     },
 
     POS_CUSTOMER: {
@@ -2556,8 +2615,14 @@ module.exports = {
           FROM pos_kot WHERE OrderId = ? AND TenantId = ? ORDER BY CreatedOn ASC`,
       BILL: `
         SELECT b.Id AS BillId, b.BillNo, b.Status AS BillStatus, b.Total AS BillTotal,
-               b.SettledAt, b.TransactionDetailLogId,
-               l.TransactionNo, s.Name AS LedgerStatus
+               b.SettledAt, b.TransactionDetailLogId, b.BranchDetailId,
+               l.TransactionNo, s.Name AS LedgerStatus,
+               -- Paid and owed on the invoice, so the order can say "₹88 due"
+               -- and offer to collect it.
+               l.GrossAmount AS InvoiceTotal, l.WriteOffAmount,
+               l.CustomerName, l.CustomerMobile, l.SettledAt AS InvoiceSettledAt,
+               CASE WHEN l.Id IS NULL THEN 0 ELSE ${COLLECTED_SQL} END AS Collected,
+               CASE WHEN l.Id IS NULL THEN 0 ELSE ${RETURNED_SQL} END AS Returned
           FROM pos_bill_order bo
           JOIN pos_bill b ON b.Id = bo.BillId AND b.TenantId = bo.TenantId
           LEFT JOIN transactiondetaillog l ON l.Id = b.TransactionDetailLogId
@@ -3499,31 +3564,25 @@ module.exports = {
       SELECT_LOG_LIST: `
         SELECT l.Id, l.TransactionNo, l.TransactionDate, l.GrossAmount, l.NetAmount,
                l.TaxAmount, l.CustomerName, l.CustomerMobile, l.SettledAt,
+               l.WriteOffAmount, l.BranchId,
                s.Name AS StatusName, t.Name AS TypeName,
+               -- What has been taken against it so far. The list shows Paid and
+               -- Due beside the total, so a partly-paid invoice can be spotted
+               -- and collected without opening it.
+               ${COLLECTED_SQL} AS Collected,
                -- What the customer was holding: a token number, or a table.
                -- Correlated subqueries rather than joins: a bill covering three
                -- rounds would fan this row out three times and every list total
                -- would triple. An invoice with no POS bill behind it (an
                -- expense) simply gets nulls.
-               (SELECT GROUP_CONCAT(DISTINCT tk.TokenLabel ORDER BY tk.TokenNumber SEPARATOR ', ')
-                  FROM pos_bill b
-                  JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
-                  JOIN pos_token tk      ON tk.OrderId = bo.OrderId AND tk.TenantId = bo.TenantId
-                 WHERE b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId) AS TokenLabels,
-               (SELECT GROUP_CONCAT(DISTINCT o.TableName ORDER BY o.TableName SEPARATOR ', ')
-                  FROM pos_bill b
-                  JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
-                  JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
-                 WHERE b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId) AS TableNames,
-               (SELECT GROUP_CONCAT(DISTINCT o.OrderNo ORDER BY o.OrderNo SEPARATOR ', ')
-                  FROM pos_bill b
-                  JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
-                  JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
-                 WHERE b.TransactionDetailLogId = l.Id AND b.TenantId = l.TenantId) AS OrderNos
+${DOC_SOURCE_COLUMNS_SQL}
           FROM transactiondetaillog l
           LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
           LEFT JOIN transactiontype t       ON t.Id = l.TransactionTypeId
          WHERE l.TenantId = ?`,
+      // The due expression, for the list's "Dues only" filter. Static SQL,
+      // never user input.
+      DUE_EXPR: DUE_SQL,
 
       // The rounds one invoice covers, each with the token issued for it (if
       // any) and the venue it was served at. This is what lets a ledger
@@ -3594,7 +3653,7 @@ module.exports = {
                l.DiscountAmount, l.BranchId, l.ContactDetailId, l.CustomerName,
                l.CustomerMobile, l.TransactionTypeConfigId, l.TransactionTypeStatusId,
                l.TaxMode, l.BuyerGstin, l.BuyerLegalName, l.SellerGstin,
-               l.SettledAt, s.Name AS StatusName
+               l.SettledAt, l.WriteOffAmount, s.Name AS StatusName
           FROM transactiondetaillog l
           LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
          WHERE l.Id = ? AND l.TenantId = ?
@@ -3757,7 +3816,8 @@ module.exports = {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1, NOW(), ?, ?)`,
       SELECT_TENDERS_BY_LOG: `
         SELECT b.Id, b.Amount, b.Timestamp, pm.Type AS PaymentMode, pmtd.RefNo,
-               prt.Type AS ReceivedType, a.Name AS AccountName
+               prt.Type AS ReceivedType, a.Name AS AccountName,
+               b.PaymentDetailId, b.CreatedBy
           FROM paymentdetail pd
           JOIN paymentbreakup b ON b.PaymentDetailId = pd.Id AND b.TenantId = pd.TenantId
           LEFT JOIN paymentmodetransactiondetail pmtd ON pmtd.Id = b.PaymentModeTransactionDetailId
@@ -3768,6 +3828,74 @@ module.exports = {
          ORDER BY b.Timestamp ASC`,
       SELECT_PAYMENT_DETAIL_BY_LOG:
         'SELECT * FROM paymentdetail WHERE TransactionDetailLogId = ? AND TenantId = ? ORDER BY CreatedOn ASC',
+
+      // ── Collecting a balance ──────────────────────────────────────────────
+      // The sale, LOCKED, before anything is read about what it still owes. Two
+      // cashiers collecting the same invoice at once would otherwise both read
+      // "₹88 due" and both take it.
+      SELECT_SALE_FOR_COLLECT: `
+        SELECT l.Id, l.TransactionNo, l.GrossAmount, l.BranchId,
+               l.TransactionTypeConfigId, l.TransactionTypeStatusId,
+               l.ContactDetailId, l.CustomerName, l.CustomerMobile,
+               l.WriteOffAmount, l.SettledAt,
+               s.Name AS StatusName, t.Name AS TypeName
+          FROM transactiondetaillog l
+          LEFT JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+          LEFT JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+         WHERE l.Id = ? AND l.TenantId = ?
+         FOR UPDATE`,
+      // Every payment taken against one document, however many there were.
+      SELECT_COLLECTED_TOTAL: `
+        SELECT COALESCE(SUM(TotalAmount), 0) AS collected
+          FROM paymentdetail
+         WHERE TransactionDetailLogId = ? AND TenantId = ?`,
+      // What the customer has paid and NOT had back: the sale's payment rows
+      // netted against every refund row on its credit notes, store credit
+      // included. A return refunds only what this exceeds what they keep.
+      SELECT_NET_PAID: `
+        SELECT COALESCE(SUM(b.Amount), 0) AS netPaid
+          FROM paymentbreakup b
+          JOIN paymentdetail pd ON pd.Id = b.PaymentDetailId AND pd.TenantId = b.TenantId
+         WHERE b.TenantId = ?
+           AND pd.TransactionDetailLogId IN (
+                 SELECT Id FROM transactiondetaillog
+                  WHERE TenantId = ? AND (Id = ? OR ReversesLogId = ?)
+               )`,
+      SET_WRITE_OFF: `
+        UPDATE transactiondetaillog
+           SET WriteOffAmount = ?, WriteOffReason = ?, WriteOffNote = ?,
+               WrittenOffAt = NOW(), WrittenOffBy = ?, UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE Id = ? AND TenantId = ?`,
+      // Who owes the balance, added after the fact for a sale saved short with
+      // no name. Only the snapshot moves — the CRM customer is untouched.
+      SET_DEBTOR: `
+        UPDATE transactiondetaillog
+           SET CustomerName = ?, CustomerMobile = ?, UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE Id = ? AND TenantId = ?`,
+      // Moves the POS bill on only from the status it is expected to be in, so
+      // a bill already marked refunded is never flipped back to 'paid'.
+      UPDATE_BILL_STATUS_BY_LOG_FROM:
+        'UPDATE pos_bill SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE TransactionDetailLogId = ? AND TenantId = ? AND Status = ?',
+
+      // Every sale still owed money, oldest first — the Dues worklist. Small by
+      // nature (only part-paid sales), so filtering by age and text happens in
+      // Node over this one read. Params: businessDate, tenantId, typeName.
+      SELECT_DUES: `
+        SELECT l.Id, l.TransactionNo, l.TransactionDate, l.CreatedOn, l.GrossAmount,
+               l.CustomerName, l.CustomerMobile, l.ContactDetailId, l.BranchId,
+               br.BranchName, l.WriteOffAmount,
+               DATEDIFF(?, l.TransactionDate) AS AgeDays,
+               ${COLLECTED_SQL} AS Collected,
+               ${RETURNED_SQL} AS Returned,
+               (SELECT MAX(pdl.CreatedOn) FROM paymentdetail pdl
+                 WHERE pdl.TransactionDetailLogId = l.Id AND pdl.TenantId = l.TenantId) AS LastPaymentAt,
+${DOC_SOURCE_COLUMNS_SQL}
+          FROM transactiondetaillog l
+          JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+          JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+          LEFT JOIN branchdetail br    ON br.Id = l.BranchId
+         WHERE l.TenantId = ? AND t.Name = ? AND s.Name = 'PARTIALLY_PAID' AND l.Active = 1
+           AND ${DUE_SQL} > 0.01`,
 
       // POS bill link (posting + idempotency guard)
       SELECT_BILL_LEDGER_LINK:
@@ -3833,7 +3961,13 @@ module.exports = {
           COALESCE(SUM(l.RoundOff), 0)            AS RoundOff,
           COALESCE(SUM(l.GrossAmount), 0)         AS GrossAmount,
           COALESCE(SUM(p.Collected), 0)           AS Collected,
-          COALESCE(SUM(l.GrossAmount), 0) - COALESCE(SUM(p.Collected), 0) AS Outstanding
+          -- Still owed, per document, then summed: returns come off a part-paid
+          -- sale's due first, and a written-off balance is no longer owed. The
+          -- old Gross − Collected kept counting both as outstanding.
+          COALESCE(SUM(GREATEST(0, l.GrossAmount - COALESCE(r.Returned, 0)
+                                 - COALESCE(p.Collected, 0) - l.WriteOffAmount)), 0) AS Outstanding,
+          -- Balances given up on. Their own figure, never folded into discount.
+          COALESCE(SUM(l.WriteOffAmount), 0)      AS WrittenOff
         FROM transactiondetaillog l
         JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
         JOIN transactiontype t       ON t.Id = l.TransactionTypeId
@@ -3841,6 +3975,12 @@ module.exports = {
           SELECT TransactionDetailLogId, SUM(TotalAmount) AS Collected
             FROM paymentdetail WHERE TenantId = ? GROUP BY TransactionDetailLogId
         ) p ON p.TransactionDetailLogId = l.Id
+        LEFT JOIN (
+          SELECT ReversesLogId, SUM(GrossAmount) AS Returned
+            FROM transactiondetaillog
+           WHERE ReversesLogId IS NOT NULL AND Active = 1
+           GROUP BY ReversesLogId
+        ) r ON r.ReversesLogId = l.Id
         WHERE l.TenantId = ? AND t.Name = ?
           AND l.TransactionDate BETWEEN ? AND ?
           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
@@ -4108,7 +4248,7 @@ module.exports = {
           l.Id, l.TransactionNo, l.TransactionDate, l.GrossAmount,
           l.CustomerName, l.CustomerMobile,
           COALESCE(p.Collected, 0)                        AS Collected,
-          l.GrossAmount - COALESCE(p.Collected, 0)        AS Outstanding
+          ${DUE_SQL}                                      AS Outstanding
         FROM transactiondetaillog l
         JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
         JOIN transactiontype t       ON t.Id = l.TransactionTypeId
@@ -4118,7 +4258,8 @@ module.exports = {
         ) p ON p.TransactionDetailLogId = l.Id
         WHERE l.TenantId = ? AND t.Name = ?
           AND l.TransactionDate BETWEEN ? AND ?
-          AND l.GrossAmount - COALESCE(p.Collected, 0) > 0
+          AND s.Name = 'PARTIALLY_PAID'
+          AND ${DUE_SQL} > 0.01
         ORDER BY l.TransactionDate DESC`,
 
       // Unbilled: rounds still open on the floor. Operational, so it reads the
@@ -4643,6 +4784,18 @@ module.exports = {
     // REFUNDED MORE THAN IT RECEIVED — otherwise a sequence of partial returns
     // can hand back cash the customer never paid in cash.
     TENDER_APPORTIONMENT: 'CASH_FIRST',
+
+    // ── Collecting a balance ─────────────────────────────────────────────
+    //
+    // Why a balance was given up on. Coded so write-offs can be grouped; OTHER
+    // needs a note, because "other" alone explains nothing to whoever audits
+    // it later. [Code, Label, NoteRequired]
+    WRITE_OFF_REASONS: [
+      ['CUSTOMER_LEFT', 'Customer left without paying', false],
+      ['DISPUTED',      'Disputed item',                false],
+      ['STAFF_GUEST',   "Staff or owner's guest",       false],
+      ['OTHER',         'Other',                        true],
+    ],
   },
 
   // Why goods came back. Seeded as a master (pos_return_reason) so returns can

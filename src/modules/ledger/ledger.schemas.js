@@ -27,6 +27,8 @@ const listQuerySchema = Joi.object({
   branchId: entityId.optional(),
   contactDetailId: entityId.optional(),
   search: Joi.string().max(100).optional().allow(''),
+  // Only sales that still have a balance owed.
+  dues: Joi.boolean().optional(),
 });
 
 /**
@@ -166,7 +168,42 @@ const reportQuerySchema = Joi.object({
 
 const uuidParamSchema = Joi.object({ id: entityId.required() });
 
+// ── Collecting a balance ─────────────────────────────────────────────────────
+
+// One way the customer paid this time. Same shape as a tender at the till, but
+// every amount must be positive: a ₹0 line here records nothing and would only
+// add a row to the tender mix.
+const collectTenderSchema = Joi.object({
+  paymentModeId: entityId.required(),
+  amount: Joi.number().positive().precision(2).required(),
+  refNo: Joi.string().trim().max(50).optional().allow(null, ''),
+  comment: Joi.string().trim().max(100).optional().allow(null, ''),
+});
+
+const collectSchema = Joi.object({
+  Tenders: Joi.array().items(collectTenderSchema).min(1).max(10).required(),
+});
+
+// The amount is never sent: the server writes off exactly what is due at the
+// moment it locks the invoice.
+const writeOffSchema = Joi.object({
+  Reason: Joi.string().valid(...LEDGER.WRITE_OFF_REASONS.map(([code]) => code)).required(),
+  Note: Joi.string().trim().max(500).optional().allow(null, ''),
+});
+
+const debtorSchema = Joi.object({
+  Name: Joi.string().trim().min(1).max(150).required(),
+  Mobile: Joi.string().trim().max(50).optional().allow(null, ''),
+});
+
+const duesQuerySchema = Joi.object({
+  branchId: entityId.optional(),
+  age: Joi.string().valid('today', 'week', 'month', 'older').optional(),
+  search: Joi.string().max(100).optional().allow(''),
+});
+
 module.exports = {
   listQuerySchema, returnsListQuerySchema, refundSchema, returnSchema, settlementSchema,
   reportQuerySchema, uuidParamSchema,
+  collectSchema, writeOffSchema, debtorSchema, duesQuerySchema,
 };

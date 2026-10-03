@@ -83,6 +83,12 @@ const settleSchema = Joi.object({
   Discount: Joi.number().optional().allow(null),
   LineDiscounts: lineDiscountsSchema,
   Total: Joi.number().optional().allow(null),
+  // Who owes the balance when the bill is paid short. The ledger requires a
+  // name in that case unless a guest is already attached to the table.
+  Debtor: Joi.object({
+    Name: Joi.string().trim().min(1).max(150).required(),
+    Mobile: Joi.string().trim().max(50).optional().allow(null, ''),
+  }).optional().allow(null),
 }).or('Tenders', 'Payments');
 
 const paginationSchema = Joi.object({

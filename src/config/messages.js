@@ -87,6 +87,26 @@ module.exports = {
       'Line totals do not reconcile with the document total. The bill was not posted.',
     LEDGER_ACCOUNT_UNMAPPED:
       'This payment mode has no account mapped. Set its default account before taking payments this way: ',
+    // ── Collecting a balance ───────────────────────────────────────────
+    LEDGER_DEBTOR_REQUIRED:
+      'Enter the name of the person who owes the balance before saving a partial payment.',
+    LEDGER_NOT_A_SALE:
+      'Only a sale can take a payment or a write-off.',
+    LEDGER_NOTHING_DUE:
+      'Nothing is due on this invoice — it is already paid in full.',
+    LEDGER_COLLECT_AMOUNT_INVALID:
+      'Each payment must be more than ₹0.',
+    LEDGER_COLLECT_OVERPAID:
+      'Only cash can be more than the amount due — the difference is handed back as change. '
+      + 'Lower the card, UPI or other amount to the balance due.',
+    LEDGER_WRITE_OFF_REASON:
+      'Choose why this balance is being written off.',
+    LEDGER_WRITE_OFF_NOTE:
+      'Add a note explaining the write-off when the reason is Other.',
+    LEDGER_DEBTOR_LOCKED:
+      'The name can only be added to an invoice that still has a balance due and no linked guest.',
+    POS_BILL_ORDER_ALREADY_INVOICED:
+      'is already on invoice',
     // Expenses
     EXPENSE_NOT_APPROVED:
       'Only an approved expense can be settled.',
