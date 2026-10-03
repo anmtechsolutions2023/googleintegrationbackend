@@ -3110,6 +3110,30 @@ module.exports = {
         WHERE tenant_id = ? AND is_admin = TRUE
         ORDER BY user_phone`,
 
+      // Rows that point at ANOTHER ROW OF THE SAME TABLE, cut loose before the
+      // sweep. Executed first, inside the same transaction.
+      //
+      // The sweep empties each table with one DELETE, and InnoDB checks a
+      // foreign key row by row as it deletes, not once the statement is done.
+      // So when a table references itself, a single
+      // "DELETE … WHERE TenantId = ?" fails with ER_ROW_IS_REFERENCED_2 the
+      // moment it reaches a parent row before the child that points at it — and
+      // which comes first is just the order of the primary key, a random uuid.
+      // A tenancy with no returns, no reversals and no sub-categories never
+      // trips it, which is why it passed locally and failed on a real tenancy.
+      //
+      // Nulling the links first makes the order irrelevant. Nothing is lost:
+      // every row touched here is deleted by the sweep a moment later, in the
+      // same transaction.
+      UNLINK_SELF_REFERENCES: [
+        // A return / credit-note line → the sale line it returns.
+        'UPDATE transactionitemdetail SET SourceLineId = NULL WHERE TenantId = ? AND SourceLineId IS NOT NULL',
+        // A reversing document → the document it reverses.
+        'UPDATE transactiondetaillog SET ReversesLogId = NULL WHERE TenantId = ? AND ReversesLogId IS NOT NULL',
+        // A sub-category → its parent category.
+        'UPDATE categorydetail SET ParentId = NULL WHERE TenantId = ? AND ParentId IS NOT NULL',
+      ],
+
       // The sweep. Executed in array order, all inside ONE transaction.
       SWEEP: [
         // ── Wave 1 ─ Leaf rows: ledger lines, POS movements, join tables, role grants.

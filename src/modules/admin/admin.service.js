@@ -605,6 +605,11 @@ const deleteTenant = async (tenantId, actorTenantId) => {
       QUERIES.TENANT_DELETE.SELECT_ADMINS, [tenantId]
     );
 
+    // Self-references first, or a single DELETE on a table that points at
+    // itself fails whenever it reaches a parent before its child.
+    for (const sql of QUERIES.TENANT_DELETE.UNLINK_SELF_REFERENCES) {
+      await conn.execute(sql, [tenantId]);
+    }
     for (const sql of QUERIES.TENANT_DELETE.SWEEP) {
       await conn.execute(sql, [tenantId]);
     }

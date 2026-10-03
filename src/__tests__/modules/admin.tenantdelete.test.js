@@ -76,6 +76,23 @@ describe('deleteTenant — the sweep', () => {
     swept.forEach((s) => expect(s.params).toEqual([TENANT]));
   });
 
+  it('cuts self-references loose before the first delete, scoped to the tenancy', async () => {
+    // A return line points at the sale line it returns, in the same table. One
+    // DELETE over both fails if InnoDB reaches the sale line first — which on a
+    // real tenancy with returns it did, in production.
+    wire({ members: ['+919876500051'], sole: [] });
+    await deleteTenant(TENANT, ACTOR_TENANT);
+
+    const calls = mockConn.execute.mock.calls;
+    const firstDelete = calls.findIndex(([sql]) => sql === QUERIES.TENANT_DELETE.SWEEP[0]);
+    QUERIES.TENANT_DELETE.UNLINK_SELF_REFERENCES.forEach((sql) => {
+      const i = calls.findIndex(([q]) => q === sql);
+      expect(i).toBeGreaterThan(-1);
+      expect(i).toBeLessThan(firstDelete);
+      expect(calls[i][1]).toEqual([TENANT]);
+    });
+  });
+
   it('never deletes from the global tables or from onboarding_requests by tenant', async () => {
     wire({ members: ['+919876500051'], sole: ['+919876500051'] });
     await deleteTenant(TENANT, ACTOR_TENANT);
@@ -189,6 +206,29 @@ describe('deleteTenant — the sweep against the live schema', () => {
 
   it('names each table exactly once', () => {
     expect(new Set(swept).size).toBe(swept.length);
+  });
+
+  it('cuts loose every RESTRICT self-reference on a swept table, through a nullable column', () => {
+    // The ordering check below cannot see these — a table cannot be ordered
+    // before itself — so they need their own guard. This is the one that would
+    // have caught transactionitemdetail.SourceLineId.
+    const unlink = QUERIES.TENANT_DELETE.UNLINK_SELF_REFERENCES;
+    const missing = [];
+    tables.forEach(({ name, body }) => {
+      if (!swept.includes(name)) return;
+      const fk = /FOREIGN KEY\s*\(([^)]+)\)\s*REFERENCES\s+(\w+)\s*\(([^)]+)\)([^,\n]*(?:\n\s+ON DELETE [A-Z ]+)?)/gi;
+      for (const m of body.matchAll(fk)) {
+        const [, column, parent, , tail] = m;
+        if (parent !== name || /ON DELETE\s+(CASCADE|SET NULL)/i.test(tail || '')) continue;
+        const col = column.trim();
+        const covered = unlink.some((q) => q.startsWith(`UPDATE ${name} SET ${col} = NULL WHERE TenantId = ?`));
+        if (!covered) missing.push(`${name}.${col}`);
+        // SET NULL needs a column that accepts it.
+        const def = body.match(new RegExp(`^\\s*${col}\\s+[^\\n]*$`, 'm'));
+        expect(def && !/NOT NULL/i.test(def[0])).toBe(true);
+      }
+    });
+    expect(missing).toEqual([]);
   });
 
   it('deletes no parent before a RESTRICT child that outlives it', () => {
