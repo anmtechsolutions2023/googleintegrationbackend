@@ -91,7 +91,7 @@ const pack = async (query, tenantId) => {
   const a = await analyseMonth(query, tenantId);
   if (!a.branch.gstin) {
     throw new HttpError(
-      'This branch has no GSTIN. Add it on the GST tab or under POS Settings → GST before exporting a GST pack.',
+      'This branch has no GSTIN. Add it on the GST tab or under Outlet → Tax & GST → GST Switch before exporting a GST pack.',
       MESSAGES.HTTP_STATUS.BAD_REQUEST,
     );
   }

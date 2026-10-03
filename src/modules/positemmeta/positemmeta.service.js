@@ -8,12 +8,15 @@
 const { v4: uuidv4 } = require('uuid');
 const BaseCRUDService = require('../../common/BaseCRUDService');
 const { QUERIES } = require('../../config/constants');
-const { withTransaction, executeQuery } = require('../../utils/dbHelper');
+const { withConnection, withTransaction, executeQuery } = require('../../utils/dbHelper');
 const { HttpError } = require('../../middleware/errorHandler');
 const MESSAGES = require('../../config/messages');
 const { attachBreakdown, attachBreakdownToOne } = require('../pricing/pricing.enrich');
 // The schedule rule, from the one module that owns it.
 const categorySchedule = require('../poscategoryschedule/poscategoryschedule.service');
+const dailyStock = require('../posdailystock/posdailystock.service');
+const dailyStockRepo = require('../posdailystock/posdailystock.repository');
+const { resolve: resolveStock } = require('../posdailystock/posdailystock.resolver');
 
 const PRICING_OPTS = { idField: 'CostInfoId' };
 
@@ -129,6 +132,8 @@ class PosItemMetaService extends BaseCRUDService {
       data.PortionSize ?? null,
       data.MeatTypeId ?? null,
       data.PrepTimeMinutes ?? null,
+      data.StockTracked ? 1 : 0,
+      data.MaxPerOrder ?? null,
       data.BranchDetailId ?? null,
       data.Active !== undefined ? data.Active : true,
       userPhone,
@@ -148,6 +153,8 @@ class PosItemMetaService extends BaseCRUDService {
       data.PortionSize !== undefined ? data.PortionSize : existing.PortionSize,
       data.MeatTypeId !== undefined ? data.MeatTypeId : existing.MeatTypeId,
       data.PrepTimeMinutes !== undefined ? data.PrepTimeMinutes : existing.PrepTimeMinutes,
+      data.StockTracked !== undefined ? (data.StockTracked ? 1 : 0) : (existing.StockTracked ? 1 : 0),
+      data.MaxPerOrder !== undefined ? data.MaxPerOrder : (existing.MaxPerOrder ?? null),
       data.BranchDetailId !== undefined ? data.BranchDetailId : existing.BranchDetailId,
       data.Active !== undefined ? data.Active : existing.Active,
       userPhone,
@@ -342,6 +349,45 @@ class PosItemMetaService extends BaseCRUDService {
   }
 
   /**
+   * Marks each row with today's portion count, where the dish keeps one.
+   *
+   * Same shape as attachAvailability above and for the same reason: ONE read for
+   * the whole page rather than one per dish.
+   *
+   * A dish that is not tracked comes back `stockState: 'unlimited'` with a null
+   * remaining, which is what every existing dish is — so a till that ignores
+   * these fields behaves exactly as it did.
+   *
+   * @param {Array<Object>} rows
+   * @param {string} tenantId
+   * @returns {Promise<Array<Object>>}
+   */
+  async attachStock(rows, tenantId) {
+    if (!rows || rows.length === 0) return rows || [];
+    const ids = rows.map((r) => r.Id).filter(Boolean);
+    if (ids.length === 0) return rows;
+
+    const day = dailyStock.dayOf();
+    const byId = await withConnection((conn) => dailyStockRepo.findForItems(
+      conn, { itemMetaIds: ids, businessDate: day }, tenantId,
+    ));
+
+    return rows.map((r) => {
+      const found = byId.get(r.Id);
+      // A dish the lookup did not return is untracked as far as the till is
+      // concerned. Defaulting the other way would take dishes off the menu on a
+      // query that simply found nothing.
+      const resolved = resolveStock(found || { StockTracked: r.StockTracked ? 1 : 0 });
+      return {
+        ...r,
+        stockState: resolved.stockState,
+        remaining: resolved.remaining,
+        maxPerOrder: resolved.maxPerOrder,
+      };
+    });
+  }
+
+  /**
    * One change applied to many menu rows, all or nothing.
    *
    * The whole selection is checked first: if any dish no longer exists the
@@ -423,7 +469,8 @@ class PosItemMetaService extends BaseCRUDService {
     const result = await super.getAll(tenantId, page, limit, expand);
     const rows = (result.data || []).map((r) => this.normalizeRow(r));
     const priced = await attachBreakdown(rows, tenantId, PRICING_OPTS);
-    return { ...result, data: await this.attachAvailability(priced, tenantId) };
+    const withAvail = await this.attachAvailability(priced, tenantId);
+    return { ...result, data: await this.attachStock(withAvail, tenantId) };
   }
 
   /**
@@ -440,7 +487,8 @@ class PosItemMetaService extends BaseCRUDService {
     const nutritionRows = await executeQuery(this.queries.SELECT_NUTRITION, [id, tenantId]);
     const withNutrition = { ...row, Nutrition: nutritionRows[0] ?? null };
     const priced = await attachBreakdownToOne(withNutrition, tenantId, PRICING_OPTS);
-    const [withAvailability] = await this.attachAvailability([priced], tenantId);
+    const [withAvail] = await this.attachAvailability([priced], tenantId);
+    const [withAvailability] = await this.attachStock([withAvail], tenantId);
     return withAvailability;
   }
 }

@@ -858,6 +858,63 @@ module.exports = {
         'SELECT DinerSessionsEndedOn FROM pos_table WHERE Id = ? AND TenantId = ? LIMIT 1',
     },
 
+    // Today's portion counts. See pos_item_daily_stock in the schema for why a
+    // row per day, and why its ABSENCE is meaningful.
+    POS_DAILY_STOCK: {
+      // The counts screen: every tracked dish on a branch, with today's row if
+      // there is one. LEFT JOIN, because "tracked but not set today" is a state
+      // the screen has to show rather than a row it can skip.
+      SELECT_FOR_DAY: `SELECT im.Id AS ItemMetaId, idt.Name AS ItemName,
+          im.StockTracked, im.MaxPerOrder,
+          ds.Id AS StockId, ds.PreparedQty, ds.SoldQty
+        FROM pos_item_meta im
+        JOIN itemdetail idt ON idt.Id = im.ItemDetailId AND idt.TenantId = im.TenantId
+        LEFT JOIN pos_item_daily_stock ds
+          ON ds.ItemMetaId = im.Id AND ds.TenantId = im.TenantId
+         AND ds.BusinessDate = ? AND ds.Active = 1
+        WHERE im.TenantId = ? AND im.BranchDetailId = ? AND im.Active = 1
+          AND im.StockTracked = 1
+        ORDER BY idt.Name ASC`,
+      // The order path's read: the counts for a specific set of dishes, used to
+      // resolve state before the write and to give a better message than the
+      // UPDATE's silence. Advisory only — CONSUME below is the authority.
+      SELECT_FOR_ITEMS: `SELECT im.Id AS ItemMetaId, idt.Name AS ItemName,
+          im.StockTracked, im.MaxPerOrder,
+          ds.PreparedQty, ds.SoldQty
+        FROM pos_item_meta im
+        JOIN itemdetail idt ON idt.Id = im.ItemDetailId AND idt.TenantId = im.TenantId
+        LEFT JOIN pos_item_daily_stock ds
+          ON ds.ItemMetaId = im.Id AND ds.TenantId = im.TenantId
+         AND ds.BusinessDate = ? AND ds.Active = 1
+        WHERE im.TenantId = ? AND im.Id IN (:ids)`,
+      UPSERT:
+        'INSERT INTO pos_item_daily_stock (Id, TenantId, BranchDetailId, ItemMetaId, BusinessDate, PreparedQty, SoldQty, Active, CreatedOn, CreatedBy, UpdatedBy) '
+        + 'VALUES (?, ?, ?, ?, ?, ?, 0, 1, NOW(), ?, ?) '
+        // SoldQty is NOT reset: changing today's prepared figure at 3pm must not
+        // forget what has already gone out of the kitchen.
+        + 'ON DUPLICATE KEY UPDATE PreparedQty = VALUES(PreparedQty), Active = 1, UpdatedOn = NOW(), UpdatedBy = VALUES(UpdatedBy)',
+      CLEAR:
+        'DELETE FROM pos_item_daily_stock WHERE TenantId = ? AND ItemMetaId = ? AND BusinessDate = ?',
+      // THE GUARD AND THE DEDUCTION ARE ONE STATEMENT. Two orders racing for the
+      // last portion both run this; the engine serialises them on the row, the
+      // first wins, and the second's WHERE no longer matches. affectedRows = 0
+      // is "somebody just took it", not an error to retry.
+      CONSUME: `UPDATE pos_item_daily_stock
+           SET SoldQty = SoldQty + ?, UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE TenantId = ? AND ItemMetaId = ? AND BusinessDate = ? AND Active = 1
+           AND PreparedQty - SoldQty >= ?`,
+      // A portal order has already charged the guest, so it decrements WITHOUT
+      // the guard and is allowed to go negative. A negative count is honest; a
+      // refused order the aggregator has taken money for is not.
+      CONSUME_UNCHECKED: `UPDATE pos_item_daily_stock
+           SET SoldQty = SoldQty + ?, UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE TenantId = ? AND ItemMetaId = ? AND BusinessDate = ? AND Active = 1`,
+      // Floored at zero: a release must never invent portions that were not sold.
+      RELEASE: `UPDATE pos_item_daily_stock
+           SET SoldQty = GREATEST(SoldQty - ?, 0), UpdatedOn = NOW(), UpdatedBy = ?
+         WHERE TenantId = ? AND ItemMetaId = ? AND BusinessDate = ? AND Active = 1`,
+    },
+
     // Which tenders each OUTLET accepts. The catalogue above is tenant-wide;
     // this is the per-branch override over it.
     POS_BRANCH_PAYMENT_METHOD: {
@@ -1295,8 +1352,8 @@ module.exports = {
         LEFT JOIN itemdetail idt ON idt.Id = im.ItemDetailId AND idt.TenantId = im.TenantId
         LEFT JOIN categorydetail cat ON cat.Id = idt.CategoryId AND cat.TenantId = im.TenantId
         WHERE im.Id = ? AND im.TenantId = ?`,
-      INSERT: 'INSERT INTO pos_item_meta (Id, TenantId, ItemDetailId, FoodTypeId, CostInfoId, Channels, Prices, Variants, ServesCount, PortionSize, MeatTypeId, PrepTimeMinutes, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
-      UPDATE: 'UPDATE pos_item_meta SET ItemDetailId = ?, FoodTypeId = ?, CostInfoId = ?, Channels = ?, Prices = ?, Variants = ?, ServesCount = ?, PortionSize = ?, MeatTypeId = ?, PrepTimeMinutes = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      INSERT: 'INSERT INTO pos_item_meta (Id, TenantId, ItemDetailId, FoodTypeId, CostInfoId, Channels, Prices, Variants, ServesCount, PortionSize, MeatTypeId, PrepTimeMinutes, StockTracked, MaxPerOrder, BranchDetailId, Active, CreatedOn, CreatedBy, UpdatedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)',
+      UPDATE: 'UPDATE pos_item_meta SET ItemDetailId = ?, FoodTypeId = ?, CostInfoId = ?, Channels = ?, Prices = ?, Variants = ?, ServesCount = ?, PortionSize = ?, MeatTypeId = ?, PrepTimeMinutes = ?, StockTracked = ?, MaxPerOrder = ?, BranchDetailId = ?, Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
       DELETE: 'DELETE FROM pos_item_meta WHERE Id = ? AND TenantId = ?',
       // Order lines reference a menu row; pricing needs the cost record it
       // points at. Batched so an order costs one lookup, not one per line.
@@ -1503,6 +1560,24 @@ module.exports = {
       DELETE: 'DELETE FROM pos_order WHERE Id = ? AND TenantId = ?',
       // Domain action helper: update order status (e.g. after firing a KOT)
       SET_STATUS: 'UPDATE pos_order SET Status = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      // Covers and waiter. Their own statement rather than columns on INSERT /
+      // UPDATE: those are shared with the transfer path, which rewrites a round
+      // wholesale and must leave who is serving it alone.
+      SET_SERVICE:
+        'UPDATE pos_order SET GuestCount = ?, WaiterId = ?, WaiterName = ?, UpdatedOn = NOW(), UpdatedBy = ? '
+        + 'WHERE Id = ? AND TenantId = ?',
+      // A bill printed for the guest to check, before payment.
+      MARK_BILL_PRINTED:
+        'UPDATE pos_order SET BillPrintedAt = NOW(), UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      // Who can be named as a table's waiter: the tenancy's active members.
+      // Name and outlet only — a phone number is the member's login and has no
+      // business on a till that every cashier can read.
+      SELECT_WAITERS:
+        "SELECT id AS Id, full_name AS Name, branch_detail_id AS BranchDetailId FROM user_tenants "
+        + "WHERE tenant_id = ? AND is_active = 1 AND status = 'ACTIVE' ORDER BY full_name ASC",
+      SELECT_WAITER_BY_ID:
+        "SELECT id AS Id, full_name AS Name FROM user_tenants "
+        + "WHERE id = ? AND tenant_id = ? AND is_active = 1 AND status = 'ACTIVE'",
     },
 
     POS_KOT: {
@@ -2369,6 +2444,7 @@ module.exports = {
       // whole by one screen, and a page boundary would hide dishes from guests.
       MENU_FOR_BRANCH: `
         SELECT im.Id, im.CostInfoId, im.PortionSize, im.ServesCount, im.PrepTimeMinutes,
+               im.StockTracked, im.MaxPerOrder,
                idt.Name AS ItemName, idt.Description,
                cat.Id AS CategoryId, cat.Name AS CategoryName,
                ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg,
@@ -3059,6 +3135,10 @@ module.exports = {
         'DELETE FROM pos_expense WHERE TenantId = ?',
         'DELETE FROM pos_feedback WHERE TenantId = ?',
         'DELETE FROM pos_item_meta_addon_group WHERE TenantId = ?',
+        // Today's portion counts. Ahead of pos_item_meta for the same reason as
+        // its siblings: the FK cascades, but the sweep counts every row it
+        // removes rather than leaving any to the engine.
+        'DELETE FROM pos_item_daily_stock WHERE TenantId = ?',
         'DELETE FROM pos_item_meta_channel WHERE TenantId = ?',
         'DELETE FROM pos_item_meta_tag WHERE TenantId = ?',
         'DELETE FROM pos_item_meta_variant WHERE TenantId = ?',
@@ -4331,6 +4411,9 @@ module.exports = {
     PRESETS_MAX: 20,
     DEFAULT_PRESETS: ['Less spicy', 'Extra spicy', 'Less salt', 'Less oil', 'No onion', 'No garlic', 'Jain'],
   },
+  // Covers at one table, = pos_order.GuestCount SMALLINT. A banquet of 500 is
+  // real; 5000 is a slipped key, and it would skew every per-cover report.
+  POS_GUEST_COUNT_MAX: 999,
   // Series tag + fallback prefix for 'series' numbering.
   POS_TOKEN_SERIES: { TAG: 'POS_TOKEN', PREFIX: 'TOK' },
   // Ordered: the Tracking board advances an order one stage at a time, so the

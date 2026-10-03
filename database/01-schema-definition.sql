@@ -1415,6 +1415,7 @@ DROP TABLE IF EXISTS pos_order;
 DROP TABLE IF EXISTS pos_item_nutrition;
 DROP TABLE IF EXISTS pos_item_meta_tag;
 DROP TABLE IF EXISTS pos_item_meta_addon_group;
+DROP TABLE IF EXISTS pos_item_daily_stock;
 DROP TABLE IF EXISTS pos_item_meta_channel;
 DROP TABLE IF EXISTS pos_item_meta_variant;
 DROP TABLE IF EXISTS pos_item_meta;
@@ -1746,6 +1747,22 @@ CREATE TABLE pos_item_meta (
     -- Kitchen Preparation Time for THIS dish, in minutes. The order-level KPT
     -- sent to a portal is derived from the slowest line, not stored twice.
     PrepTimeMinutes INT           NULL,
+    -- ── Daily portion counts ────────────────────────────────────────────────
+    -- OPT IN, defaulting to off, so every dish that exists today keeps behaving
+    -- exactly as it does: unlimited, no count kept.
+    --
+    -- The flag exists because "no count entered today means unavailable" cannot
+    -- be the rule for the whole menu — soft drinks and packaged items would go
+    -- dark every morning until somebody typed a number against all of them. With
+    -- it, absence means two different things: UNTRACKED is unlimited, TRACKED
+    -- WITH NO ROW FOR TODAY is unavailable. See pos_item_daily_stock.
+    StockTracked    TINYINT(1)    NOT NULL DEFAULT 0,
+    -- The most of this dish ONE order may take. NULL = no cap.
+    --
+    -- Not inventory, and deliberately separate from it: a kitchen holding forty
+    -- portions may still refuse to send twelve of them to one table. Checked
+    -- line-wise, so it needs no transaction.
+    MaxPerOrder     INT           NULL,
     BranchDetailId  VARCHAR(50)   NOT NULL,
     TenantId        VARCHAR(50)   NOT NULL,
     Active          TINYINT(1)    NOT NULL,
@@ -1866,6 +1883,50 @@ CREATE TABLE pos_item_nutrition (
     FOREIGN KEY (ItemMetaId) REFERENCES pos_item_meta(Id) ON DELETE CASCADE
 );
 
+
+-- 4.8e pos_item_daily_stock — how many of this dish the kitchen made TODAY.
+--
+-- ONE ROW PER TRACKED DISH PER DAY, and the row's absence is meaningful: a dish
+-- whose pos_item_meta.StockTracked is 1 and which has no row for today is
+-- UNAVAILABLE, not unlimited. That is the operator's own rule — if nobody said
+-- how many were made, nothing is sold.
+--
+-- A ROW PER DAY RATHER THAN A COUNTER THAT RESETS. A counter would answer "how
+-- many are left" and nothing else; these rows answer "how often did we sell out,
+-- and by when", which is the question that decides tomorrow's number. Nothing
+-- has to run at midnight to clear anything, either — a new day simply has no row
+-- yet, which is the state the rule above already describes.
+--
+-- SoldQty moves only through the conditional UPDATE in the order transaction
+-- (see QUERIES.POS_DAILY_STOCK.CONSUME): the deduction and the oversell guard
+-- are the same statement, so two tills racing for the last portion cannot both
+-- win. It is given back when a round is rejected or cancelled.
+--
+-- This is DAILY availability, not ingredient inventory. Nothing here depletes a
+-- shared stock of paneer across three dishes; that is a different system.
+CREATE TABLE pos_item_daily_stock (
+    Id              VARCHAR(50)  NOT NULL,
+    TenantId        VARCHAR(50)  NOT NULL,
+    BranchDetailId  VARCHAR(50)  NOT NULL,
+    ItemMetaId      VARCHAR(50)  NOT NULL,
+    -- utils/dateRange.businessDate() — the LOCAL calendar day, the same one the
+    -- ledger stamps documents with, so a day's sales and a day's counts agree.
+    BusinessDate    DATE         NOT NULL,
+    PreparedQty     INT          NOT NULL,
+    SoldQty         INT          NOT NULL DEFAULT 0,
+    Active          TINYINT(1)   NOT NULL DEFAULT 1,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    -- One count per dish per day. This is what makes setting the number an
+    -- upsert rather than a second opinion.
+    UNIQUE KEY uk_daily_stock (TenantId, ItemMetaId, BusinessDate),
+    -- The counts screen's own query: one branch, one day.
+    INDEX idx_daily_stock_day (TenantId, BranchDetailId, BusinessDate),
+    FOREIGN KEY (ItemMetaId) REFERENCES pos_item_meta(Id) ON DELETE CASCADE
+);
 -- 4.8 pos_customer — walk-in / loyalty customers
 CREATE TABLE pos_customer (
     Id              VARCHAR(50)     NOT NULL,
@@ -1981,6 +2042,25 @@ CREATE TABLE pos_order (
     -- the same reason pos_kot carries one: whoever packs the bag acts on it
     -- without reading the cooking instructions.
     NoCutlery       TINYINT(1)     NOT NULL DEFAULT 0,
+    -- WHO IS AT THE TABLE AND WHO IS LOOKING AFTER THEM. Dine-in only in
+    -- practice; null on a counter or portal round, and null on a table where
+    -- nobody said. Set on each round of a session, so a round moved to another
+    -- table carries its own covers and waiter with it.
+    --
+    -- WaiterId is user_tenants.id — a member of the tenancy IS a staff member —
+    -- and deliberately has no FK, for the same reason the venue snapshot above
+    -- has none: a waiter leaving must neither be blocked by, nor rewrite, the
+    -- history of the tables they served. WaiterName is the name as it stood
+    -- when they were assigned, so a bill reprinted next year still names them.
+    GuestCount      SMALLINT       NULL,
+    WaiterId        CHAR(36)       NULL,
+    WaiterName      VARCHAR(100)   NULL,
+    -- When a bill for this round was last printed for the guest to check,
+    -- BEFORE it was paid. Not the invoice: that is issued on settlement. A
+    -- table whose every open round carries this is waiting on payment, which
+    -- is what the floor plan shows. A round added after printing has none, so
+    -- the table goes back to running until the bill is printed again.
+    BillPrintedAt   DATETIME       NULL,
     -- WHY STAFF REFUSED a round a guest placed from a QR table. Set only by
     -- POST /api/pos/qr/orders/:id/reject, which also cancels the round; the
     -- guest's phone shows the reason. A coded reason from the house

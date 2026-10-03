@@ -79,6 +79,12 @@ const createSchema = Joi.object({
   // This dish's own prep time. The order-level KPT sent to a portal is derived
   // from the slowest line, so it is not stored twice.
   PrepTimeMinutes: optionalNumber({ min: 0, integer: true }),
+  // Daily portion counts. Opt in: off keeps the dish unlimited, on means no
+  // count entered for the day and it is not sold. 1/0 accepted because an edit
+  // form seeded from a GET echoes the TINYINT back.
+  StockTracked: Joi.boolean().truthy(1).falsy(0).optional(),
+  // The most of this dish ONE order may take; empty clears the cap.
+  MaxPerOrder: optionalNumber({ min: 1, integer: true }),
   Nutrition: nutritionSchema.optional(),
   Channels: jsonCol.optional(),
   Prices: jsonCol.optional(),
@@ -92,6 +98,12 @@ const createSchema = Joi.object({
   // what refuses the save.
   CategoryAvailableNow: Joi.any().optional().strip(),
   CategoryOpensAt: Joi.any().optional().strip(),
+  // Same again for today's portion count, computed by attachStock. The dish's
+  // OWN StockTracked and MaxPerOrder are real columns and stay editable above;
+  // these three are the resolved answer and are read-only.
+  stockState: Joi.any().optional().strip(),
+  remaining: Joi.any().optional().strip(),
+  maxPerOrder: Joi.any().optional().strip(),
   // TaxBreakdown is not a SELECT alias — pricing.enrich computes it after the
   // read — so joinedEchoes cannot see it and it stays listed by hand.
   TaxBreakdown: taxBreakdownEcho(),
@@ -120,6 +132,12 @@ const updateSchema = Joi.object({
   // This dish's own prep time. The order-level KPT sent to a portal is derived
   // from the slowest line, so it is not stored twice.
   PrepTimeMinutes: optionalNumber({ min: 0, integer: true }),
+  // Daily portion counts. Opt in: off keeps the dish unlimited, on means no
+  // count entered for the day and it is not sold. 1/0 accepted because an edit
+  // form seeded from a GET echoes the TINYINT back.
+  StockTracked: Joi.boolean().truthy(1).falsy(0).optional(),
+  // The most of this dish ONE order may take; empty clears the cap.
+  MaxPerOrder: optionalNumber({ min: 1, integer: true }),
   Nutrition: nutritionSchema.optional(),
   Channels: jsonCol.optional(),
   Prices: jsonCol.optional(),
@@ -133,6 +151,12 @@ const updateSchema = Joi.object({
   // what refuses the save.
   CategoryAvailableNow: Joi.any().optional().strip(),
   CategoryOpensAt: Joi.any().optional().strip(),
+  // Same again for today's portion count, computed by attachStock. The dish's
+  // OWN StockTracked and MaxPerOrder are real columns and stay editable above;
+  // these three are the resolved answer and are read-only.
+  stockState: Joi.any().optional().strip(),
+  remaining: Joi.any().optional().strip(),
+  maxPerOrder: Joi.any().optional().strip(),
   // TaxBreakdown is not a SELECT alias — pricing.enrich computes it after the
   // read — so joinedEchoes cannot see it and it stays listed by hand.
   TaxBreakdown: taxBreakdownEcho(),

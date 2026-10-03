@@ -10,7 +10,11 @@ jest.mock('../../utils/logger', () => ({
 }));
 jest.mock('uuid', () => ({ v4: jest.fn(() => 'mock-uuid') }));
 
-const mockConn = { execute: jest.fn(async () => [{ affectedRows: 1 }]) };
+// A SELECT must answer with a ROW ARRAY; only writes answer with a result
+// object. The daily-stock lookup in createRoundTx is a SELECT, and this
+// suite's dishes are untracked, so an empty array is the right answer.
+const answerFor = (q) => (/^\s*SELECT/i.test(q) ? [[]] : [{ affectedRows: 1 }]);
+const mockConn = { execute: jest.fn(async (q) => answerFor(q)) };
 jest.mock('../../utils/dbHelper', () => ({
   withConnection: jest.fn(async (cb) => cb(mockConn)),
   withTransaction: jest.fn(async (cb) => cb(mockConn)),
@@ -71,7 +75,7 @@ const insertedOrder = () => {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockConn.execute.mockImplementation(async () => [{ affectedRows: 1 }]);
+  mockConn.execute.mockImplementation(async (q) => answerFor(q));
 });
 
 describe('the rules', () => {

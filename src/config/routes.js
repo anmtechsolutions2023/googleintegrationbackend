@@ -37,6 +37,7 @@ const itemdetailRoutes = require('../modules/itemdetail/itemdetail.routes');
 const mastersetupRoutes = require('../modules/mastersetup/mastersetup.routes');
 const posmediaRoutes = require('../modules/posmedia/posmedia.routes');
 const pospaymentmethodRoutes = require('../modules/pospaymentmethod/pospaymentmethod.routes');
+const posdailystockRoutes = require('../modules/posdailystock/posdailystock.routes');
 const businessprofileRoutes = require('../modules/businessprofile/businessprofile.routes');
 const importRoutes = require('../modules/import/import.routes');
 const pricingRoutes = require('../modules/pricing/pricing.routes');
@@ -333,6 +334,9 @@ const registerRoutes = (app) => {
   // Which tenders THIS outlet accepts. The tenant-wide catalogue of methods
   // stays at /api/paymentmodes; this is the per-branch override over it.
   app.use('/api/pos/payment-methods', pospaymentmethodRoutes);
+  // How many of each tracked dish the kitchen made today. Availability, not
+  // ingredient inventory — see pos_item_daily_stock.
+  app.use('/api/pos/daily-stock', posdailystockRoutes);
   // Campaigns and the offers inside them. An offer is not a second way to price
   // a bill — the engine produces the same per-line discounts the till already
   // takes, so posbill.recomputeTotals stays the only pricing path.

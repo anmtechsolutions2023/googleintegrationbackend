@@ -229,7 +229,7 @@ const importItems = async (rows, options, tenantId, userPhone) => {
             // Neither — say so, and let a person decide.
             throw new HttpError(
               `Tax group “${row.taxGroup}” already carries different rates. `
-              + 'Change them in Master Data → Tax Groups, or name a different group here.',
+              + 'Change them in Outlet → Tax & GST → Tax Groups, or name a different group here.',
               400,
             );
           }

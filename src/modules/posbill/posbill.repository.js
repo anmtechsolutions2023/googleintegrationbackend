@@ -2,6 +2,7 @@
 // Bill ↔ orders link, and the priced line snapshots a bill is recomputed from.
 
 const { QUERIES } = require('../../config/constants');
+const { quantityOf } = require('../../utils/orderLine');
 const { lineNoteOf } = require('../posorder/kitchenNotes');
 
 const expandIds = (sql, count) =>
@@ -140,7 +141,7 @@ const getOrderLinesTx = async (conn, orderIds, tenantId, lineDiscounts = null) =
         taxCharged: item.taxCharged !== false,
         // Already includes both surcharges — see posorder.priceItems.
         unitAmount: item.price ?? item.unitAmount ?? 0,
-        quantity: Number(item.qty ?? item.quantity ?? 1) || 0,
+        quantity: quantityOf(item),
         isTaxIncluded: !!item.isTaxIncluded,
         // Rates as captured at order time. An order placed before pricing
         // shipped has none, so it prices as 0% rather than picking up today's.

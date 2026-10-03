@@ -32,6 +32,14 @@ const DETAIL = checkScope(...SCOPE_SETS.POS_ORDER_REFERENCE_READ);
 router.get('/', authenticateToken, LIST, audit, ...controller.getAll);
 
 /**
+ * GET /waiters — the tenancy's active members, for the waiter picker on a
+ * table. Read on the same scopes as the order list: whoever can see a table's
+ * order can see who is serving it. Declared BEFORE /:id so 'waiters' is not
+ * read as an id.
+ */
+router.get('/waiters', authenticateToken, LIST, audit, ...controller.listWaiters);
+
+/**
  * GET /:id/detail — the round with its token, kitchen tickets and invoice.
  * Declared BEFORE /:id so 'detail' is not read as part of an id.
  */
@@ -74,6 +82,31 @@ router.post(
   checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_ORDER_WRITE),
   auditLogCrud('POS Order Transfer', AUDIT_CATEGORIES.POS),
   ...controller.transfer,
+);
+
+/** POST /service-details — domain action: covers and/or waiter on a table's open rounds. */
+router.post(
+  '/service-details',
+  authenticateToken,
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_ORDER_WRITE),
+  auditLogCrud('POS Order Service Details', AUDIT_CATEGORIES.POS),
+  ...controller.setServiceDetails,
+);
+
+/**
+ * POST /bill-printed — domain action: a bill was printed for these rounds
+ * before payment. Open to order staff AND billing staff: a waiter fetches the
+ * bill for the guest, a cashier prints it at the counter.
+ */
+router.post(
+  '/bill-printed',
+  authenticateToken,
+  checkScope(
+    SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.POS_ORDER_WRITE, SCOPES.POS_BILLING_WRITE,
+  ),
+  auditLogCrud('POS Bill Printed', AUDIT_CATEGORIES.POS),
+  ...controller.markBillPrinted,
 );
 
 /** POST /:id/fire-kot — domain action: fire a KOT from this order. */

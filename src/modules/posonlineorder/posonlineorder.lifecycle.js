@@ -172,6 +172,11 @@ const accept = async (id, data, tenantId, userPhone) => {
         ChannelId: portal?.ChannelId ?? null,
         Status: 'open',
         TableId: null,
+        // The aggregator has already taken the guest's money, so today's
+        // portion count records this round but never refuses it — the same rule
+        // the availability checks follow. The count may go negative, which is
+        // the honest answer: the food is owed whatever the kitchen planned for.
+        StockGuard: false,
         // Deliberately no CustomerId: aggregators mask the number and rotate
         // it, so resolving one per order would fill the CRM with one-visit
         // ghosts and poison the loyalty ledger. The name rides on the online

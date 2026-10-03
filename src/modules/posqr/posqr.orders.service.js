@@ -14,6 +14,7 @@ const { HttpError } = require('../../middleware/errorHandler');
 const { logger } = require('../../utils/logger');
 const posOrderService = require('../posorder/posorder.service');
 const { refreshTable } = require('../posorder/posorder.transfer');
+const dailyStock = require('../posdailystock/posdailystock.service');
 
 const Q = QUERIES.POS_QR_ORDER;
 
@@ -111,6 +112,15 @@ const reject = async (orderId, { reasonId, note }, tenantId, userPhone) =>
       reasonId, note || null, userPhone, orderId, tenantId,
     ]);
     if (result.affectedRows !== 1) throw new HttpError(MESSAGES.ERROR.QR_ORDER_NOT_PENDING, 409);
+
+    // Give today's portions back. The count was taken when the guest ordered,
+    // so a round staff refuse has to return it or the kitchen's figure drifts
+    // down all service. Never throws — see releaseForOrder: a release that
+    // fails must not leave staff unable to reject an order.
+    await dailyStock.releaseForOrder(
+      conn, parseItems(order.Items), tenantId, userPhone,
+      { date: order.CreatedOn },
+    );
 
     await refreshTable(conn, order.TableId, tenantId, userPhone);
     logger.info('QR order rejected', { tenantId, orderId, reasonId, by: userPhone });

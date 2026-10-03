@@ -3,11 +3,19 @@
 
 const Joi = require('joi');
 const { entityId, optionalEntityId } = require('../../utils/idSchema');
-const { POS_ORDER_STATUSES, POS_ORDER_TYPES, KITCHEN_NOTES } = require('../../config/constants');
+const {
+  POS_ORDER_STATUSES, POS_ORDER_TYPES, KITCHEN_NOTES, POS_GUEST_COUNT_MAX,
+} = require('../../config/constants');
 
 // The whole-order note and the no-cutlery flag. A DISH note is not a field here:
 // it rides on its line inside Items, and posorder.service cleans and bounds it.
 const cookingInstructions = Joi.string().max(KITCHEN_NOTES.ORDER_MAX).allow(null, '').trim();
+
+// Covers and waiter. Both nullable: null is "nobody said", which is a real
+// answer at a busy door. The waiter is named by membership id; the service
+// resolves the name, so a client cannot print whatever it likes on a bill.
+const guestCount = Joi.number().integer().min(1).max(POS_GUEST_COUNT_MAX).allow(null);
+const waiterId = optionalEntityId;
 
 // Canonical lowercase enums, normalized on write. Status and OrderType were both
 // free-text before, which is how 'Active'/'open' and 'Dine-in'/'dinein' ended up
@@ -34,6 +42,8 @@ const createSchema = Joi.object({
   BranchDetailId: optionalEntityId,
   CookingInstructions: cookingInstructions.optional(),
   NoCutlery: Joi.boolean().optional(),
+  GuestCount: guestCount.optional(),
+  WaiterId: waiterId.optional(),
   Active: Joi.boolean().optional().default(true),
 });
 
@@ -99,4 +109,27 @@ const transferSchema = Joi.object({
   destOrderNo: Joi.string().max(50).optional().allow(null, ''),
 });
 
-module.exports = { createSchema, updateSchema, paginationSchema, uuidParamSchema, transferSchema };
+// Covers and waiter for a table's open rounds, changed after they were placed —
+// the party grew, or the section was handed to someone else. Every round of the
+// session at once, so the table cannot end up with two answers. A field left out
+// is left alone; null clears it.
+const serviceDetailsSchema = Joi.object({
+  orderIds: Joi.array().items(entityId).min(1).max(100).unique().required(),
+  GuestCount: guestCount.optional(),
+  WaiterId: waiterId.optional(),
+}).or('GuestCount', 'WaiterId');
+
+// The rounds a bill was just printed for, before payment.
+const billPrintedSchema = Joi.object({
+  orderIds: Joi.array().items(entityId).min(1).max(100).unique().required(),
+});
+
+module.exports = {
+  createSchema,
+  updateSchema,
+  paginationSchema,
+  uuidParamSchema,
+  transferSchema,
+  serviceDetailsSchema,
+  billPrintedSchema,
+};

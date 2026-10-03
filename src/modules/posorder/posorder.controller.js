@@ -21,6 +21,8 @@ const {
   paginationSchema,
   uuidParamSchema,
   transferSchema,
+  serviceDetailsSchema,
+  billPrintedSchema,
 } = require('./posorder.schemas');
 const { logger } = require('../../utils/logger');
 
@@ -95,6 +97,30 @@ const fireKot = asyncHandler(async (req, res) => {
   createdResponse(res, kot, 'KOT fired successfully');
 });
 
+// Who can be named as a table's waiter.
+const listWaiters = asyncHandler(async (req, res) => {
+  const { tid: tenantId } = req.user;
+  logger.info('PosOrder.listWaiters called', { tenantId });
+  const rows = await service.listWaiters(tenantId);
+  successResponse(res, rows, 'Waiters retrieved successfully');
+});
+
+// Domain action: change covers and/or waiter on a table's open rounds.
+const setServiceDetails = asyncHandler(async (req, res) => {
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosOrder.setServiceDetails called', { tenantId, phone, rounds: req.body.orderIds.length });
+  const result = await service.setServiceDetails(req.body, tenantId, phone);
+  successResponse(res, result, 'Guests and waiter updated');
+});
+
+// Domain action: a bill was printed for these rounds, before payment.
+const markBillPrinted = asyncHandler(async (req, res) => {
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosOrder.markBillPrinted called', { tenantId, phone, rounds: req.body.orderIds.length });
+  const result = await service.markBillPrinted(req.body.orderIds, tenantId, phone);
+  successResponse(res, result, 'Bill marked as printed');
+});
+
 module.exports = {
   getAll: [validateQuery(paginationSchema), getAll],
   getById: [validateParams(uuidParamSchema), getById],
@@ -104,4 +130,7 @@ module.exports = {
   deleteById: [validateParams(uuidParamSchema), deleteById],
   fireKot: [validateParams(uuidParamSchema), fireKot],
   transfer: [validateBody(transferSchema), transfer],
+  listWaiters: [listWaiters],
+  setServiceDetails: [validateBody(serviceDetailsSchema), setServiceDetails],
+  markBillPrinted: [validateBody(billPrintedSchema), markBillPrinted],
 };

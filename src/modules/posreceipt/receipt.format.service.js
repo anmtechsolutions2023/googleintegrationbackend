@@ -411,7 +411,7 @@ const setTaxMode = async (taxMode, branchId, tenantId, userPhone) => {
   const setting = await taxSettingRepository.get(tenantId);
   if (!setting.gstCharging) {
     throw new HttpError(
-      'GST is switched off in POS Settings → GST, so the receipt follows that setting. Turn GST on there first.',
+      'GST is switched off in Outlet → Tax & GST → GST Switch, so the receipt follows that setting. Turn GST on there first.',
       MESSAGES.HTTP_STATUS.CONFLICT,
       'TAX_MODE_FOLLOWS_GST_SWITCH',
     );

@@ -998,6 +998,39 @@ const swaggerSpec = {
         },
       },
 
+      // ─── DailyStock ────────────────────────────────────────────────────────
+      DailyStockItem: {
+        type: 'object',
+        properties: {
+          itemMetaId: { type: 'string', format: 'uuid' },
+          name: { type: 'string', example: 'Paneer Biryani' },
+          stockState: {
+            type: 'string', enum: ['unlimited', 'unavailable', 'available', 'sold_out'],
+            description: '`unlimited` — not tracked. `unavailable` — tracked, but no count was set for this day. `available` — portions remain. `sold_out` — the count reached zero. The middle two are different problems: one means nobody set a number this morning, the other means the kitchen ran out.',
+          },
+          remaining: { type: 'integer', nullable: true, description: 'Null when unlimited. Never negative, even after a portal order pushed the count past its prepared figure.' },
+          prepared: { type: 'integer', nullable: true, description: 'Null when unlimited or when no count was set for the day.' },
+          sold: { type: 'integer', nullable: true },
+          maxPerOrder: { type: 'integer', nullable: true, description: 'The most one order may take. Null = no cap. Independent of stock.' },
+        },
+      },
+      DailyStockDay: {
+        type: 'object',
+        properties: {
+          branchId: { type: 'string', format: 'uuid' },
+          businessDate: { type: 'string', example: '2026-10-02' },
+          items: { type: 'array', items: { $ref: '#/components/schemas/DailyStockItem' } },
+        },
+      },
+      DailyStockSet: {
+        type: 'object', required: ['itemMetaId', 'preparedQty'],
+        properties: {
+          itemMetaId: { type: 'string', format: 'uuid' },
+          preparedQty: { type: 'integer', minimum: 0, maximum: 100000, description: 'Zero is legal and means "we made none today".' },
+          date: { type: 'string', example: '2026-10-02', description: 'YYYY-MM-DD. Defaults to the business date.' },
+        },
+      },
+
       // ─── BranchPaymentMethod ───────────────────────────────────────────────
       // The tenant-wide catalogue above, resolved for ONE outlet.
       BranchPaymentMethod: {
@@ -2199,6 +2232,8 @@ const swaggerSpec = {
           BranchDetailId: {"type":"string","format":"uuid"},
           CookingInstructions: {"type":"string","maxLength":500,"nullable":true,"description":"The note for the whole order, as opposed to a dish note. Copied onto the kitchen ticket when the round is sent."},
           NoCutlery: {"type":"boolean","description":"Takeaway: the customer wants no cutlery. Prints boxed on the kitchen ticket."},
+          GuestCount: {"type":"integer","minimum":1,"maximum":999,"nullable":true,"description":"Covers at the table. Null when nobody said."},
+          WaiterId: {"type":"string","format":"uuid","nullable":true,"description":"The waiter, as a membership id from GET /api/pos/orders/waiters. The server resolves and stores the name; an inactive or unknown member is refused with 400."},
           Active: {"type":"boolean"},
         },
       },
@@ -2235,6 +2270,10 @@ const swaggerSpec = {
           BranchDetailId: {"type":"string","format":"uuid"},
           CookingInstructions: {"type":"string","maxLength":500,"nullable":true,"description":"The note for the whole order, as opposed to a dish note. Copied onto the kitchen ticket when the round is sent."},
           NoCutlery: {"type":"boolean","description":"Takeaway: the customer wants no cutlery. Prints boxed on the kitchen ticket."},
+          GuestCount: {"type":"integer","nullable":true,"description":"Covers at the table."},
+          WaiterId: {"type":"string","format":"uuid","nullable":true},
+          WaiterName: {"type":"string","nullable":true,"description":"The waiter's name as it stood when they were assigned."},
+          BillPrintedAt: {"type":"string","format":"date-time","nullable":true,"description":"When a bill was last printed for this round before payment. Not the invoice."},
           Active: {"type":"boolean"},
         },
       },
@@ -4654,6 +4693,61 @@ const swaggerSpec = {
     ...crudPaths('PosExpenses', '/api/pos/expenses', 'PosExpenseCreate', 'PosExpenseUpdate', 'PosExpense', false),
 
     // POS domain actions (beyond CRUD)
+    '/api/pos/orders/waiters': {
+      get: {
+        tags: ['PosOrders'],
+        summary: 'Who can be named as a table\'s waiter',
+        description: 'The tenancy\'s active members, by name and outlet. Phone numbers are not returned. '
+          + 'Readable on the same scopes as the order list.',
+        security,
+        responses: {
+          200: {
+            description: 'Members',
+            content: { 'application/json': { schema: { type: 'object', properties: {
+              success: { type: 'boolean' },
+              data: { type: 'array', items: { type: 'object', properties: {
+                Id: { type: 'string', format: 'uuid' },
+                Name: { type: 'string' },
+                BranchDetailId: { type: 'string', format: 'uuid', nullable: true },
+              } } },
+            } } } },
+          },
+          ...responses.unauthorized, ...responses.forbidden,
+        },
+      },
+    },
+    '/api/pos/orders/service-details': {
+      post: {
+        tags: ['PosOrders'],
+        summary: 'Change the covers and/or waiter on a table\'s open rounds',
+        description: 'All rounds or none. A field left out keeps each round\'s own value; null clears it. '
+          + 'A settled round refuses the whole change with 409.',
+        security,
+        requestBody: { required: true, content: { 'application/json': { schema: {
+          type: 'object', required: ['orderIds'],
+          properties: {
+            orderIds: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'string', format: 'uuid' } },
+            GuestCount: { type: 'integer', minimum: 1, maximum: 999, nullable: true },
+            WaiterId: { type: 'string', format: 'uuid', nullable: true },
+          },
+        } } } },
+        responses: { 200: { description: 'Updated' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/orders/bill-printed': {
+      post: {
+        tags: ['PosOrders'],
+        summary: 'Record that a bill was printed for these rounds before payment',
+        description: 'Stamps BillPrintedAt. Raises no invoice and moves no money: the invoice is issued '
+          + 'on settlement. Open to POS_ORDER:WRITE and POS_BILLING:WRITE.',
+        security,
+        requestBody: { required: true, content: { 'application/json': { schema: {
+          type: 'object', required: ['orderIds'],
+          properties: { orderIds: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'string', format: 'uuid' } } },
+        } } } },
+        responses: { 200: { description: 'Stamped' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
     '/api/pos/orders/{id}/fire-kot': {
       post: {
         tags: ['PosOrders'], summary: 'Fire a KOT from this order', security,
@@ -4698,7 +4792,7 @@ const swaggerSpec = {
           + 'Categories, units and tax groups are resolved by name and created only when missing, '
           + 'so 56 rows naming eight categories produce eight categories. '
           + 'Every record is written through the same createTx the ordinary forms call, so an '
-          + 'imported item is an ORDINARY item — it edits in Master Data → Items and publishes in '
+          + 'imported item is an ORDINARY item — it edits in Admin → Data tables → Items and publishes in '
           + 'Menu Master like any other, and carries no import marker of any kind. '
           + 'ALWAYS answers 200: one transaction per ROW, so a bad row 37 does not discard the 36 '
           + 'before it, and the response reports the outcome of every row.',
@@ -5141,6 +5235,56 @@ const swaggerSpec = {
         security,
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/OfferPreviewRequest' } } } },
         responses: { ...singleResponse('OfferPreviewResult'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+
+    // ── Daily portion counts ───────────────────────────────────────────────
+    // HOW MANY THE KITCHEN MADE TODAY, per dish per outlet. Availability, not
+    // ingredient inventory: nothing here depletes a shared stock of paneer
+    // across three dishes.
+    //
+    // FOUR STATES, and the absence of a row is one of them:
+    //   StockTracked = 0              → unlimited    (the default)
+    //   tracked, no row for the day   → unavailable  (nobody set a count)
+    //   tracked, remaining > 0        → available
+    //   tracked, remaining = 0        → sold_out
+    '/api/pos/daily-stock': {
+      get: {
+        tags: ['DailyStock'],
+        summary: "Today's counts for one outlet",
+        description:
+          'Every dish on this outlet whose menu row has `StockTracked` on, with the day\'s count where one was set — and WITHOUT one where it was not, because "tracked but nobody set a number" is the state the operator most needs to see.\n\nOpen to every scope that can operate a till: the cashier is asked whether a dish is still on before the guest is. Audited.',
+        security,
+        parameters: [
+          { name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'date', in: 'query', required: false, schema: { type: 'string', example: '2026-10-02' }, description: 'YYYY-MM-DD. Defaults to the server\'s business date (local calendar day).' },
+        ],
+        responses: { ...singleResponse('DailyStockDay'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
+      },
+      put: {
+        tags: ['DailyStock'],
+        summary: 'Set how many were made today',
+        description:
+          'Upsert for one dish on one day.\n\n**It never resets what has already sold.** Changing the figure at 3pm adjusts how many were prepared, not how many went out of the kitchen.\n\n`preparedQty: 0` is legal and is a statement — "we made none" — which is different from clearing the row ("nobody has said"). Both leave the dish unsellable; only one was a decision.\n\nRequires POS_CONFIG:WRITE or POS_OPS:WRITE. Audited at WARN.',
+        security,
+        parameters: [{ name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/DailyStockSet' } } } },
+        responses: { ...singleResponse('DailyStockItem'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/pos/daily-stock/{itemMetaId}': {
+      delete: {
+        tags: ['DailyStock'],
+        summary: "Clear a dish's count for the day",
+        description:
+          'Removes the row, returning the dish to **unavailable** — not to unlimited. A tracked dish with no count for the day is not sold.\n\nRequires POS_CONFIG:WRITE or POS_OPS:WRITE. Audited at WARN.',
+        security,
+        parameters: [
+          { name: 'itemMetaId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'branchId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'date', in: 'query', required: false, schema: { type: 'string', example: '2026-10-02' } },
+        ],
+        responses: { ...singleResponse('DailyStockItem'), ...responses.validation, ...responses.unauthorized, ...responses.forbidden },
       },
     },
 

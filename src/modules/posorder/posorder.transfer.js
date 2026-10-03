@@ -28,7 +28,7 @@ const asArray = (v) => {
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const CLOSED = new Set(['closed', 'settled', 'cancelled']);
-const lineQty = (l) => Number(l.qty ?? l.quantity ?? 1) || 0;
+const { quantityOf: lineQty } = require('../../utils/orderLine');
 
 // Totals are a plain sum of the lines' snapshots — never a re-price.
 const sumTotals = (lines) => {

@@ -25,7 +25,10 @@ const { LIMITS } = require('../utils/fieldLimits');
 const REQUIRED_COLUMNS = {
   // Venue snapshot — where a round was served, frozen at the time.
   // RejectionReasonId/RejectionNote: why staff refused a guest's QR order.
-  pos_order: ['TableName', 'FloorId', 'FloorName', 'TableCapacity', 'CookingInstructions', 'NoCutlery', 'RejectionReasonId', 'RejectionNote'],
+  // GuestCount/WaiterId/WaiterName/BillPrintedAt: covers, waiter and the
+  // printed-bill state set from Billing.
+  pos_order: ['TableName', 'FloorId', 'FloorName', 'TableCapacity', 'CookingInstructions', 'NoCutlery', 'RejectionReasonId', 'RejectionNote',
+    'GuestCount', 'WaiterId', 'WaiterName', 'BillPrintedAt'],
   // Per-item discounts granted on a bill.
   pos_bill: ['LineDiscounts'],
   // What the customer asked the kitchen for, snapshotted onto the ticket.
@@ -52,7 +55,11 @@ const REQUIRED_COLUMNS = {
   // GST 9(5): a bill can carry both goods and services, taxed differently.
   itemdetail: ['SupplyType', 'SACCode'],
   // What the dish IS beyond its price, plus its own preparation time.
-  pos_item_meta: ['ServesCount', 'PortionSize', 'MeatTypeId', 'PrepTimeMinutes'],
+  pos_item_meta: ['ServesCount', 'PortionSize', 'MeatTypeId', 'PrepTimeMinutes',
+    // Daily portion counts. Without StockTracked every dish reads as untracked,
+    // which is the safe direction but silently disables the whole feature.
+    'StockTracked', 'MaxPerOrder'],
+  pos_item_daily_stock: ['ItemMetaId', 'BusinessDate', 'PreparedQty', 'SoldQty'],
   // Tenant profile (migration 001). A database without these fails every save on
   // the Business Profile screen and every onboarding that fills an optional field.
   // pos_branch_media is listed by a column rather than by existence because this

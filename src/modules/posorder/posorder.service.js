@@ -13,6 +13,8 @@ const {
 
 const pricingService = require('../pricing/pricing.service');
 const itemMetaRepository = require('../positemmeta/positemmeta.repository');
+const dailyStock = require('../posdailystock/posdailystock.service');
+const { quantityOf } = require('../../utils/orderLine');
 const { transfer: transferImpl, refreshTable } = require('./posorder.transfer');
 const { issuePosNumber } = require('./posNumbering');
 const { writeKot, findLiveKotTx } = require('./posKotWriter');
@@ -113,7 +115,7 @@ class PosOrderService extends BaseCRUDService {
     const { lines, totals } = await pricingService.priceLines(
       priceable.map((l, index) => ({
         costInfoId: l.costInfoId,
-        quantity: Number(l.qty ?? l.quantity ?? 1) || 0,
+        quantity: quantityOf(l),
         // Selected variants and add-ons are both a per-unit surcharge resolved
         // from their masters. Neither is trusted from the request.
         variantIds: normalizeVariantIds(l),
@@ -374,6 +376,11 @@ class PosOrderService extends BaseCRUDService {
     // Same seam, same reasoning: a portal order that already charged the guest
     // is reconciled by hand, not refused at the door.
     await this.assertAddonSelectionsAreValid(input.Items, tenantId);
+    // ADVISORY. It turns "no longer available" into "only 2 left" and catches a
+    // per-order cap before anything is priced — but it runs outside the insert
+    // transaction like its neighbours, so another till can still take the last
+    // portion between here and the write. consumeForOrder is the authority.
+    await dailyStock.assertStockAvailable(input.Items, tenantId);
     const priced = await this.priceItems(input.Items, tenantId);
     const order = priced
       ? {
@@ -414,10 +421,163 @@ class PosOrderService extends BaseCRUDService {
    * @returns {Promise<Object>} { id, ...order }
    */
   async createRoundTx(connection, order, tenantId, userPhone) {
+    // StockGuard is a caller's instruction, not a column. Read it, then take it
+    // off the row so nothing downstream has to know about it. The order schemas
+    // are closed objects, so no client can set it — only the portal path, which
+    // reaches this method directly.
+    const guard = order.StockGuard !== false;
     const row = { ...order };
+    delete row.StockGuard;
+    // Covers and waiter, when the till sent them. Resolved before anything is
+    // numbered or consumed, so naming a waiter who has left refuses the round
+    // cleanly instead of after today's portions were taken.
+    const hasService = row.GuestCount != null || row.WaiterId != null;
+    const waiter = hasService ? await this.resolveWaiterTx(connection, row.WaiterId, tenantId) : null;
     row.OrderNo = await issuePosNumber(connection, 'POS_ORDER', 'ORD', tenantId, userPhone);
     Object.assign(row, await resolveVenueTx(connection, row.TableId, tenantId));
-    return this.createTx(connection, row, tenantId, userPhone);
+
+    // TODAY'S PORTIONS, TAKEN HERE AND NOWHERE ELSE.
+    //
+    // Inside this transaction on purpose. The availability checks in `create`
+    // run OUTSIDE one — deliberately, so a portal order an aggregator has
+    // already charged for is never refused — and a stock check placed beside
+    // them would inherit that check-then-act gap and could still oversell. The
+    // guard is the UPDATE's own WHERE clause, so taking the last portion and
+    // discovering it was taken are the same statement.
+    //
+    // `guard: false` for a round that arrives already paid for: it decrements
+    // and is allowed to go negative rather than refuse, which is the same rule
+    // the availability checks follow and for the same reason.
+    await dailyStock.consumeForOrder(connection, row.Items, tenantId, userPhone, { guard });
+
+    const created = await this.createTx(connection, row, tenantId, userPhone);
+    if (!hasService) return created;
+    const GuestCount = row.GuestCount ?? null;
+    await connection.execute(QUERIES.POS_ORDER.SET_SERVICE, [
+      GuestCount, waiter.WaiterId, waiter.WaiterName, userPhone, created.id, tenantId,
+    ]);
+    return { ...created, GuestCount, ...waiter };
+  }
+
+  /**
+   * The waiter a membership id names, or nobody.
+   *
+   * Only an ACTIVE member of THIS tenancy qualifies. The name is read here
+   * rather than taken from the client, because it is printed on the guest's
+   * bill and kept on the round as history.
+   *
+   * @param {Object} connection - Open connection or transaction.
+   * @param {string|null} waiterId - user_tenants.id, or null for none.
+   * @param {string} tenantId
+   * @returns {Promise<{WaiterId: string|null, WaiterName: string|null}>}
+   */
+  async resolveWaiterTx(connection, waiterId, tenantId) {
+    if (!waiterId) return { WaiterId: null, WaiterName: null };
+    const [rows] = await connection.execute(
+      QUERIES.POS_ORDER.SELECT_WAITER_BY_ID, [waiterId, tenantId],
+    );
+    if (!rows || rows.length === 0) {
+      throw new HttpError('That waiter is not an active member of this business.', 400);
+    }
+    return { WaiterId: rows[0].Id, WaiterName: rows[0].Name };
+  }
+
+  /**
+   * Who can be named as a table's waiter.
+   * @param {string} tenantId
+   * @returns {Promise<Array<{Id: string, Name: string, BranchDetailId: string|null}>>}
+   */
+  async listWaiters(tenantId) {
+    return withConnection(async (connection) => {
+      const [rows] = await connection.execute(QUERIES.POS_ORDER.SELECT_WAITERS, [tenantId]);
+      return rows || [];
+    });
+  }
+
+  /**
+   * Load the rounds a session action names, refusing any that is missing,
+   * belongs to another tenancy, or is already settled.
+   *
+   * @param {Object} connection - Open transaction.
+   * @param {string[]} orderIds
+   * @param {string} tenantId
+   * @param {string} doing - What the caller was trying to do, for the 409.
+   * @returns {Promise<Object[]>} The rows, in the order asked.
+   */
+  async loadOpenRoundsTx(connection, orderIds, tenantId, doing) {
+    const rows = [];
+    for (const id of orderIds) {
+      const order = await this.getByIdTx(connection, id, tenantId); // 404 if missing
+      if (CLOSED_STATUSES.has(String(order.Status || '').toLowerCase())) {
+        throw new HttpError(`Order ${order.OrderNo || id} is already closed, so you cannot ${doing}.`, 409);
+      }
+      rows.push(order);
+    }
+    return rows;
+  }
+
+  /**
+   * Domain action: change the covers and/or waiter on a table's open rounds.
+   *
+   * All rounds or none, in one transaction: half a table re-assigned is a
+   * table with two waiters. A field the caller left out keeps each round's own
+   * value; null clears it.
+   *
+   * @param {Object} payload - { orderIds[], GuestCount?, WaiterId? }
+   * @param {string} tenantId
+   * @param {string} userPhone
+   * @returns {Promise<Object>} { orderIds, GuestCount?, WaiterId?, WaiterName? }
+   */
+  async setServiceDetails(payload, tenantId, userPhone) {
+    const { orderIds } = payload;
+    const setsGuests = payload.GuestCount !== undefined;
+    const setsWaiter = payload.WaiterId !== undefined;
+    return withTransaction(async (connection) => {
+      const rounds = await this.loadOpenRoundsTx(
+        connection, orderIds, tenantId, 'change its guests or waiter',
+      );
+      const waiter = setsWaiter
+        ? await this.resolveWaiterTx(connection, payload.WaiterId, tenantId)
+        : null;
+      for (const order of rounds) {
+        await connection.execute(QUERIES.POS_ORDER.SET_SERVICE, [
+          setsGuests ? (payload.GuestCount ?? null) : (order.GuestCount ?? null),
+          setsWaiter ? waiter.WaiterId : (order.WaiterId ?? null),
+          setsWaiter ? waiter.WaiterName : (order.WaiterName ?? null),
+          userPhone,
+          order.Id,
+          tenantId,
+        ]);
+      }
+      return {
+        orderIds,
+        ...(setsGuests ? { GuestCount: payload.GuestCount ?? null } : {}),
+        ...(setsWaiter ? waiter : {}),
+      };
+    });
+  }
+
+  /**
+   * Domain action: record that a bill was printed for these rounds before
+   * payment.
+   *
+   * Writes no money and raises no invoice. The invoice is issued on
+   * settlement; this only marks the table as waiting on payment, so the floor
+   * plan can say so.
+   *
+   * @param {string[]} orderIds
+   * @param {string} tenantId
+   * @param {string} userPhone
+   * @returns {Promise<Object>} { orderIds, BillPrintedAt }
+   */
+  async markBillPrinted(orderIds, tenantId, userPhone) {
+    return withTransaction(async (connection) => {
+      await this.loadOpenRoundsTx(connection, orderIds, tenantId, 'print a bill for it');
+      for (const id of orderIds) {
+        await connection.execute(QUERIES.POS_ORDER.MARK_BILL_PRINTED, [userPhone, id, tenantId]);
+      }
+      return { orderIds, BillPrintedAt: new Date().toISOString() };
+    });
   }
 
   async update(id, data, tenantId, userPhone) {
@@ -643,4 +803,9 @@ module.exports = {
   createRoundTx: (conn, order, tenantId, userPhone) =>
     service.createRoundTx(conn, order, tenantId, userPhone),
   transfer: (payload, tenantId, userPhone) => service.transfer(payload, tenantId, userPhone),
+  listWaiters: (tenantId) => service.listWaiters(tenantId),
+  setServiceDetails: (payload, tenantId, userPhone) =>
+    service.setServiceDetails(payload, tenantId, userPhone),
+  markBillPrinted: (orderIds, tenantId, userPhone) =>
+    service.markBillPrinted(orderIds, tenantId, userPhone),
 };

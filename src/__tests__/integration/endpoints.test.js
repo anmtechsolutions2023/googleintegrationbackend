@@ -42,6 +42,8 @@ jest.mock('../../config/config', () => ({
     ENABLE_CACHE: true,
     STRICT_SCOPE_CHECK: true,
   },
+  WHATSAPP: {},
+  OTP: {},
 }));
 
 jest.mock('../../utils/logger', () => ({
@@ -2821,6 +2823,102 @@ describe('POS domain action: POST /api/pos/orders/:id/fire-kot', () => {
     } finally {
       restoreDefaultMocks();
     }
+  });
+});
+
+describe('POS waiters: GET /api/pos/orders/waiters', () => {
+  const path = '/api/pos/orders/waiters';
+
+  it('no token → 401', async () => {
+    const res = await request(server).get(path);
+    expect(res.status).toBe(401);
+  });
+
+  it('cashier → 200 with the member list, not read as an order id', async () => {
+    const res = await request(server).get(path).set('Authorization', cashierToken());
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    const sql = mockConnection.execute.mock.calls.map(([q]) => String(q));
+    expect(sql.some((q) => /FROM user_tenants/.test(q))).toBe(true);
+    expect(sql.some((q) => /SELECT \* FROM pos_order WHERE Id = \?/.test(q))).toBe(false);
+  });
+});
+
+describe('POS domain action: POST /api/pos/orders/service-details', () => {
+  const path = '/api/pos/orders/service-details';
+
+  it('no token → 401', async () => {
+    const res = await request(server).post(path).send({ orderIds: [RECORD_ID], GuestCount: 4 });
+    expect(res.status).toBe(401);
+  });
+
+  it('viewer scope → 403', async () => {
+    const res = await request(server).post(path).set('Authorization', viewerToken())
+      .send({ orderIds: [RECORD_ID], GuestCount: 4 });
+    expect(res.status).toBe(403);
+  });
+
+  it('neither guests nor waiter → 400', async () => {
+    const res = await request(server).post(path).set('Authorization', cashierToken())
+      .send({ orderIds: [RECORD_ID] });
+    expect(res.status).toBe(400);
+  });
+
+  it('zero guests → 400', async () => {
+    const res = await request(server).post(path).set('Authorization', cashierToken())
+      .send({ orderIds: [RECORD_ID], GuestCount: 0 });
+    expect(res.status).toBe(400);
+  });
+
+  it('cashier, open round → 200 and writes the covers', async () => {
+    const res = await request(server).post(path).set('Authorization', cashierToken())
+      .send({ orderIds: [RECORD_ID], GuestCount: 4 });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    const write = mockConnection.execute.mock.calls
+      .find(([q]) => /SET GuestCount = \?/.test(String(q)));
+    expect(write[1][0]).toBe(4);
+  });
+
+  it('round not found → 404', async () => {
+    mockConnection.execute.mockImplementation(notFoundExecuteImpl);
+    try {
+      const res = await request(server).post(path).set('Authorization', cashierToken())
+        .send({ orderIds: [RECORD_ID], GuestCount: 2 });
+      expect(res.status).toBe(404);
+    } finally {
+      restoreDefaultMocks();
+    }
+  });
+});
+
+describe('POS domain action: POST /api/pos/orders/bill-printed', () => {
+  const path = '/api/pos/orders/bill-printed';
+
+  it('no token → 401', async () => {
+    const res = await request(server).post(path).send({ orderIds: [RECORD_ID] });
+    expect(res.status).toBe(401);
+  });
+
+  it('viewer scope → 403', async () => {
+    const res = await request(server).post(path).set('Authorization', viewerToken())
+      .send({ orderIds: [RECORD_ID] });
+    expect(res.status).toBe(403);
+  });
+
+  it('empty list → 400', async () => {
+    const res = await request(server).post(path).set('Authorization', cashierToken())
+      .send({ orderIds: [] });
+    expect(res.status).toBe(400);
+  });
+
+  it('cashier, open round → 200 and stamps it', async () => {
+    const res = await request(server).post(path).set('Authorization', cashierToken())
+      .send({ orderIds: [RECORD_ID] });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(mockConnection.execute.mock.calls
+      .some(([q]) => /SET BillPrintedAt = NOW\(\)/.test(String(q)))).toBe(true);
   });
 });
 

@@ -16,6 +16,9 @@ const { withConnection } = require('../../utils/dbHelper');
 const { QUERIES } = require('../../config/constants');
 const pricingService = require('../pricing/pricing.service');
 const categorySchedule = require('../poscategoryschedule/poscategoryschedule.service');
+const dailyStock = require('../posdailystock/posdailystock.service');
+const dailyStockRepo = require('../posdailystock/posdailystock.repository');
+const { resolve: resolveStock } = require('../posdailystock/posdailystock.resolver');
 const qrChannel = require('../posqr/posqr.channel');
 
 const Q = QUERIES.POS_DINE;
@@ -99,6 +102,13 @@ const getMenu = async ({ tenantId, branchId }) => {
   const byCategory = categorySchedule.indexByCategory(rules);
   const when = new Date();
 
+  // Today's portion counts, ONE read for the whole menu — same shape as the
+  // schedule rules above and for the same reason.
+  const day = dailyStock.dayOf();
+  const stockById = await withConnection((conn) => dailyStockRepo.findForItems(
+    conn, { itemMetaIds: rows.map((r) => r.Id), businessDate: day }, tenantId,
+  ));
+
   const categories = new Map();
   rows.forEach((r) => {
     const price = r.CostInfoId ? prices.get(r.CostInfoId) : null;
@@ -107,6 +117,7 @@ const getMenu = async ({ tenantId, branchId }) => {
     const { available, opensAt } = categorySchedule.availabilityOf(
       byCategory.get(r.CategoryId), when, timeZone,
     );
+    const stock = resolveStock(stockById.get(r.Id) || { StockTracked: r.StockTracked ? 1 : 0 });
     const key = r.CategoryId || 'uncategorised';
     const category = categories.get(key) || {
       id: r.CategoryId || null, name: r.CategoryName || 'More', items: [],
@@ -122,8 +133,17 @@ const getMenu = async ({ tenantId, branchId }) => {
       // What the guest pays for one, before options: the gross the till shows.
       price: Number(price.grossAmount) || 0,
       taxIncluded: !!price.isTaxIncluded,
-      available,
+      // `available` now means orderable: on the menu, its section open, AND
+      // portions left. A guest cannot act on the difference between a dish that
+      // ran out and one nobody counted — but `stockState` carries it for the
+      // label, because "Sold out" and "Not available today" read differently.
+      available: available && stock.stockState !== 'sold_out'
+        && stock.stockState !== 'unavailable',
       opensAt: available ? null : (opensAt ? String(opensAt).slice(0, 5) : null),
+      stockState: stock.stockState,
+      // Null unless the dish keeps a count. Shown as "Only 3 left" by the app.
+      remaining: stock.remaining,
+      maxPerOrder: stock.maxPerOrder,
       variants: variants.get(r.Id) || [],
       addonGroups: [...(addons.get(r.Id) || new Map()).values()],
     });
