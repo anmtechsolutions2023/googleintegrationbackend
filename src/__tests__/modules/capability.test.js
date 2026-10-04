@@ -185,8 +185,10 @@ describe('names and the generated screen binding stay in step', () => {
     expect(SCREENS.POS_CONFIG.length).toBeGreaterThanOrEqual(9);
   });
 
-  it('POS_BILLING opens the cash drawer, not the billing screen', () => {
-    expect(SCREENS.POS_BILLING).toEqual(['Cash Sessions']);
+  // Dues too: collecting a balance owed is taking money at the till.
+  it('POS_BILLING opens the cash drawer and dues, not the billing screen', () => {
+    expect(SCREENS.POS_BILLING).toEqual(['Dues', 'Cash Sessions']);
+    expect(SCREENS.POS_BILLING).not.toContain('Billing & KOT');
   });
 });
 

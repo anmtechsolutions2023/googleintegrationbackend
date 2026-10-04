@@ -73,6 +73,7 @@
       "subject": "POS_BILLING",
       "group": "Money",
       "screens": [
+        "Dues",
         "Cash Sessions"
       ]
     },
@@ -129,7 +130,7 @@
     },
     {
       "subject": "POS_ORDER",
-      "group": "Service",
+      "group": "Billing & KOT",
       "screens": [
         "Billing & KOT",
         "Tables",
@@ -158,6 +159,7 @@
         "Numbering",
         "Finance",
         "Ledger",
+        "Dues",
         "Returns",
         "GST filing"
       ]
