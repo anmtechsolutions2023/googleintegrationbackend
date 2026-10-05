@@ -97,6 +97,24 @@ describe('the token it produces', () => {
     expect(captureAudit).toHaveBeenCalledWith(req, null, PHONE, AUDIT_ACTIONS.SWITCH_TENANT_DENIED, 'DENIED', 'TENANT_MGMT', 'WARN', 'somebody-elses');
   });
 
+  it('names each tenancy in the token, for the tenant switcher', async () => {
+    mockConn.execute.mockImplementation(async (sql) => {
+      if (sql === QUERIES.USER_TENANTS.SELECT) {
+        return [[
+          { tenant_id: 'tenant-b', is_admin: 0, is_super_admin: 0, tenant_name: 'Mayini’s Kitchen' },
+          { tenant_id: 'tenant-c', is_admin: 1, is_super_admin: 0, tenant_name: null },
+        ]];
+      }
+      return [[]];
+    });
+    const switched = await switchTenantPermissions(req, PHONE, 'tenant-b', 'Asha');
+    const claims = jwt.decode(generateAppToken(switched));
+    expect(claims.associatedTenants).toEqual([
+      { tenantId: 'tenant-b', name: 'Mayini’s Kitchen', isAdmin: false },
+      { tenantId: 'tenant-c', name: null, isAdmin: true },
+    ]);
+  });
+
   it('remembers the tenancy for the next sign-in', async () => {
     wire({ is_admin: 0, is_super_admin: 0 });
     await switchTenantPermissions(req, PHONE, 'tenant-b', 'Asha');

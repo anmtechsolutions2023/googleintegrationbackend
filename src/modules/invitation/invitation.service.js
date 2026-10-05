@@ -195,6 +195,12 @@ const acceptPendingTx = async (conn, phone) => {
 
     await conn.execute(QUERIES.INVITATIONS.MARK_ACCEPTED, [invite.id]);
 
+    // Land in the tenancy that invited them. Sign-in picks the most recently
+    // used membership and a brand-new one has no last_active_at, so somebody
+    // who already belonged to a tenancy (often one auto-created at their first
+    // sign-in) went back to it and never saw the restaurant that invited them.
+    await conn.execute(QUERIES.USER_TENANTS.TOUCH_ACTIVE, [invitee, invite.tenant_id]);
+
     if (roleIds.length === 0) {
       // A membership with no roles yields no scopes at all — the person signs
       // in and can see nothing. Surfaced so an admin can fix it, rather than

@@ -253,6 +253,8 @@ const generateAppToken = (userPermissions) => {
     roles: userPermissions.roles || [],
     associatedTenants: (userPermissions.associatedTenants || []).map((t) => ({
       tenantId: t.tenant_id,
+      // Shown in the tenant switcher; null for a tenancy with no organization yet.
+      name: t.tenant_name || null,
       isAdmin: t.is_admin === 1 || t.is_admin === true,
     })),
     iss: MESSAGES.JWT.ISSUER,

@@ -120,8 +120,12 @@ module.exports = {
       // Ordered by last_active_at so a member of several tenancies resumes
       // where they left off. Previously unordered, so tenantRows[0] — which
       // login uses as the active tenancy — could differ between logins.
+      //
+      // tenant_name is the tenancy's first organization, as the platform
+      // directory names it — the tenant switcher showed bare ids, which left a
+      // member of three tenancies guessing which one was the restaurant.
       SELECT:
-        'SELECT tenant_id, is_admin, is_super_admin, full_name, last_active_at FROM user_tenants WHERE user_phone = ? AND is_active = TRUE ORDER BY last_active_at IS NULL, last_active_at DESC, tenant_id ASC',
+        'SELECT tenant_id, is_admin, is_super_admin, full_name, last_active_at, (SELECT o.Name FROM organizationdetail o WHERE o.TenantId = user_tenants.tenant_id ORDER BY o.CreatedOn ASC LIMIT 1) AS tenant_name FROM user_tenants WHERE user_phone = ? AND is_active = TRUE ORDER BY last_active_at IS NULL, last_active_at DESC, tenant_id ASC',
       TOUCH_ACTIVE:
         'UPDATE user_tenants SET last_active_at = NOW() WHERE user_phone = ? AND tenant_id = ?',
     },

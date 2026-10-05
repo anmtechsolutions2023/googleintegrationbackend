@@ -219,6 +219,17 @@ describe('claiming at login', () => {
     expect(sqlOf(/UPDATE user_tenants SET full_name/)).toHaveLength(0);
   });
 
+  // Sign-in picks the most recently used membership, and a brand-new one has
+  // none — so somebody who already had a tenancy went back to it and never saw
+  // the restaurant that invited them.
+  it('marks the new membership most recently used, so this sign-in lands in it', async () => {
+    state.claimable = [invite()];
+    await service.acceptPendingTx(mockConn, '+919000000001');
+    const touch = sqlOf(/SET last_active_at = NOW\(\)/);
+    expect(touch).toHaveLength(1);
+    expect(touch[0].params).toEqual(['+919000000001', TENANT]);
+  });
+
   it('honours the co-admin flag', async () => {
     state.claimable = [invite({ is_admin: 1 })];
     await service.acceptPendingTx(mockConn, '+919000000001');
