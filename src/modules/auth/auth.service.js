@@ -230,65 +230,8 @@ const findAndGetPermissions = async (req, userData) => {
   }
 };
 
-/**
- * Switches tenant permissions for an authenticated user.
- * @param {Object} req - Express request object.
- * @param {string} userPhone - User phone.
- * @param {string} targetTenantId - Target tenant ID.
- * @param {string} userName - User name.
- * @returns {Promise<Object>} New permissions object.
- */
-const switchTenantPermissions = async (
-  req,
-  userPhone,
-  targetTenantId,
-  userName
-) => {
-  const connection = await db.getConnection();
-  try {
-    const [tenantRows] = await connection.execute(QUERIES.USER_TENANTS.SELECT, [
-      userPhone,
-    ]);
-
-    const targetTenant = tenantRows.find((t) => t.tenant_id === targetTenantId);
-
-    if (!targetTenant) {
-      await captureAudit(
-        req, null, userPhone,
-        AUDIT_ACTIONS.SWITCH_TENANT_DENIED, STATUSES.DENIED,
-        AUDIT_CATEGORIES.TENANT_MGMT, 'WARN', targetTenantId
-      );
-      throw new Error(MESSAGES.ERROR.TENANT_ACCESS_DENIED);
-    }
-
-    // The same builder as sign-in, so switching into a tenancy yields the token
-    // a fresh sign-in there would. This path used to add TENANT:ADMIN only —
-    // never TENANT:SUPER_ADMIN — and to report no roles at all.
-    const permissions = await buildScopes(connection, targetTenant, targetTenantId, userPhone);
-    const roles = await getRoleNames(connection, targetTenantId, userPhone);
-
-    return {
-      phone: userPhone,
-      name: targetTenant.full_name || userName,
-      tenantId: targetTenantId,
-      onboardingStatus: 'APPROVED',
-      permissions,
-      roles,
-      associatedTenants: tenantRows,
-      // Resolved for the TARGET tenant: a user who belongs to a set-up tenant
-      // and an unfinished one must be gated after switching into the latter.
-      setupCompleted: await setupRepository.isSetupComplete(
-        targetTenantId,
-        connection
-      ),
-    };
-  } catch (error) {
-    logger.error('Switch Tenant Error:', error);
-    throw error;
-  } finally {
-    connection.release();
-  }
-};
+// Tenant switching lives in modules/tenant/tenant.service.js (POST
+// /api/tenants/switch). It builds its scopes with the same access.js builder.
 
 /**
  * Generates a signed JWT. Guest tokens use a shorter expiry.
@@ -358,7 +301,6 @@ const reissueTokenWithSetupComplete = (tokenPayload) => {
 
 module.exports = {
   findAndGetPermissions,
-  switchTenantPermissions,
   generateAppToken,
   reissueTokenWithSetupComplete,
   // Exported for scripts/admin-token.js (break-glass access). It is read-only

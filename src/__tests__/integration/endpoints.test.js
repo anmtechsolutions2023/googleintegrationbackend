@@ -3225,3 +3225,52 @@ describe('Admin — DELETE /api/admin/roles/:roleId while somebody holds it', ()
     expect(res.body.details.holders).toEqual([{ name: 'User211', phone: '+919876543211' }]);
   });
 });
+
+// POST /api/tenants/switch went down in production with "Can't add new command
+// when connection is in closed state": its service still named a retired query.
+describe('POST /api/tenants/switch', () => {
+  const OTHER = 'b0b0b0b0-0000-0000-0000-000000000002';
+  const wireSwitch = () => mockConnection.execute.mockImplementation((sql) => {
+    const s = String(sql);
+    if (/FROM user_tenants WHERE user_phone = \? AND is_active = TRUE/.test(s)) {
+      return Promise.resolve([[
+        { tenant_id: TENANT_ID, is_admin: 1, is_super_admin: 0, full_name: 'Owner' },
+        { tenant_id: OTHER, is_admin: 0, is_super_admin: 0, full_name: 'Owner' },
+      ]]);
+    }
+    if (/SELECT DISTINCT f\.scope, f\.feature_short_name/.test(s)) {
+      return Promise.resolve([[{ feature_short_name: 'POS_ORDER', scope: 'READ' }]]);
+    }
+    if (/r\.name AS role_name/.test(s)) return Promise.resolve([[{ role_name: 'POS_WAITER', role_is_active: 1 }]]);
+    if (/^\s*SELECT/i.test(s)) return Promise.resolve([[]]);
+    return Promise.resolve([{ affectedRows: 1 }]);
+  });
+
+  it('switches into another tenancy the member belongs to → 200 with a full token', async () => {
+    wireSwitch();
+    try {
+      const res = await request(server).post('/api/tenants/switch').set('Authorization', adminToken())
+        .send({ tenantId: OTHER });
+      expect(res.status).toBe(200);
+      const claims = jwt.decode(res.body.token);
+      expect(claims.tid).toBe(OTHER);
+      expect(claims.scopes).toEqual(['POS_ORDER:READ']);
+      expect(claims.roles).toEqual(['POS_WAITER']);
+      expect(claims.onboardingStatus).toBe('APPROVED');
+      expect(claims.exp - claims.iat).toBe(60 * 60);
+    } finally {
+      restoreDefaultMocks();
+    }
+  });
+
+  it('refuses a tenancy the member does not belong to → 403, not 500', async () => {
+    wireSwitch();
+    try {
+      const res = await request(server).post('/api/tenants/switch').set('Authorization', adminToken())
+        .send({ tenantId: 'c0c0c0c0-0000-0000-0000-000000000003' });
+      expect(res.status).toBe(403);
+    } finally {
+      restoreDefaultMocks();
+    }
+  });
+});

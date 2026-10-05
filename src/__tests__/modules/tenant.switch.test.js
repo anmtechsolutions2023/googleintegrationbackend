@@ -1,12 +1,17 @@
-// src/__tests__/modules/auth.switch.test.js
-// Switching tenancy yields the token a fresh sign-in there would.
+// src/__tests__/modules/tenant.switch.test.js
+// Switching tenancy (POST /api/tenants/switch) yields the token a fresh
+// sign-in there would.
 //
-// switchTenantPermissions used to build its own scope list: it added
-// TENANT:ADMIN for an admin membership but never TENANT:SUPER_ADMIN, and
-// reported no roles at all. Both paths now share one builder (auth/access.js).
+// The live switch path read only the legacy per-membership grant table, so a
+// switched-into token carried no role permissions; it never set
+// onboardingStatus, so generateAppToken signed it as a 15-minute guest token;
+// and when that legacy query was retired it crashed in production with "Can't
+// add new command when connection is in closed state". It now shares the
+// sign-in scope builder (auth/access.js).
 
 const mockConn = { execute: jest.fn(), release: jest.fn() };
 
+jest.mock('../../config/envConfig', () => ({ JWT_SECRET: 'test-secret' }));
 jest.mock('../../config/db', () => ({
   getConnection: jest.fn(() => Promise.resolve(mockConn)),
 }));
@@ -21,8 +26,11 @@ jest.mock('../../modules/invitation/invitation.service', () => ({
   acceptPendingTx: jest.fn(async () => []),
 }));
 
-const { QUERIES, SCOPES } = require('../../config/constants');
-const { switchTenantPermissions, findAndGetPermissions } = require('../../modules/auth/auth.service');
+const jwt = require('jsonwebtoken');
+const { QUERIES, SCOPES, AUDIT_ACTIONS } = require('../../config/constants');
+const config = require('../../config/config');
+const { switchTenantPermissions } = require('../../modules/tenant/tenant.service');
+const { findAndGetPermissions, generateAppToken } = require('../../modules/auth/auth.service');
 
 const PHONE = '+919800000002';
 const req = { headers: {}, ip: '127.0.0.1' };
@@ -66,6 +74,40 @@ describe('switchTenantPermissions', () => {
     await switchTenantPermissions(req, PHONE, 'tenant-b', 'Asha');
     const grants = mockConn.execute.mock.calls.find(([sql]) => sql === QUERIES.PERMISSIONS.SELECT_ALL_GRANTS);
     expect(grants[1]).toEqual(['tenant-b', PHONE]);
+  });
+});
+
+describe('the token it produces', () => {
+  it('is a full session, not a 15-minute guest token', async () => {
+    wire({ is_admin: 0, is_super_admin: 0 });
+    const switched = await switchTenantPermissions(req, PHONE, 'tenant-b', 'Asha');
+    expect(switched.onboardingStatus).toBe('APPROVED');
+    const claims = jwt.decode(generateAppToken(switched));
+    expect(config.JWT.EXPIRATION).toBe('1h');
+    expect(claims.exp - claims.iat).toBe(60 * 60);   // the guest expiry is 15 minutes
+    expect(claims.setupCompleted).toBe(true);
+    expect(claims.roles).toEqual(['POS_WAITER']);
+  });
+
+  it('refuses a tenancy the person does not belong to with 403, and audits it', async () => {
+    wire({ is_admin: 0, is_super_admin: 0 });
+    const { captureAudit } = require('../../utils/logger');
+    await expect(switchTenantPermissions(req, PHONE, 'somebody-elses', 'Asha'))
+      .rejects.toMatchObject({ statusCode: 403 });
+    expect(captureAudit).toHaveBeenCalledWith(req, null, PHONE, AUDIT_ACTIONS.SWITCH_TENANT_DENIED, 'DENIED', 'TENANT_MGMT', 'WARN', 'somebody-elses');
+  });
+
+  it('remembers the tenancy for the next sign-in', async () => {
+    wire({ is_admin: 0, is_super_admin: 0 });
+    await switchTenantPermissions(req, PHONE, 'tenant-b', 'Asha');
+    const touch = mockConn.execute.mock.calls.find(([sql]) => sql === QUERIES.USER_TENANTS.TOUCH_ACTIVE);
+    expect(touch[1]).toEqual([PHONE, 'tenant-b']);
+  });
+
+  it('gives the connection back, even when it fails', async () => {
+    mockConn.execute.mockRejectedValue(new Error('pool exhausted'));
+    await expect(switchTenantPermissions(req, PHONE, 'tenant-b', 'Asha')).rejects.toThrow('pool exhausted');
+    expect(mockConn.release).toHaveBeenCalled();
   });
 });
 

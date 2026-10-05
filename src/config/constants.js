@@ -2719,7 +2719,6 @@ module.exports = {
     // carries full_name / phone / branch_detail_id, and user_roles carries what
     // they may do. See ADMIN_USERS below.
 
-    // Role-based scope resolution (Path A) — UNIONed with PERMISSIONS.SELECT in auth.service
     // One-time code challenges.
     //
     // The rate limits are counted HERE, in the table, rather than in memory:
