@@ -33,9 +33,12 @@
 --   PART 12 — POS food types (Veg / Vegan / Non-Veg)
 --   PART 13 — Portal menu masters: meat types (7), menu tags (12 across
 --             CATEGORY/BEVERAGE/CUISINE), rejection reasons (6)
+--   PART 14 — QR table ordering (POS_QR:READ/WRITE)
+--   PART 15 — Refunds (REFUND:APPROVE)
 --
--- Verified against an empty database: 50 statements, 29 features, 12 roles,
--- 161 role permissions, 7 numbering series.
+-- Verified against an empty database (5 Oct 2026, after PART 15 and the
+-- removal of tenant_features): 32 features, 12 roles, 175 role permissions,
+-- 7 numbering series.
 --
 -- (Role and permission counts corrected 6 Sep 2026: the previous "11 roles,
 -- 133 role permissions" predated the OWNER_OPERATOR merge from the old
@@ -128,44 +131,44 @@ INSERT IGNORE INTO roles (id, tenant_id, name, description, is_system_role, is_a
     ('r0000001-iam0-0000-0000-000000000001',
      'e3845e08-dcc2-11f0-8e78-0242ac110002',
      'SUPER_ADMIN',
-     'Full system access — cannot be modified or deleted.',
+     'Platform owner. Every permission; cannot be assigned, changed or deleted.',
      1, 1),
 
     ('r0000001-iam0-0000-0000-000000000002',
      'e3845e08-dcc2-11f0-8e78-0242ac110002',
      'TENANT_ADMIN',
-     'Full CRUD access to all modules plus user and role management.',
+     'Every business permission in this restaurant. Managing people and roles needs the Admin switch, not this role.',
      1, 1),
 
     -- Standard roles (is_system_role=0: editable by admins)
     ('a0000001-iam0-0000-0000-000000000001',
      'e3845e08-dcc2-11f0-8e78-0242ac110002',
      'VIEWER',
-     'Read-only access to all modules. Cannot create, update, or delete records.',
+     'View the books, stock, lookup lists, contacts, payments and business details. Changes nothing, and sees no front-desk screens.',
      0, 1),
 
     ('a0000001-iam0-0000-0000-000000000002',
      'e3845e08-dcc2-11f0-8e78-0242ac110002',
      'EDITOR',
-     'Full CRUD access to all modules. Can create, update, and delete records.',
+     'Keep the back office: edit the books, stock, lookup lists, contacts, payments and business details. No front-desk, asset, audit or refund access.',
      0, 1),
 
     ('a0000001-iam0-0000-0000-000000000003',
      'e3845e08-dcc2-11f0-8e78-0242ac110002',
      'ACCOUNTS_MANAGER',
-     'Read access to all modules plus full write access to Payments and Transactions.',
+     'Run the books: payments, the ledger and refunds. View stock, lookup lists, contacts, assets, business details and the audit trail.',
      0, 1),
 
     ('a0000001-iam0-0000-0000-000000000004',
      'e3845e08-dcc2-11f0-8e78-0242ac110002',
      'INVENTORY_MANAGER',
-     'Read access to all modules plus full write access to Inventory and Master Data.',
+     'Manage stock and lookup lists (units, categories, tax). View assets, contacts, payments, the books and business details.',
      0, 1),
 
     ('a0000001-iam0-0000-0000-000000000006',
      'e3845e08-dcc2-11f0-8e78-0242ac110002',
      'OPERATIONS_STAFF',
-     'Read access to all modules plus write access to Transactions, Contacts, and Organization.',
+     'Keep the books and contacts, and edit business details. View stock, lookup lists and payments. No refunds or front-desk screens.',
      0, 1);
 
 -- =============================================================================
@@ -395,68 +398,68 @@ VALUES
     -- POS Config (floors, tables, menu/channel setup)
     ('f10000a1-pos0-0000-0000-000000000001',
      'POS Config Read',  'POS_CONFIG', 'READ',
-     'Front Desk — Config View', 'POS',
-     'View POS setup: floors, tables, and menu/channel configuration.', 1),
+     'Menu & outlet setup — View', 'POS',
+     'View the menu, floors and tables, and how the outlet is set up.', 1),
     ('f10000a1-pos0-0000-0000-000000000002',
      'POS Config Write', 'POS_CONFIG', 'WRITE',
-     'Front Desk — Config Manage', 'POS',
-     'Create and update floors, tables, and menu/channel configuration.', 1),
+     'Menu & outlet setup — Manage', 'POS',
+     'Change the menu, floors and tables, and how the outlet is set up.', 1),
 
     -- POS Order (order taking, table occupancy, KOT firing)
     ('f10000a2-pos0-0000-0000-000000000001',
      'POS Order Read',  'POS_ORDER', 'READ',
-     'Front Desk — Orders View', 'POS',
-     'View orders and table occupancy.', 1),
+     'Orders & KOTs — View', 'POS',
+     'See the till, the tables and the orders on them.', 1),
     ('f10000a2-pos0-0000-0000-000000000002',
      'POS Order Write', 'POS_ORDER', 'WRITE',
-     'Front Desk — Orders Manage', 'POS',
-     'Take orders, update tables, and fire KOTs.', 1),
+     'Orders & KOTs — Manage', 'POS',
+     'Take orders on the till, seat and move tables, and send KOTs to the kitchen.', 1),
 
     -- POS Kitchen (KDS)
     ('f10000a3-pos0-0000-0000-000000000001',
      'POS Kitchen Read',  'POS_KITCHEN', 'READ',
-     'Front Desk — Kitchen View', 'POS',
-     'View the Kitchen Display System (pending KOTs).', 1),
+     'Kitchen display — View', 'POS',
+     'See the kitchen display: the KOTs waiting to be cooked.', 1),
     ('f10000a3-pos0-0000-0000-000000000002',
      'POS Kitchen Write', 'POS_KITCHEN', 'WRITE',
-     'Front Desk — Kitchen Manage', 'POS',
-     'Mark KOTs ready / update kitchen status.', 1),
+     'Kitchen display — Manage', 'POS',
+     'Mark KOTs ready on the kitchen display.', 1),
 
     -- POS Billing (bill settlement, payments)
     ('f10000a4-pos0-0000-0000-000000000001',
      'POS Billing Read',  'POS_BILLING', 'READ',
-     'Front Desk — Billing View', 'POS',
-     'View bills and settlements.', 1),
+     'Bills & settlement — View', 'POS',
+     'See bills, dues and cash sessions.', 1),
     ('f10000a4-pos0-0000-0000-000000000002',
      'POS Billing Write', 'POS_BILLING', 'WRITE',
-     'Front Desk — Billing Manage', 'POS',
-     'Settle bills and record payments.', 1),
+     'Bills & settlement — Manage', 'POS',
+     'Settle bills at the till, collect dues and run cash sessions. Includes discounts at settle.', 1),
 
     -- POS CRM (customers, loyalty, feedback)
     ('f10000a5-pos0-0000-0000-000000000001',
      'POS CRM Read',  'POS_CRM', 'READ',
-     'Front Desk — CRM View', 'POS',
-     'View customers, loyalty, and feedback.', 1),
+     'Customers, loyalty & feedback — View', 'POS',
+     'See customers, their loyalty points and their feedback.', 1),
     ('f10000a5-pos0-0000-0000-000000000002',
      'POS CRM Write', 'POS_CRM', 'WRITE',
-     'Front Desk — CRM Manage', 'POS',
-     'Create and update customers, loyalty, and feedback.', 1),
+     'Customers, loyalty & feedback — Manage', 'POS',
+     'Add and edit customers, adjust loyalty points and answer feedback.', 1),
 
     -- POS Ops (inventory adj., expenses, tokens, online orders)
     ('f10000a6-pos0-0000-0000-000000000001',
      'POS Ops Read',  'POS_OPS', 'READ',
-     'Front Desk — Ops View', 'POS',
-     'View expenses, tokens, and online orders.', 1),
+     'Counter, online orders & expenses — View', 'POS',
+     'See the token queue, online orders and expense claims.', 1),
     ('f10000a6-pos0-0000-0000-000000000002',
      'POS Ops Write', 'POS_OPS', 'WRITE',
-     'Front Desk — Ops Manage', 'POS',
-     'Manage expenses, tokens, and online orders.', 1),
+     'Counter, online orders & expenses — Manage', 'POS',
+     'Run the token queue, accept and dispatch online orders, and raise expense claims.', 1),
 
     -- POS Reports (dashboard & reports — read only)
     ('f10000a7-pos0-0000-0000-000000000001',
      'POS Reports Read', 'POS_REPORTS', 'READ',
-     'Front Desk — Reports View', 'POS',
-     'View POS dashboard and reports.', 1);
+     'Front-desk reports — View', 'POS',
+     'See the front-desk dashboard and its reports.', 1);
 
 -- =============================================================================
 -- PART 7 — POS Roles (per-tenant, editable)
@@ -480,7 +483,7 @@ INSERT IGNORE INTO roles (id, tenant_id, name, description, is_system_role, is_a
     ('a0000010-pos0-0000-0000-000000000004',
      'e3845e08-dcc2-11f0-8e78-0242ac110002',
      'POS_MANAGER',
-     'Front-desk manager: full POS access plus reports.',
+     'Front-desk manager: every front-desk screen and report, approves expenses, and keeps the asset register.',
      0, 1);
 
 -- =============================================================================
@@ -1057,7 +1060,7 @@ ON DUPLICATE KEY UPDATE status = 'COMPLETED';
 
 INSERT INTO roles (id, tenant_id, name, description, is_system_role, is_active)
 SELECT UUID(), t.tenant_id, 'OWNER_OPERATOR',
-       'Owner-operator: runs the floor and keeps the books. No user or role management.',
+       'Owner-operator: runs the floor, keeps the books and issues refunds. No user or role management.',
        0, 1
   FROM (SELECT DISTINCT tenant_id FROM roles) t
  WHERE NOT EXISTS (
@@ -1102,11 +1105,11 @@ INSERT IGNORE INTO features
 VALUES
     ('f10000a8-pos0-0000-0000-000000000001',
      'POS QR Read',  'POS_QR', 'READ',
-     'Front Desk — QR Ordering View', 'POS',
+     'QR ordering — View', 'POS',
      'See and print table QR codes, and the queue of orders guests placed from their phones.', 1),
     ('f10000a8-pos0-0000-0000-000000000002',
      'POS QR Write', 'POS_QR', 'WRITE',
-     'Front Desk — QR Ordering Manage', 'POS',
+     'QR ordering — Manage', 'POS',
      'Issue and rotate table QR codes, switch QR ordering per branch, and accept or reject guests\' orders.', 1);
 
 -- Full control: the admins, the POS manager and the owner-operator.
@@ -1127,6 +1130,35 @@ SELECT UUID(), r.id, f.feature_id
  WHERE r.name IN ('POS_CASHIER', 'POS_WAITER')
    AND f.feature_short_name = 'POS_QR'
    AND f.scope = 'READ';
+
+-- =============================================================================
+-- PART 15 — Refunds (REFUND:APPROVE feature + role grants)
+-- =============================================================================
+-- Money going back out: a refund against a settled bill, a partial return, and
+-- marking a refund paid (/api/ledger/documents/:id/refund, …/returns, and
+-- /api/ledger/returns/:id/settlement). These used to need only
+-- TRANSACTIONS:WRITE, which EDITOR and OPERATIONS_STAFF hold to keep the books
+-- and the numbering — neither job should be able to hand money back.
+--
+-- Granted by role NAME across every tenancy, like PART 14, so an existing
+-- tenancy's roles pick it up on re-seed and new tenancies copy it from the
+-- template. Idempotent.
+INSERT IGNORE INTO features
+    (feature_id, name, feature_short_name, scope, display_name, category, description, is_active)
+VALUES
+    ('f100000a-iam0-0000-0000-000000000001',
+     'Refund Approve', 'REFUND', 'APPROVE',
+     'Refunds & returns — Approve', 'Refunds',
+     'Refund a settled bill, take a partial return, and mark a refund as paid out.',
+     1);
+
+INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
+SELECT UUID(), r.id, f.feature_id
+  FROM roles r
+ CROSS JOIN features f
+ WHERE r.name IN ('SUPER_ADMIN', 'TENANT_ADMIN', 'OWNER_OPERATOR', 'ACCOUNTS_MANAGER')
+   AND f.feature_short_name = 'REFUND'
+   AND f.scope = 'APPROVE';
 
 -- =============================================================================
 -- VERIFICATION QUERIES — run these manually after seeding to confirm correctness

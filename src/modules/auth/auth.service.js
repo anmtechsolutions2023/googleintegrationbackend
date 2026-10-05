@@ -19,33 +19,9 @@ const invitationService = require('../invitation/invitation.service');
 // Repository, not the service: mastersetup.service pulls in ~14 CRUD services.
 // This file only needs the setup flag.
 const setupRepository = require('../mastersetup/mastersetup.repository');
+// One scope builder for every path that mints a token — see access.js.
+const { getScopesForTenant, buildScopes, getRoleNames } = require('./access');
 
-
-/**
- * Resolves scopes for a user in a tenant from both direct grants (Path B)
- * and role-based grants (Path A). Returns a deduplicated union.
- * @param {Object} connection - Database connection.
- * @param {string} tenantId - Tenant ID.
- * @param {string} userPhone - The verified mobile number, E.164.
- * @returns {Promise<string[]>} Deduplicated array of scope strings.
- */
-const getScopesForTenant = async (connection, tenantId, userPhone) => {
-  // One statement covers both grant paths — direct feature grants (Path B) and
-  // role-based ones (Path A). They used to be two awaits here, which on a single
-  // connection means two serialised round trips on the request a user is sitting
-  // and waiting through; see PERMISSIONS.SELECT_ALL_GRANTS.
-  const [rows] = await connection.execute(QUERIES.PERMISSIONS.SELECT_ALL_GRANTS, [
-    tenantId,
-    userPhone,
-    tenantId,
-    userPhone,
-  ]);
-
-  // UNION has already deduplicated by (scope, feature_short_name); the Set
-  // guards the composite string the caller actually consumes, in case two
-  // distinct rows ever format to the same scope.
-  return [...new Set(rows.map((r) => `${r.feature_short_name}:${r.scope}`))];
-};
 
 /**
  * Finds and retrieves user permissions. For provisioned users returns full
@@ -97,15 +73,8 @@ const findAndGetPermissions = async (req, userData) => {
       // Remember where they are, so the next sign-in returns here.
       await connection.execute(QUERIES.USER_TENANTS.TOUCH_ACTIVE, [phone, tenantId]);
 
-      const permissions = await getScopesForTenant(connection, tenantId, phone);
-
-      if (selectedTenant.is_admin) permissions.push(SCOPES.TENANT_ADMIN);
-      if (selectedTenant.is_super_admin) permissions.push(SCOPES.TENANT_SUPER_ADMIN);
-
-      const [roleRows] = await connection.execute(
-        QUERIES.USER_ROLES.SELECT_BY_USER_TENANT,
-        [phone, tenantId]
-      );
+      const permissions = await buildScopes(connection, selectedTenant, tenantId, phone);
+      const roles = await getRoleNames(connection, tenantId, phone);
 
       return {
         phone,
@@ -118,7 +87,7 @@ const findAndGetPermissions = async (req, userData) => {
         tenantId,
         onboardingStatus: 'APPROVED',
         permissions,
-        roles: roleRows.map((r) => r.role_name),
+        roles,
         associatedTenants: tenantRows,
         setupCompleted: await setupRepository.isSetupComplete(
           tenantId,
@@ -168,14 +137,8 @@ const findAndGetPermissions = async (req, userData) => {
           const selectedTenant = newTenantRows[0];
           const newTenantId = selectedTenant.tenant_id;
 
-          const permissions = await getScopesForTenant(connection, newTenantId, phone);
-          if (selectedTenant.is_admin) permissions.push(SCOPES.TENANT_ADMIN);
-          if (selectedTenant.is_super_admin) permissions.push(SCOPES.TENANT_SUPER_ADMIN);
-
-          const [roleRows] = await connection.execute(
-            QUERIES.USER_ROLES.SELECT_BY_USER_TENANT,
-            [phone, newTenantId]
-          );
+          const permissions = await buildScopes(connection, selectedTenant, newTenantId, phone);
+          const roles = await getRoleNames(connection, newTenantId, phone);
 
           // Read everything that needs THIS connection before giving it back.
           // A freshly auto-provisioned tenant has no tenant_setup row, so this
@@ -213,7 +176,7 @@ const findAndGetPermissions = async (req, userData) => {
             tenantId: newTenantId,
             onboardingStatus: 'APPROVED',
             permissions,
-            roles: roleRows.map((r) => r.role_name),
+            roles,
             associatedTenants: newTenantRows,
             setupCompleted,
           };
@@ -298,23 +261,19 @@ const switchTenantPermissions = async (
       throw new Error(MESSAGES.ERROR.TENANT_ACCESS_DENIED);
     }
 
-    const permissions = await getScopesForTenant(
-      connection,
-      targetTenantId,
-      userPhone
-    );
-
-    if (targetTenant.is_admin) {
-      permissions.push(SCOPES.TENANT_ADMIN);
-    }
+    // The same builder as sign-in, so switching into a tenancy yields the token
+    // a fresh sign-in there would. This path used to add TENANT:ADMIN only —
+    // never TENANT:SUPER_ADMIN — and to report no roles at all.
+    const permissions = await buildScopes(connection, targetTenant, targetTenantId, userPhone);
+    const roles = await getRoleNames(connection, targetTenantId, userPhone);
 
     return {
       phone: userPhone,
-      name: userName,
+      name: targetTenant.full_name || userName,
       tenantId: targetTenantId,
       onboardingStatus: 'APPROVED',
       permissions,
-      roles: [],
+      roles,
       associatedTenants: tenantRows,
       // Resolved for the TARGET tenant: a user who belongs to a set-up tenant
       // and an unfinished one must be gated after switching into the latter.

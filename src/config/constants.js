@@ -128,48 +128,24 @@ module.exports = {
 
     // Permissions Queries
     PERMISSIONS: {
-      SELECT: `
-        SELECT
-            f.scope,
-            f.feature_short_name
-        FROM user_tenants ut
-        JOIN tenant_features tf ON ut.id = tf.user_tenants_id
-        JOIN features f ON tf.feature_id = f.feature_id
-        WHERE f.is_active = TRUE
-          AND tf.is_active = TRUE
-          AND ut.is_active = TRUE
-          AND ut.tenant_id = ?
-          AND ut.user_phone = ?
-      `,
-
-      // Both grant paths in one statement: direct feature grants (Path B) and
-      // role-based grants (Path A), which SELECT above and
-      // ROLE_SCOPES.SELECT_BY_USER_TENANT read separately.
+      // Every feature scope a member holds through their roles in one tenancy.
+      // Roles are the only grant path: the legacy per-membership table
+      // (tenant_features) was a second, invisible one — no screen or API wrote
+      // it, yet any row in it granted permissions nobody could see.
       //
-      // Sign-in needs the union of the two and nothing else, and it ran them as
-      // two awaits on one connection — which mysql2 serialises, so it cost two
-      // full round trips to the database on the one request a user actually
-      // waits through. UNION (not UNION ALL) folds that into one and dedupes
-      // server-side, which is what the caller did in JS afterwards anyway.
-      //
-      // The two halves stay separately addressable above: they are read on
-      // their own elsewhere, and keeping them lets a grant that appears in the
-      // wrong half still be traced to the path that produced it.
+      // roles is joined on BOTH the id and the tenancy, and must be active. A
+      // user_roles row pointing at another tenancy's role, or at a role that was
+      // deactivated, therefore grants nothing — the join used to be by role id
+      // alone, so either kind of row reached the token.
       SELECT_ALL_GRANTS: `
-        SELECT f.scope, f.feature_short_name
-        FROM user_tenants ut
-        JOIN tenant_features tf ON ut.id = tf.user_tenants_id
-        JOIN features f ON tf.feature_id = f.feature_id
-        WHERE f.is_active = TRUE
-          AND tf.is_active = TRUE
-          AND ut.is_active = TRUE
-          AND ut.tenant_id = ?
-          AND ut.user_phone = ?
-        UNION
-        SELECT f.scope, f.feature_short_name
+        SELECT DISTINCT f.scope, f.feature_short_name
         FROM user_roles ur
-        JOIN role_permissions rp ON ur.role_id = rp.role_id
-        JOIN features f ON rp.feature_id = f.feature_id
+        JOIN roles r
+          ON r.id = ur.role_id
+         AND r.tenant_id = ur.tenant_id
+         AND r.is_active = TRUE
+        JOIN role_permissions rp ON rp.role_id = r.id
+        JOIN features f ON f.feature_id = rp.feature_id
         WHERE ur.tenant_id = ?
           AND ur.user_phone = ?
           AND f.is_active = TRUE
@@ -2744,16 +2720,6 @@ module.exports = {
     // they may do. See ADMIN_USERS below.
 
     // Role-based scope resolution (Path A) — UNIONed with PERMISSIONS.SELECT in auth.service
-    ROLE_SCOPES: {
-      SELECT_BY_USER_TENANT: `
-        SELECT DISTINCT f.scope, f.feature_short_name
-        FROM user_roles ur
-        JOIN role_permissions rp ON ur.role_id = rp.role_id
-        JOIN features f ON rp.feature_id = f.feature_id
-        WHERE ur.user_phone = ? AND ur.tenant_id = ? AND f.is_active = TRUE
-      `,
-    },
-
     // One-time code challenges.
     //
     // The rate limits are counted HERE, in the table, rather than in memory:
@@ -2946,6 +2912,20 @@ module.exports = {
         'UPDATE roles SET name = ?, description = ?, is_active = ?, updated_at = NOW() WHERE id = ? AND tenant_id = ? AND is_system_role = 0',
       DELETE:
         'DELETE FROM roles WHERE id = ? AND tenant_id = ? AND is_system_role = 0',
+      // What still depends on a role. user_roles and tenant_invitation_roles
+      // both cascade on delete, so without these a delete would silently strip
+      // the role from everyone holding it and from every pending invitation.
+      SELECT_HOLDERS: `
+        SELECT ut.user_phone, ut.full_name
+        FROM user_roles ur
+        JOIN user_tenants ut ON ut.user_phone = ur.user_phone AND ut.tenant_id = ur.tenant_id
+        WHERE ur.role_id = ? AND ur.tenant_id = ?
+        ORDER BY ut.full_name`,
+      COUNT_PENDING_INVITATIONS: `
+        SELECT COUNT(*) AS total
+        FROM tenant_invitation_roles ir
+        JOIN tenant_invitations i ON i.id = ir.invitation_id
+        WHERE ir.role_id = ? AND i.tenant_id = ? AND i.status = 'PENDING'`,
     },
 
     // Role Permission Queries
@@ -2956,6 +2936,13 @@ module.exports = {
         FROM role_permissions rp
         JOIN features f ON rp.feature_id = f.feature_id
         WHERE rp.role_id = ?`,
+      // Every grant of every role in one tenancy — the permission matrix,
+      // role comparison and access preview all read this one result.
+      SELECT_FOR_TENANT: `
+        SELECT rp.role_id, rp.feature_id
+        FROM role_permissions rp
+        JOIN roles r ON r.id = rp.role_id
+        WHERE r.tenant_id = ?`,
       DELETE_ALL_FOR_ROLE:
         'DELETE FROM role_permissions WHERE role_id = ?',
       INSERT:
@@ -2964,10 +2951,13 @@ module.exports = {
 
     // User Role Queries
     USER_ROLES: {
+      // Joined on the tenancy as well as the id, so a row naming another
+      // tenancy's role is never reported as one this member holds here.
       SELECT_BY_USER_TENANT: `
-        SELECT ur.*, r.name AS role_name, r.description, r.is_system_role
+        SELECT ur.*, r.name AS role_name, r.description, r.is_system_role,
+               r.is_active AS role_is_active
         FROM user_roles ur
-        JOIN roles r ON ur.role_id = r.id
+        JOIN roles r ON ur.role_id = r.id AND r.tenant_id = ur.tenant_id
         WHERE ur.user_phone = ? AND ur.tenant_id = ?`,
       DELETE_ALL_FOR_USER:
         'DELETE FROM user_roles WHERE user_phone = ? AND tenant_id = ?',
@@ -3205,7 +3195,6 @@ module.exports = {
         //   app_settings: GLOBAL table — never deleted
         //   onboarding_requests: handled by email, not by tenant — see clearOnboardingFor()
         //   role_permissions: removed by ON DELETE CASCADE
-        //   tenant_features: removed by ON DELETE CASCADE
         //   tenant_invitation_roles: removed by ON DELETE CASCADE
         'DELETE FROM asset WHERE TenantId = ?',
         'DELETE FROM audit_logs WHERE tenant_id = ?',
@@ -3427,6 +3416,27 @@ module.exports = {
       // cross-tenant status change to verify existence and guard super admins.
       SELECT_FLAGS_BY_PHONE_TENANT:
         'SELECT is_super_admin FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
+      // What the per-request access check needs to know about a membership:
+      // whether it still exists and is usable, and the two flags that become
+      // TENANT:ADMIN and TENANT:SUPER_ADMIN.
+      SELECT_ACCESS_FLAGS:
+        'SELECT is_admin, is_super_admin, is_active, status FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
+      // A membership's state before a change, for the audit row's before → after.
+      SELECT_STATE: `
+        SELECT ut.full_name, ut.branch_detail_id, b.BranchName AS branch_name,
+               ut.is_admin, ut.is_super_admin, ut.status
+        FROM user_tenants ut
+        LEFT JOIN branchdetail b ON b.Id = ut.branch_detail_id
+        WHERE ut.user_phone = ? AND ut.tenant_id = ?`,
+      SELECT_BRANCH_NAME:
+        'SELECT BranchName FROM branchdetail WHERE Id = ? AND TenantId = ?',
+      // Who can grant access in a tenancy, for the Access Denied page. Names and
+      // numbers only — what any member is already shown on a staff rota.
+      SELECT_ADMINISTRATORS: `
+        SELECT full_name, user_phone
+        FROM user_tenants
+        WHERE tenant_id = ? AND is_admin = TRUE AND is_active = TRUE AND status = 'ACTIVE'
+        ORDER BY full_name`,
       SELECT_BY_PHONE: `
         SELECT ut.*, GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles
         FROM user_tenants ut
@@ -3470,6 +3480,10 @@ module.exports = {
         'UPDATE features SET display_name = ?, scope = ?, category = ?, description = ?, is_active = ? WHERE feature_id = ?',
       CHECK_IN_USE:
         'SELECT COUNT(*) as cnt FROM role_permissions WHERE feature_id = ?',
+      // The whole catalogue as keys, to validate a role's grants and to work
+      // out what each one depends on (see config/permissionRules.js).
+      SELECT_KEYS:
+        'SELECT feature_id, feature_short_name, scope, is_active FROM features',
     },
 
     // Application Settings (global key/value config, super-admin owned)
@@ -4663,6 +4677,11 @@ ${DOC_SOURCE_COLUMNS_SQL}
     VIEW_USER_ROLES:          'Viewed user roles',
     UPDATE_USER_ROLES:        'Updated user roles',
     UPDATE_USER_STATUS:       'Updated user status',
+    UPDATE_USER_PROFILE:      'Updated staff details',
+    GRANT_ADMIN:              'Granted administrator access',
+    REVOKE_ADMIN:             'Withdrew administrator access',
+    // Both kinds, for the route-level row (which fires on failures too).
+    UPDATE_USER_ADMIN:        'Changed administrator access',
     ACTIVATE_USER:            'Activated user account',
     SUSPEND_USER:             'Suspended user account',
     REMOVE_USER:              'Removed user from tenant',
@@ -4942,7 +4961,6 @@ ${DOC_SOURCE_COLUMNS_SQL}
     BILLING_READ: 'billing:READ',
     BILLING_WRITE: 'billing:WRITE',
     GUEST_EXPLORE: 'guest:explore',
-    ADMIN_ACCESS: 'admin:access',
     AUDIT_READ: 'AUDIT:READ',
     // Feature-category scopes (granted via IAM roles → role_permissions → features)
     MASTER_DATA_READ: 'MASTER_DATA:READ',
@@ -4981,6 +4999,11 @@ ${DOC_SOURCE_COLUMNS_SQL}
     // Approving an expense commits money, so it is deliberately separate from
     // POS_OPS:WRITE — the person who raises a claim should not approve it.
     EXPENSE_APPROVE: 'EXPENSE:APPROVE',
+    // Money going back out: a refund against a settled bill, or settling a
+    // return. Separate from TRANSACTIONS:WRITE, which editors and operations
+    // staff hold to keep the books and the numbering — neither job should be
+    // able to hand money back.
+    REFUND_APPROVE: 'REFUND:APPROVE',
     // The asset register is finance-owned reference data, not floor operations.
     ASSET_READ: 'ASSET:READ',
     ASSET_WRITE: 'ASSET:WRITE',

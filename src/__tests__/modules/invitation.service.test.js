@@ -21,8 +21,12 @@ const mockConn = {
     const q = String(sql);
     if (/FROM user_tenants WHERE user_phone/.test(q)) return [state.membership];
     if (/SELECT id FROM roles WHERE tenant_id/.test(q)) return [state.tenantRoles];
-    // roleGuard resolves the NAMES behind the ids, to refuse SUPER_ADMIN.
-    if (/SELECT name FROM roles WHERE tenant_id/.test(q)) return [state.roleNames];
+    // roleGuard resolves the rows behind the ids INSIDE the tenancy: an id it
+    // cannot find is another tenancy's, and its name is checked for SUPER_ADMIN.
+    if (/SELECT id, name FROM roles WHERE tenant_id/.test(q)) {
+      const wanted = (params || []).slice(1);
+      return [state.roleNames.filter((r) => wanted.includes(r.id))];
+    }
     if (/FROM tenant_invitations\s*\n?\s*WHERE phone/.test(q) || /SELECT id, tenant_id, phone, is_admin/.test(q)) {
       return [state.claimable];
     }
@@ -58,7 +62,7 @@ beforeEach(() => {
   state = {
     membership: [], tenantRoles: [{ id: 'role-1' }, { id: 'role-2' }],
     claimable: [], inviteRoles: [], list: [],
-    roleNames: [{ name: 'POS_MANAGER' }],
+    roleNames: [{ id: 'role-1', name: 'POS_MANAGER' }, { id: 'role-2', name: 'POS_CASHIER' }],
     insertDuplicates: false, membershipExists: false, revokeHits: true,
   };
 });
@@ -189,7 +193,9 @@ describe('claiming at login', () => {
 
     const claimed = await service.acceptPendingTx(mockConn, '+919000000001');
 
-    expect(sqlOf(/INSERT INTO user_tenants/)[0].params.slice(1, 4)).toEqual(['+919000000001', TENANT, 0]);
+    // [id, phone, full_name (falls back to the number), tenant_id, is_admin, is_super_admin]
+    expect(sqlOf(/INSERT INTO user_tenants/)[0].params.slice(1, 6))
+      .toEqual(['+919000000001', '+919000000001', TENANT, 0, 0]);
     expect(sqlOf(/INSERT INTO user_roles/)).toHaveLength(2);
     expect(claimed).toEqual([{ tenantId: TENANT, roleCount: 2 }]);
   });
@@ -216,7 +222,7 @@ describe('claiming at login', () => {
   it('honours the co-admin flag', async () => {
     state.claimable = [invite({ is_admin: 1 })];
     await service.acceptPendingTx(mockConn, '+919000000001');
-    expect(sqlOf(/INSERT INTO user_tenants/)[0].params[3]).toBe(1);
+    expect(sqlOf(/INSERT INTO user_tenants/)[0].params[4]).toBe(1);   // is_admin
   });
 
   it('closes the invitation so it cannot be claimed twice', async () => {

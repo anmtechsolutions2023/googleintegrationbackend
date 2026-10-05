@@ -1,5 +1,6 @@
 // src/__tests__/modules/admin.rolegrant.test.js
-// The SUPER_ADMIN refusal, at every door that accepts roleIds.
+// The SUPER_ADMIN refusal, and the foreign-role refusal, at every door that
+// accepts roleIds.
 //
 // A guard is only worth what it is wired into. roleGuard.test.js proves the
 // guard says no; this proves each granting path actually asks it, and that a
@@ -29,7 +30,10 @@ const ADMIN = 'admin@x.com';
  * constant. Matching on the SQL keeps these tests honest about which call is
  * which, rather than counting call indexes.
  */
-const isRoleNameLookup = (sql) => /SELECT name FROM roles/.test(sql);
+const isRoleNameLookup = (sql) => /SELECT id, name FROM roles/.test(sql);
+// The ids each test asks for, in order; roleNames[i] is what ids[i] is called
+// INSIDE the tenancy. A name left out means that id is not this tenancy's.
+const IDS = ['r1', 'r2', 'r3'];
 
 /**
  * updateUserRoles and createInvitation both look a membership up with the SAME
@@ -40,7 +44,7 @@ const isRoleNameLookup = (sql) => /SELECT name FROM roles/.test(sql);
  */
 const wire = ({ roleNames, membership }) => {
   mockConn.execute.mockImplementation((sql) => {
-    if (isRoleNameLookup(sql)) return [roleNames.map((name) => ({ name }))];
+    if (isRoleNameLookup(sql)) return [roleNames.map((name, i) => ({ id: IDS[i], name }))];
     if (/SELECT id FROM user_tenants/.test(sql)) {
       return [membership === 'exists' ? [{ id: 'ut-1' }] : []];
     }
@@ -82,6 +86,28 @@ describe('updateUserRoles', () => {
   });
 });
 
+describe('a role from another tenancy', () => {
+  // The lookup is confined to the caller's tenancy, so another tenancy's role
+  // id resolves to no row. It used to be skipped as "not SUPER_ADMIN" and then
+  // stored; sign-in read its grants into the token.
+  it('is refused with 400 by Edit roles, and nothing is cleared', async () => {
+    wire({ roleNames: [], membership: 'exists' });
+    await expect(adminService.updateUserRoles('bob@x.com', TENANT, ['foreign-role'], ADMIN))
+      .rejects.toMatchObject({ statusCode: 400 });
+    expect(sqlCalls()).not.toContain(QUERIES.USER_ROLES.DELETE_ALL_FOR_USER);
+  });
+
+  it('is refused with 400 by an onboarding approval, and no membership is created', async () => {
+    mockConn.execute.mockImplementation((sql) => {
+      if (/onboarding_requests WHERE id/.test(sql)) return [[{ id: 'req-1', phone: '+919000000003', name: 'Asha' }]];
+      return [[]];   // no membership yet, and the role is not this tenancy's
+    });
+    await expect(adminService.approveRequest('req-1', TENANT, ['foreign-role'], ADMIN))
+      .rejects.toMatchObject({ statusCode: 400 });
+    expect(sqlCalls()).not.toContain(QUERIES.ADMIN_USERS.INSERT_USER_TENANT_FLAGS);
+  });
+});
+
 describe('createInvitation', () => {
   it('refuses an invitation carrying SUPER_ADMIN', async () => {
     wire({ roleNames: ['SUPER_ADMIN'], membership: 'none' });
@@ -116,8 +142,8 @@ describe('the platform rank itself', () => {
     const insert = mockConn.execute.mock.calls
       .find(([sql]) => sql === QUERIES.ADMIN_USERS.INSERT_USER_TENANT_FLAGS);
     if (insert) {
-      // params: [id, email, tenantId, is_admin, is_super_admin]
-      expect(insert[1][4]).toBe(0);
+      // params: [id, phone, full_name, tenant_id, is_admin, is_super_admin]
+      expect(insert[1][5]).toBe(0);
     }
   });
 });

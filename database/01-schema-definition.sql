@@ -50,6 +50,8 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Source: src/config/dbquery.sql + src/config/db-queries-iam.sql (collapsed)
 -- =============================================================================
 
+-- tenant_features: no longer created (see 1.3); dropped so a rebuild over an
+-- older database does not leave it behind.
 DROP TABLE IF EXISTS tenant_features;
 DROP TABLE IF EXISTS tenant_setup;
 DROP TABLE IF EXISTS user_tenants;
@@ -150,20 +152,11 @@ CREATE TABLE features (
     UNIQUE KEY uk_feature_scope (feature_short_name, scope)
 );
 
--- 1.3 tenant_features
--- Maps specific features to individual user-tenant memberships.
--- This is the legacy per-user grant model; the IAM layer (Section 2) adds
--- role-based permissions on top of this.
-CREATE TABLE tenant_features (
-    tenant_feature_id  CHAR(36)  NOT NULL,
-    user_tenants_id    CHAR(36)  NOT NULL COMMENT 'FK to user_tenants.id',
-    feature_id         CHAR(36)  NOT NULL COMMENT 'FK to features.feature_id',
-    is_active          BOOLEAN   NOT NULL DEFAULT TRUE,
-    PRIMARY KEY (tenant_feature_id),
-    UNIQUE KEY uk_user_feature (user_tenants_id, feature_id),
-    CONSTRAINT fk_tf_membership FOREIGN KEY (user_tenants_id) REFERENCES user_tenants(id) ON DELETE CASCADE,
-    CONSTRAINT fk_tf_feature    FOREIGN KEY (feature_id)      REFERENCES features(feature_id) ON DELETE CASCADE
-);
+-- 1.3 (removed) tenant_features
+-- Was the legacy per-membership grant table. Sign-in read it alongside roles,
+-- but no screen or API ever wrote it, so any row in it granted permissions that
+-- nobody could see on People & Access. Roles are now the only grant path; the
+-- DROP above clears it from a database built before this change.
 
 -- 1.4 audit_logs
 -- Records all auditable user actions across the application.
@@ -375,14 +368,19 @@ CREATE TABLE roles (
 
 -- 2.3 role_permissions
 -- Features (scopes) assigned to a role.
+-- feature_id references features: a grant of a feature that does not exist
+-- used to be stored silently. CHAR(36) to match features.feature_id. No cascade
+-- — a feature still granted to a role cannot be deleted (admin.service
+-- deleteFeature refuses it first, with a clearer message).
 CREATE TABLE role_permissions (
     id          VARCHAR(50)  NOT NULL,
     role_id     VARCHAR(50)  NOT NULL,
-    feature_id  VARCHAR(50)  NOT NULL,
+    feature_id  CHAR(36)     NOT NULL,
     created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_role_feature (role_id, feature_id),
-    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+    CONSTRAINT fk_rp_feature FOREIGN KEY (feature_id) REFERENCES features(feature_id)
 );
 
 -- 2.4 user_roles
@@ -3270,9 +3268,6 @@ CREATE INDEX idx_asset_tenant       ON asset (TenantId, BranchDetailId, Status);
 --   ACTION: Add (TenantId, Active) indexes to masters if any grows past a few
 --           thousand rows per tenant.
 --
--- GAP #5: tenant_features table usage unclear
---   The legacy tenant_features table (per-user feature grants) coexists with
---   the new IAM model (roles → role_permissions → user_roles).
---   It is unclear if tenant_features is still actively written/read by the app.
---   ACTION: Grep src/ for tenant_features usage and remove if superseded.
+-- GAP #5: RESOLVED (Oct 2026) — tenant_features removed. Roles →
+--   role_permissions → user_roles is the only grant path.
 -- =============================================================================

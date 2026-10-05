@@ -47,6 +47,28 @@ router.put(
   ...controller.update
 );
 
+/**
+ * PUT /:id/occupancy — seat or free a table, from the till.
+ *
+ * The till marks a table occupied when its first round is saved and free when
+ * the bill is settled. It used to do that through PUT /:id, which needs
+ * POS_CONFIG:WRITE — a scope cashiers and waiters do not hold — so their order
+ * or payment went through and THEN the request failed: the success message and
+ * cart reset were skipped (inviting a duplicate round), or an error appeared
+ * after the money was taken. This accepts the scopes the till's own actions
+ * need, and can change nothing but the status and the current order.
+ */
+router.put(
+  '/:id/occupancy',
+  authenticateToken,
+  checkScope(
+    SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+    SCOPES.POS_ORDER_WRITE, SCOPES.POS_BILLING_WRITE,
+  ),
+  audit,
+  ...controller.setOccupancy
+);
+
 /** DELETE /:id — delete a POS Table. */
 router.delete(
   '/:id',

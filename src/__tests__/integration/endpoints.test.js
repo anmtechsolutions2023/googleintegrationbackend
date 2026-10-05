@@ -107,10 +107,22 @@ const superAdminToken = () =>
     TEST_SECRET
   );
 
+// A tenant admin as sign-in now mints one: the Admin switch on the membership
+// becomes TENANT:ADMIN. This used to carry 'admin:access', a scope no code ever
+// issued; the admin routes no longer accept it.
 const iamAdminToken = () =>
   'Bearer ' +
   jwt.sign(
-    { tid: TENANT_ID, phone: '+919222200007', scopes: ['admin:access'] },
+    { tid: TENANT_ID, phone: '+919222200007', scopes: ['TENANT:ADMIN'] },
+    TEST_SECRET
+  );
+
+// A hand-made token carrying the retired 'admin:access' scope. Every guard that
+// used to accept it must now refuse it.
+const legacyAdminAccessToken = () =>
+  'Bearer ' +
+  jwt.sign(
+    { tid: TENANT_ID, phone: '+919222200017', scopes: ['admin:access'] },
     TEST_SECRET
   );
 
@@ -786,7 +798,7 @@ MODULES.forEach(({ path: basePath, body: createBody, updateBody, emptyCreateIsVa
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Auth middleware edge cases', () => {
-  it('should return 403 for a token signed with wrong secret', async () => {
+  it('should return 401 for a token signed with wrong secret', async () => {
     const badToken =
       'Bearer ' +
       jwt.sign(
@@ -796,7 +808,7 @@ describe('Auth middleware edge cases', () => {
     const res = await request(server)
       .get('/api/taxtypes')
       .set('Authorization', badToken);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     expect(res.body.success).toBe(false);
   });
 
@@ -805,7 +817,7 @@ describe('Auth middleware edge cases', () => {
     expect(res.status).toBe(401);
   });
 
-  it('should return 403 when token is missing tid field', async () => {
+  it('should return 401 when token is missing tid field', async () => {
     const noTidToken =
       'Bearer ' +
       jwt.sign(
@@ -815,17 +827,17 @@ describe('Auth middleware edge cases', () => {
     const res = await request(server)
       .get('/api/categories')
       .set('Authorization', noTidToken);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
-  it('should return 403 when token is missing scopes field', async () => {
+  it('should return 401 when token is missing scopes field', async () => {
     const noScopesToken =
       'Bearer ' +
       jwt.sign({ tid: TENANT_ID, phone: '+919222200013' }, TEST_SECRET);
     const res = await request(server)
       .get('/api/categories')
       .set('Authorization', noScopesToken);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
   it('TENANT:SUPER_ADMIN bypasses scope check on POST', async () => {
@@ -862,11 +874,11 @@ describe('Auth middleware edge cases', () => {
     expect(res.body.success).toBe(false);
   });
 
-  it('should return 403 on malformed Bearer token value', async () => {
+  it('should return 401 on malformed Bearer token value', async () => {
     const res = await request(server)
       .get('/api/taxtypes')
       .set('Authorization', 'Bearer notavalidjwt');
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -1200,7 +1212,7 @@ describe('Root health check', () => {
 // AUDIT LOGGER MIDDLEWARE
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Audit routes — AUDIT:READ / admin:access gating', () => {
+describe('Audit routes — AUDIT:READ / tenant-admin gating', () => {
   ['/api/audit/logs', '/api/audit/categories'].forEach((p) => {
     it(`GET ${p} — no token → 401`, async () => {
       const res = await request(server).get(p);
@@ -1219,11 +1231,11 @@ describe('Audit routes — AUDIT:READ / admin:access gating', () => {
       expect(res.status).toBe(200);
     });
 
-    it(`GET ${p} — admin:access token still allowed → 200`, async () => {
-      mockConnection.execute.mockImplementation(defaultExecuteImpl);
-      mockConnection.query.mockImplementation(defaultQueryImpl);
-      const res = await request(server).get(p).set('Authorization', iamAdminToken());
-      expect(res.status).toBe(200);
+    // admin:access was never issued by any code; only a hand-made token could
+    // carry it, so it no longer opens anything.
+    it(`GET ${p} — retired admin:access token → 403`, async () => {
+      const res = await request(server).get(p).set('Authorization', legacyAdminAccessToken());
+      expect(res.status).toBe(403);
     });
 
     // A tenant admin has full access within their own tenancy, and the
@@ -2073,16 +2085,14 @@ describe('Admin IAM endpoints — auth guards', () => {
     });
   });
 
-  // 'admin:access' is retained in the tenant-admin guard for backward
-  // compatibility, so a legacy token carrying it still reaches these.
+  // 'admin:access' is retired: no code issued it and no role could grant it,
+  // so a token carrying it could only have been made by hand.
   TENANT_ADMIN_PATHS.forEach((p) => {
-    it(`GET ${p} — legacy admin:access token → 200`, async () => {
-      mockConnection.execute.mockImplementation(defaultExecuteImpl);
-      mockConnection.query.mockImplementation(defaultQueryImpl);
+    it(`GET ${p} — retired admin:access token → 403`, async () => {
       const res = await request(server)
         .get(p)
-        .set('Authorization', iamAdminToken());
-      expect([200, 404]).toContain(res.status);
+        .set('Authorization', legacyAdminAccessToken());
+      expect(res.status).toBe(403);
     });
   });
 });
@@ -2286,9 +2296,9 @@ describe('The cross-tenant directory', () => {
       expect(res.status).toBe(403);
     });
 
-    it('admin:access is not enough either', async () => {
+    it('the retired admin:access is not enough either', async () => {
       const res = await request(server).get('/api/admin/tenants')
-        .set('Authorization', iamAdminToken());
+        .set('Authorization', legacyAdminAccessToken());
       expect(res.status).toBe(403);
     });
 
@@ -2339,7 +2349,7 @@ describe('The cross-tenant directory', () => {
 // name, phone and branch are edited through the admin API rather than through a
 // pos_staff CRUD screen (retired along with /api/pos/staff).
 describe('Admin IAM endpoints — staff details on a membership', () => {
-  const PATH = '/api/admin/users/staff@test.com/profile';
+  const PATH = '/api/admin/users/%2B919876543212/profile';
 
   it('PUT — no token → 401', async () => {
     expect((await request(server).put(PATH).send({ fullName: 'X' })).status).toBe(401);
@@ -2373,6 +2383,35 @@ describe('Admin IAM endpoints — staff details on a membership', () => {
   });
 });
 
+// A member is identified by phone since sign-in moved to WhatsApp. The routes
+// kept naming the parameter :email after the move while the handlers read
+// req.params.phone, so every per-member call bound `undefined` — which the real
+// mysql2 driver refuses ("Bind parameters must not contain undefined", a 500)
+// and these mocks never did. So assert what actually reaches the query.
+describe('Admin IAM — the member in the URL is the member the query gets', () => {
+  const PHONE = '+919876543211';
+  const AT = `/api/admin/users/${encodeURIComponent(PHONE)}`;
+  const bound = () => mockConnection.execute.mock.calls.map((c) => c[1]).filter(Array.isArray);
+
+  it.each([
+    ['get', AT, null],
+    ['get', `${AT}/roles`, null],
+    ['put', `${AT}/roles`, { roleIds: [UUID_1] }],
+    ['put', `${AT}/status`, { status: 'ACTIVE' }],
+    ['put', `${AT}/profile`, { fullName: 'Priya R' }],
+    ['put', `${AT}/admin`, { isAdmin: true }],
+    ['delete', AT, null],
+  ])('%s %s binds the decoded phone, never undefined', async (method, url, body) => {
+    mockConnection.execute.mockClear();
+    mockConnection.execute.mockImplementation(defaultExecuteImpl);
+    const call = request(server)[method](url).set('Authorization', adminToken());
+    const res = await (body ? call.send(body) : call);
+    expect(res.status).not.toBe(500);
+    expect(bound().some((params) => params.includes(PHONE))).toBe(true);
+    bound().forEach((params) => expect(params).not.toContain(undefined));
+  });
+});
+
 // /api/pos/staff is gone: a staff member is a membership now.
 describe('The retired staff roster', () => {
   it('GET /api/pos/staff → 404, not a second place to keep people', async () => {
@@ -2382,18 +2421,20 @@ describe('The retired staff roster', () => {
 });
 
 describe('Admin IAM endpoints — user status update', () => {
-  it('PUT /api/admin/users/user@test.com/status — invalid status → 400', async () => {
+  it('PUT /api/admin/users/%2B919876543211/status — invalid status → 400', async () => {
     const res = await request(server)
-      .put('/api/admin/users/user@test.com/status')
+      .put('/api/admin/users/%2B919876543211/status')
       .set('Authorization', iamAdminToken())
       .send({ status: 'BANNED' }); // not valid
     expect(res.status).toBe(400);
   });
 
-  it('PUT /api/admin/users/user@test.com/status — ACTIVE → 200', async () => {
-    mockConnection.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
+  it('PUT /api/admin/users/%2B919876543211/status — ACTIVE → 200', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([[{ status: 'SUSPENDED' }]])   // the membership, before
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
     const res = await request(server)
-      .put('/api/admin/users/user@test.com/status')
+      .put('/api/admin/users/%2B919876543211/status')
       .set('Authorization', iamAdminToken())
       .send({ status: 'ACTIVE' });
     expect(res.status).toBe(200);
@@ -2586,6 +2627,8 @@ describe('Admin IAM — PUT /api/admin/onboarding/:id/approve', () => {
     mockConnection.execute
       .mockResolvedValueOnce([[{ id: RECORD_ID, phone: '+919222200024', name: 'Guest' }]])
       .mockResolvedValueOnce([[]])
+      // roleGuard: the role is the target tenancy's own
+      .mockResolvedValueOnce([[{ id: UUID_1, name: 'POS_MANAGER' }]])
       .mockResolvedValue([[{ affectedRows: 1 }]]);
     const res = await request(server)
       .put(`/api/admin/onboarding/${RECORD_ID}/approve`)
@@ -2722,15 +2765,15 @@ describe('Admin IAM — onboarding list status filter', () => {
   });
 });
 
-describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
+describe('Admin IAM — GET /api/admin/users/:phone/roles', () => {
   it('no token → 401', async () => {
-    const res = await request(server).get('/api/admin/users/user@test.com/roles');
+    const res = await request(server).get('/api/admin/users/%2B919876543211/roles');
     expect(res.status).toBe(401);
   });
 
   it('ordinary business user → 403', async () => {
     const res = await request(server)
-      .get('/api/admin/users/user@test.com/roles')
+      .get('/api/admin/users/%2B919876543211/roles')
       .set('Authorization', viewerToken());
     expect(res.status).toBe(403);
   });
@@ -2742,7 +2785,7 @@ describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
     mockConnection.execute.mockImplementation(defaultExecuteImpl);
     mockConnection.query.mockImplementation(defaultQueryImpl);
     const res = await request(server)
-      .get('/api/admin/users/user@test.com/roles')
+      .get('/api/admin/users/%2B919876543211/roles')
       .set('Authorization', adminToken());
     expect([200, 404]).toContain(res.status);
   });
@@ -2750,7 +2793,7 @@ describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
   it('user not found in tenant → 404', async () => {
     mockConnection.execute.mockResolvedValueOnce([[]]); // not in user_tenants
     const res = await request(server)
-      .get('/api/admin/users/user@test.com/roles')
+      .get('/api/admin/users/%2B919876543211/roles')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(404);
   });
@@ -2760,7 +2803,7 @@ describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
       .mockResolvedValueOnce([[{ id: UUID_1 }]]) // user exists in tenant
       .mockResolvedValueOnce([[{ ...MOCK_ROW, role_name: 'EDITOR', is_system_role: 0 }]]); // roles
     const res = await request(server)
-      .get('/api/admin/users/user@test.com/roles')
+      .get('/api/admin/users/%2B919876543211/roles')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -2772,7 +2815,7 @@ describe('Admin IAM — GET /api/admin/users/:email/roles', () => {
       .mockResolvedValueOnce([[{ id: UUID_1 }]]) // user exists in tenant
       .mockResolvedValueOnce([[]]); // no roles
     const res = await request(server)
-      .get('/api/admin/users/user@test.com/roles')
+      .get('/api/admin/users/%2B919876543211/roles')
       .set('Authorization', iamAdminToken());
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -3039,5 +3082,146 @@ describe('POS domain action: POST /api/pos/bills/:id/settle', () => {
     } finally {
       restoreDefaultMocks();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ROLES & PERMISSIONS AUDIT FIXES (Oct 2026)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const tokenWith = (scopes, phone = '+919222200030') =>
+  'Bearer ' + jwt.sign({ tid: TENANT_ID, phone, scopes }, TEST_SECRET);
+
+// The till seats a table on a round's first save and frees it on settle. That
+// used to go through PUT /api/pos/tables/:id, which needs POS_CONFIG:WRITE —
+// so a cashier's order went through and THEN the request failed.
+describe('POS tables — PUT /api/pos/tables/:id/occupancy (the till)', () => {
+  const path = `/api/pos/tables/${RECORD_ID}/occupancy`;
+
+  it('cashier (POS_ORDER:WRITE, POS_BILLING:WRITE) may seat a table → 200', async () => {
+    const res = await request(server).put(path).set('Authorization', cashierToken())
+      .send({ Status: 'occupied', CurrentOrderId: UUID_1 });
+    expect(res.status).toBe(200);
+  });
+
+  it('a waiter (POS_ORDER:WRITE only) may free one → 200', async () => {
+    const res = await request(server).put(path)
+      .set('Authorization', tokenWith(['POS_ORDER:READ', 'POS_ORDER:WRITE']))
+      .send({ Status: 'free' });
+    expect(res.status).toBe(200);
+  });
+
+  it('a read-only member is refused → 403', async () => {
+    const res = await request(server).put(path).set('Authorization', viewerToken()).send({ Status: 'free' });
+    expect(res.status).toBe(403);
+  });
+
+  it('only occupied | free are accepted here → 400', async () => {
+    const res = await request(server).put(path).set('Authorization', cashierToken()).send({ Status: 'reserved' });
+    expect(res.status).toBe(400);
+  });
+
+  it('nothing else about a table can be changed here → 400', async () => {
+    const res = await request(server).put(path).set('Authorization', cashierToken())
+      .send({ Status: 'free', Name: 'VIP 1' });
+    expect(res.status).toBe(400);
+  });
+
+  it('editing the table itself still needs POS_CONFIG:WRITE → cashier 403', async () => {
+    const res = await request(server).put(`/api/pos/tables/${RECORD_ID}`).set('Authorization', cashierToken())
+      .send({ Status: 'free' });
+    expect(res.status).toBe(403);
+  });
+});
+
+// Refunds, partial returns and refund settlement used to need only
+// TRANSACTIONS:WRITE, which editors and operations staff hold.
+describe('Ledger money-out routes — REFUND:APPROVE', () => {
+  const routes = [
+    ['post', `/api/ledger/documents/${RECORD_ID}/refund`],
+    ['post', `/api/ledger/documents/${RECORD_ID}/returns`],
+    ['put', `/api/ledger/returns/${RECORD_ID}/settlement`],
+  ];
+  const bookkeeper = () => tokenWith(['TRANSACTIONS:READ', 'TRANSACTIONS:WRITE']);
+  const refunder = () => tokenWith(['TRANSACTIONS:READ', 'REFUND:APPROVE']);
+
+  routes.forEach(([method, p]) => {
+    it(`${method.toUpperCase()} ${p} — TRANSACTIONS:WRITE alone is refused → 403`, async () => {
+      const res = await request(server)[method](p).set('Authorization', bookkeeper()).send({});
+      expect(res.status).toBe(403);
+    });
+
+    it(`${method.toUpperCase()} ${p} — REFUND:APPROVE passes the guard`, async () => {
+      const res = await request(server)[method](p).set('Authorization', refunder()).send({});
+      expect(res.status).not.toBe(403);
+      expect(res.status).not.toBe(401);
+    });
+  });
+});
+
+describe('Admin — GET /api/admin/administrators (any member)', () => {
+  it('a member with no roles at all may read it → 200', async () => {
+    mockConnection.execute.mockResolvedValueOnce([[{ full_name: 'Owner', user_phone: '+919876543210' }]]);
+    const res = await request(server).get('/api/admin/administrators').set('Authorization', tokenWith([]));
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([{ name: 'Owner', phone: '+919876543210' }]);
+  });
+
+  it('a guest (no tenancy) is refused → 403', async () => {
+    const res = await request(server).get('/api/admin/administrators').set('Authorization', guestToken());
+    expect(res.status).toBe(403);
+  });
+
+  it('reads only the caller\'s tenancy', async () => {
+    mockConnection.execute.mockResolvedValueOnce([[]]);
+    await request(server).get('/api/admin/administrators').set('Authorization', cashierToken());
+    const call = mockConnection.execute.mock.calls.find(([sql]) => /is_admin = TRUE/.test(sql));
+    expect(call[1]).toEqual([TENANT_ID]);
+  });
+});
+
+describe('Admin — GET /api/admin/roles/permissions (the matrix)', () => {
+  it('tenant admin → 200', async () => {
+    mockConnection.execute.mockResolvedValueOnce([[{ role_id: 'r1', feature_id: 'f1' }]]);
+    const res = await request(server).get('/api/admin/roles/permissions').set('Authorization', adminToken());
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([{ role_id: 'r1', feature_id: 'f1' }]);
+  });
+
+  it('a cashier is refused → 403', async () => {
+    const res = await request(server).get('/api/admin/roles/permissions').set('Authorization', cashierToken());
+    expect(res.status).toBe(403);
+  });
+});
+
+// AUDIT:READ promised "the tenant audit log trail" and showed a non-admin only
+// their own rows.
+describe('Audit — AUDIT:READ sees the whole tenancy', () => {
+  it('reports the TENANT tier and does not pin the filter to the caller', async () => {
+    const res = await request(server).get('/api/audit/logs').set('Authorization', auditReadToken());
+    expect(res.status).toBe(200);
+    expect(res.body.visibilityLevel).toBe('TENANT');
+    expect(res.body.appliedFilters.tenantId).toBe(TENANT_ID);
+    expect(res.body.appliedFilters.userPhone).toBeNull();
+  });
+
+  it('can still narrow to one person on request', async () => {
+    const res = await request(server).get('/api/audit/logs?userPhone=%2B919876543211')
+      .set('Authorization', auditReadToken());
+    expect(res.status).toBe(200);
+    expect(res.body.appliedFilters.userPhone).toBe('+919876543211');
+  });
+});
+
+describe('Admin — DELETE /api/admin/roles/:roleId while somebody holds it', () => {
+  it('→ 409 ROLE_IN_USE with the holders in details', async () => {
+    mockConnection.execute
+      .mockResolvedValueOnce([[{ id: RECORD_ID, name: 'OPERATIONS_STAFF', is_system_role: 0 }]])
+      .mockResolvedValueOnce([[{ user_phone: '+919876543211', full_name: 'User211' }]])
+      .mockResolvedValueOnce([[{ total: 0 }]]);
+    const res = await request(server).delete(`/api/admin/roles/${RECORD_ID}`).set('Authorization', adminToken());
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('ROLE_IN_USE');
+    expect(res.body.details.holders).toEqual([{ name: 'User211', phone: '+919876543211' }]);
   });
 });

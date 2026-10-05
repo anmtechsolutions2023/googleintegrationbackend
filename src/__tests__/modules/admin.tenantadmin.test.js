@@ -9,6 +9,7 @@ jest.mock('../../utils/logger', () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
   captureAudit: jest.fn(),
 }));
+jest.mock('../../middleware/liveAccess', () => ({ invalidate: jest.fn() }));
 
 let state;
 const executed = [];
@@ -29,8 +30,14 @@ const mockConn = {
     executed.push({ sql: String(sql), params });
     if (/SELECT is_super_admin/.test(String(sql))) return [state.member];
     if (/SELECT id FROM user_tenants/.test(String(sql))) return [state.member];
-    // roleGuard resolves the NAMES behind the role ids, to refuse SUPER_ADMIN.
-    if (/SELECT name FROM roles WHERE tenant_id/.test(String(sql))) return [state.roleNames];
+    // The membership's state before a change (the audit row's "before").
+    if (/ut\.is_super_admin, ut\.status/.test(String(sql))) return [state.member];
+    // The roles a member holds, by name.
+    if (/FROM user_roles ur/.test(String(sql))) return [state.heldRoles];
+    // The home branch must be one of this tenancy's.
+    if (/FROM branchdetail WHERE Id/.test(String(sql))) return [state.branches];
+    // roleGuard resolves the rows behind the role ids inside the tenancy.
+    if (/SELECT id, name FROM roles WHERE tenant_id/.test(String(sql))) return [state.roleNames];
     if (/COUNT\(DISTINCT tenant_id\)/.test(String(sql))) return [[{ total: state.tenants.length }]];
     if (/FROM user_tenants ut/.test(String(sql))) return [state.tenants];
     return [{ affectedRows: 1 }];
@@ -50,7 +57,13 @@ beforeEach(() => {
   executed.length = 0;
   mockConn.execute.mockClear();
   mockConn.query.mockClear();
-  state = { member: [{ is_super_admin: 0 }], tenants: [], roleNames: [{ name: 'POS_MANAGER' }] };
+  state = {
+    member: [{ is_super_admin: 0, is_admin: 0, status: 'ACTIVE', full_name: 'Staff', branch_name: null }],
+    tenants: [],
+    roleNames: [{ id: 'role-1', name: 'POS_MANAGER' }],
+    heldRoles: [{ role_name: 'POS_CASHIER' }],
+    branches: [{ BranchName: 'Central' }],
+  };
 });
 
 const flagUpdate = () => executed.find((e) => /SET is_admin/.test(e.sql));
@@ -88,7 +101,9 @@ describe('guards', () => {
 
   // Granting to yourself is a harmless no-op — you already have it.
   it('allows a self-GRANT, which changes nothing', async () => {
-    await expect(service.setTenantAdmin(ACTOR, TENANT, true, ACTOR)).resolves.toBeUndefined();
+    state.member = [{ is_super_admin: 0, is_admin: 1, status: 'ACTIVE' }];
+    await expect(service.setTenantAdmin(ACTOR, TENANT, true, ACTOR))
+      .resolves.toEqual({ before: true, after: true });
   });
 
   it('compares emails case-insensitively', async () => {
@@ -98,6 +113,11 @@ describe('guards', () => {
 
   // A super admin already passes every check through the checkScope bypass, so
   // toggling their tenant-admin flag is meaningless at best.
+  it('reports the switch before and after, for the audit row', async () => {
+    await expect(service.setTenantAdmin('staff@x.com', TENANT, true, ACTOR))
+      .resolves.toEqual({ before: false, after: true });
+  });
+
   it('refuses to touch a super admin', async () => {
     state.member = [{ is_super_admin: 1 }];
     await expect(service.setTenantAdmin('super@x.com', TENANT, false, ACTOR))
@@ -184,7 +204,26 @@ describe('the staff details on a membership', () => {
   // cannot lock you out of anything.
   it('an admin may correct their own', async () => {
     await expect(service.updateUserProfile(ACTOR, TENANT, { phone: '999' }, ACTOR))
-      .resolves.toBeUndefined();
+      .resolves.toBeDefined();
+  });
+
+  it('reports what changed, with the branch by name', async () => {
+    await expect(service.updateUserProfile('+919876543210', TENANT,
+      { fullName: 'Priya R', branchDetailId: 'branch-1' }, ACTOR))
+      .resolves.toEqual({
+        before: { fullName: 'Staff', branch: null },
+        after: { fullName: 'Priya R', branch: 'Central' },
+      });
+  });
+
+  // The branch is only a label, but a label naming another tenancy's branch
+  // would still show that tenancy's branch name on this one's staff list.
+  it('refuses a branch that is not one of this tenancy\'s, and writes nothing', async () => {
+    state.branches = [];
+    await expect(service.updateUserProfile('+919876543210', TENANT,
+      { fullName: 'Priya R', branchDetailId: 'someone-elses-branch' }, ACTOR))
+      .rejects.toMatchObject({ statusCode: 400 });
+    expect(profileWrite()).toBeUndefined();
   });
 });
 

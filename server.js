@@ -18,6 +18,7 @@ const cors = require('cors');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./src/config/swagger');
 const { errorHandler } = require('./src/middleware/errorHandler');
+const { REFRESH_HEADER } = require('./src/middleware/liveAccess');
 const { logger } = require('./src/utils/logger');
 const MESSAGES = require('./src/config/messages');
 const { PORT } = require('./src/config/envConfig');
@@ -39,7 +40,13 @@ app.set('trust proxy', 1);
 // maxAge lets the browser cache the preflight instead of paying for an extra
 // (potentially cold) OPTIONS invocation ahead of every JSON POST. See
 // config.CORS.PREFLIGHT_MAX_AGE_S for why this is worth a line of config.
-app.use(cors({ maxAge: config.CORS.PREFLIGHT_MAX_AGE_S }));
+// exposedHeaders: a cross-origin page may only read response headers it is
+// told about, and the API client reads the refreshed token that liveAccess
+// sends when somebody's access changed mid-session.
+app.use(cors({
+  maxAge: config.CORS.PREFLIGHT_MAX_AGE_S,
+  exposedHeaders: [REFRESH_HEADER],
+}));
 // Body parsing — with a deliberate hole for webhooks.
 //
 // A webhook's signature is an HMAC over the EXACT bytes that arrived. Capturing

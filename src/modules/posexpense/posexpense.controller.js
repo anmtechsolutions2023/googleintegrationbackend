@@ -22,6 +22,7 @@ const {
   uuidParamSchema,
 } = require('./posexpense.schemas');
 const { logger } = require('../../utils/logger');
+const { SCOPES } = require('../../config/constants');
 
 const getAll = asyncHandler(async (req, res) => {
   const { tid: tenantId } = req.user;
@@ -66,9 +67,10 @@ const deleteById = asyncHandler(async (req, res) => {
 // POSTs to their own paths rather than a Status field on the update body.
 const approve = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { tid: tenantId, phone } = req.user;
+  const { tid: tenantId, phone, scopes = [] } = req.user;
   logger.info('PosExpense.approve called', { id, tenantId, phone });
-  const record = await service.approve(id, tenantId, phone);
+  const isAdmin = scopes.includes(SCOPES.TENANT_ADMIN) || scopes.includes(SCOPES.TENANT_SUPER_ADMIN);
+  const record = await service.approve(id, tenantId, phone, { isAdmin });
   successResponse(res, record, 'Expense approved');
 });
 

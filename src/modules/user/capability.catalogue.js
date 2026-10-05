@@ -38,7 +38,7 @@ const GROUPS = [
   { key: 'front-desk', label: 'Front Desk',
     members: ['POS_ORDER', 'POS_BILLING', 'POS_KITCHEN', 'POS_OPS', 'POS_CRM', 'POS_CONFIG', 'POS_QR', 'POS_REPORTS'] },
   { key: 'money', label: 'Money',
-    members: ['TRANSACTIONS', 'PAYMENTS', 'EXPENSE'] },
+    members: ['TRANSACTIONS', 'PAYMENTS', 'EXPENSE', 'REFUND'] },
   { key: 'catalogue', label: 'Catalogue & stock',
     members: ['MASTER_DATA', 'INVENTORY', 'ASSET'] },
   { key: 'business', label: 'Business',
@@ -60,6 +60,7 @@ const NAMES = {
   TRANSACTIONS: 'Books',
   ASSET:        'Assets',
   EXPENSE:      'Expense approvals',
+  REFUND:       'Refunds & returns',
   INVENTORY:    'Inventory',
   // Screens outside Front Desk, so the generated binding does not cover them.
   MASTER_DATA:  'Menu and master data',
@@ -80,10 +81,6 @@ const RANKS = {
   [SCOPES.TENANT_ADMIN]: {
     label: 'Administrator of this restaurant',
     note: 'Can do everything below, plus manage people and their access.',
-  },
-  [SCOPES.ADMIN_ACCESS]: {
-    label: 'Administration area',
-    note: 'Can open the administration screens.',
   },
   [SCOPES.GUEST_EXPLORE]: {
     label: 'Awaiting approval',

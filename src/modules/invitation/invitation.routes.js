@@ -15,7 +15,7 @@ const controller = require('./invitation.controller');
 
 const tenantAdmin = [
   authenticateToken,
-  checkScope(SCOPES.ADMIN_ACCESS, SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
 ];
 
 /** GET / — invitations this tenancy has raised. */

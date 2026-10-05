@@ -154,6 +154,9 @@ const errorHandler = (err, req, res, next) => {
   // Surface an explicit HttpError code (never a raw MySQL errno string) so
   // clients can branch on it. Absent for every error that does not set one.
   if (err.code && err instanceof HttpError) body.code = err.code
+  // Structured context an HttpError chose to share — e.g. who still holds a
+  // role that cannot be deleted — so the client need not parse the message.
+  if (err.details && err instanceof HttpError) body.details = err.details
 
   res.status(statusCode).json(body)
 }

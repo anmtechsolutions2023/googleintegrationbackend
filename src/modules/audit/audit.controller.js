@@ -1,8 +1,14 @@
 // src/modules/audit/audit.controller.js
-// Controller for audit log retrieval. Enforces 3-tier visibility:
-//   SUPER_ADMIN  → all logs, all tenants, all users
-//   TENANT_ADMIN → all logs within their own tenant
-//   SELF (default) → only their own logs within their tenant
+// Controller for audit log retrieval. Enforces 2-tier visibility:
+//   SUPER_ADMIN → all logs, all tenants, all users
+//   TENANCY     → all logs within their own tenant, for tenant admins and for
+//                 anyone holding AUDIT:READ
+//
+// AUDIT:READ used to show a non-admin only their OWN rows, while the
+// permission promised "the tenant audit log trail (who did what, and when)".
+// Owner-operators and accounts staff hold it to review the tenancy, so it now
+// means what it says. The tenancy is always the token's: no tier below super
+// admin can name another one.
 
 const Joi = require('joi');
 const { phoneField } = require('../../utils/phoneSchema');
@@ -56,17 +62,13 @@ const getAuditLogs = async (req, res, next) => {
         tenantId:  value.tenantId  || undefined,
         userPhone: value.userPhone || undefined,
       };
-    } else if (isTenantAdmin) {
-      visibilityLevel = 'TENANT_ADMIN';
+    } else {
+      // Tenant admins and AUDIT:READ holders alike: the whole of their own
+      // tenancy, optionally narrowed to one person.
+      visibilityLevel = isTenantAdmin ? 'TENANT_ADMIN' : 'TENANT';
       filters = {
         tenantId:  req.user.tid,
         userPhone: value.userPhone || undefined,
-      };
-    } else {
-      visibilityLevel = 'SELF';
-      filters = {
-        tenantId:  req.user.tid,
-        userPhone: req.user.phone,
       };
     }
 
@@ -109,7 +111,7 @@ const getAuditLogs = async (req, res, next) => {
 /**
  * GET /api/audit/categories
  * Returns the valid audit category list for populating filter dropdowns.
- * Gated (at the route) to users with AUDIT:READ or admin:access.
+ * Gated (at the route) to users with AUDIT:READ or tenant-admin access.
  */
 const getCategories = (req, res) => {
   const categories = Object.entries(AUDIT_CATEGORIES).map(([key, value]) => ({

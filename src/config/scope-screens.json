@@ -2,14 +2,6 @@
   "generatedFrom": "src/config/workspaces.js",
   "subjects": [
     {
-      "subject": "admin",
-      "group": "Admin",
-      "screens": [
-        "People & Access",
-        "Audit Logs"
-      ]
-    },
-    {
       "subject": "ASSET",
       "group": "Money",
       "screens": [

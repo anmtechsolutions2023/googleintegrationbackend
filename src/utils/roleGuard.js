@@ -28,25 +28,40 @@ const MESSAGES = require('../config/messages');
 const UNGRANTABLE_ROLE_NAMES = ['SUPER_ADMIN'];
 
 /**
- * Refuses a role assignment that includes an ungrantable role.
+ * Refuses a role assignment that names a role outside the tenancy, or one that
+ * may never be granted.
  *
- * Resolves the NAMES rather than trusting ids: role ids are per-tenant and a
- * caller supplies them directly, so the only trustworthy question is what the
- * rows are actually called.
+ * Resolves the rows rather than trusting ids: role ids are per-tenant and a
+ * caller supplies them directly, so the only trustworthy questions are whether
+ * each id is a role of THIS tenancy and what it is actually called.
+ *
+ * The tenancy check is the important half. This used to look names up inside
+ * the tenancy and act only on what it found, so an id from another tenancy was
+ * simply not found — neither refused as SUPER_ADMIN nor as foreign — and the
+ * caller went on to store it. Sign-in then read that role's grants into the
+ * token. Every path that assigns roles (approval, auto-approval, Edit roles,
+ * invitations) goes through here, so the check lives here.
  *
  * @param {Object} conn - Open connection (the caller's transaction).
  * @param {string[]} roleIds - Roles the caller is trying to grant.
  * @param {string} tenantId - Tenancy the roles must belong to.
- * @returns {Promise<void>} Throws 403 if any role is ungrantable.
+ * @returns {Promise<void>} Throws 400 for a foreign or unknown id, 403 for an
+ *   ungrantable role.
  */
 const assertRolesGrantable = async (conn, roleIds, tenantId) => {
   if (!Array.isArray(roleIds) || roleIds.length === 0) return;
 
-  const placeholders = roleIds.map(() => '?').join(', ');
+  const wanted = [...new Set(roleIds)];
+  const placeholders = wanted.map(() => '?').join(', ');
   const [rows] = await conn.execute(
-    `SELECT name FROM roles WHERE tenant_id = ? AND id IN (${placeholders})`,
-    [tenantId, ...roleIds]
+    `SELECT id, name FROM roles WHERE tenant_id = ? AND id IN (${placeholders})`,
+    [tenantId, ...wanted]
   );
+
+  const found = new Set(rows.map((r) => r.id));
+  if (wanted.some((id) => !found.has(id))) {
+    throw new HttpError(MESSAGES.ERROR.ROLE_NOT_IN_TENANT, 400);
+  }
 
   const blocked = rows
     .map((r) => r.name)

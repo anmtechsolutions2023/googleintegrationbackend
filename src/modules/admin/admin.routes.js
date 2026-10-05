@@ -16,13 +16,20 @@
 //                  column until a request is approved; the feature catalogue is
 //                  global). Not safe to widen.
 //
-// 'admin:access' is retained in the tenant-admin guard so any token or client
-// already relying on it keeps working.
+// 'admin:access' is gone. No code ever issued it and no role could grant it, so
+// it only ever let in a hand-made token.
+//
+// Every route that changes somebody's access writes ONE audit row: the
+// controller's, which names who or what was changed and how (before → after).
+// The route-level row below defers to it on success (deferToCapture) and is
+// written only when the request fails before the controller gets that far.
 
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, checkScope } = require('../../middleware/authMiddleware');
 const { auditLog } = require('../../middleware/auditLogger');
+const { HttpError } = require('../../middleware/errorHandler');
+const MESSAGES = require('../../config/messages');
 const { SCOPES, AUDIT_CATEGORIES, AUDIT_ACTIONS } = require('../../config/constants');
 const c = require('./admin.controller');
 
@@ -30,8 +37,17 @@ const c = require('./admin.controller');
 // what confines the work to req.user.tid.
 const tenantAdmin = [
   authenticateToken,
-  checkScope(SCOPES.ADMIN_ACCESS, SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
+  checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN),
 ];
+// Any member of a tenancy, whatever they hold — a member with no roles at all
+// still needs to know whom to ask for access.
+const tenantMember = [
+  authenticateToken,
+  (req, res, next) => (req.user && req.user.tid
+    ? next()
+    : next(new HttpError(MESSAGES.ERROR.TENANT_ACCESS_DENIED, MESSAGES.HTTP_STATUS.FORBIDDEN))),
+];
+const once = { deferToCapture: true };
 // Cross-tenant views and platform-wide data. Super admins only — note that
 // checkScope admits them to everything above as well, via its bypass.
 const superAdminOnly = [authenticateToken, checkScope(SCOPES.TENANT_SUPER_ADMIN)];
@@ -88,59 +104,71 @@ router.delete('/tenants/:tenantId',
 router.get('/users',
   ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USERS), ...c.listUsers);
 
-// Super-admin-only cross-tenant listing. MUST precede '/users/:email' so the
-// literal 'all' segment isn't captured as an :email param.
+// Super-admin-only cross-tenant listing. MUST precede '/users/:phone' so the
+// literal 'all' segment isn't captured as a :phone param.
 router.get('/users/all',
   ...superAdminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USERS), ...c.listAllUsers);
 
 // Super-admin-only cross-tenant suspend/activate (target user + tenant in body).
-// MUST precede '/users/:email/status' so 'all' isn't captured as an :email param.
+// MUST precede '/users/:phone/status' so 'all' isn't captured as a :phone param.
 router.put('/users/all/status',
-  ...superAdminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'WARN', AUDIT_ACTIONS.UPDATE_USER_STATUS), ...c.updateUserStatusCrossTenant);
+  ...superAdminOnly, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'WARN', AUDIT_ACTIONS.UPDATE_USER_STATUS, once), ...c.updateUserStatusCrossTenant);
 
-router.get('/users/:email/roles',
+router.get('/users/:phone/roles',
   ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USER_ROLES), ...c.getUserRoles);
 
-router.get('/users/:email',
+router.get('/users/:phone',
   ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_USER_DETAIL), ...c.getUserDetail);
 
-router.put('/users/:email/roles',
-  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'INFO', AUDIT_ACTIONS.UPDATE_USER_ROLES), ...c.updateUserRoles);
+router.put('/users/:phone/roles',
+  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'INFO', AUDIT_ACTIONS.UPDATE_USER_ROLES, once), ...c.updateUserRoles);
 
-router.put('/users/:email/status',
-  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'WARN', AUDIT_ACTIONS.UPDATE_USER_STATUS), ...c.updateUserStatus);
+router.put('/users/:phone/status',
+  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'WARN', AUDIT_ACTIONS.UPDATE_USER_STATUS, once), ...c.updateUserStatus);
 
-// The staff details on a membership — name, phone, branch. A staff member IS a
-// membership now; there is no separate roster.
-router.put('/users/:email/profile',
-  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'INFO', AUDIT_ACTIONS.UPDATE_USER_ROLES), ...c.updateUserProfile);
+// The staff details on a membership — name and home branch. A staff member IS a
+// membership now; there is no separate roster. Logged under its own label: it
+// used to share "Updated user roles" with the route above.
+router.put('/users/:phone/profile',
+  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'INFO', AUDIT_ACTIONS.UPDATE_USER_PROFILE, once), ...c.updateUserProfile);
 
 // Grant / withdraw tenant-administrator access. Distinct from role assignment
 // because TENANT:ADMIN is derived from the membership flag, never from a role.
-router.put('/users/:email/admin',
-  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'WARN', AUDIT_ACTIONS.UPDATE_USER_STATUS), ...c.setTenantAdmin);
+// Its own label too — it used to be logged as "Updated user status".
+router.put('/users/:phone/admin',
+  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'WARN', AUDIT_ACTIONS.UPDATE_USER_ADMIN, once), ...c.setTenantAdmin);
 
-router.delete('/users/:email',
-  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'WARN', AUDIT_ACTIONS.REMOVE_USER), ...c.removeUser);
+router.delete('/users/:phone',
+  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.USER_MGMT, 'WARN', AUDIT_ACTIONS.REMOVE_USER, once), ...c.removeUser);
 
 // ── Role management ───────────────────────────────────────────────────────────
 router.get('/roles',
   ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_ROLES), ...c.listRoles);
 
 router.post('/roles',
-  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', AUDIT_ACTIONS.CREATE_ROLE), ...c.createRole);
+  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', AUDIT_ACTIONS.CREATE_ROLE, once), ...c.createRole);
 
 router.put('/roles/:roleId',
-  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', AUDIT_ACTIONS.UPDATE_ROLE), ...c.updateRole);
+  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', AUDIT_ACTIONS.UPDATE_ROLE, once), ...c.updateRole);
 
 router.delete('/roles/:roleId',
-  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'WARN', AUDIT_ACTIONS.DELETE_ROLE), ...c.deleteRole);
+  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'WARN', AUDIT_ACTIONS.DELETE_ROLE, once), ...c.deleteRole);
+
+// Every grant of every role here in one read: the permission matrix, role
+// comparison and access preview are all built from it.
+router.get('/roles/permissions',
+  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_ROLE_PERMISSIONS), ...c.listRolePermissionMatrix);
 
 router.get('/roles/:roleId/permissions',
   ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'DEBUG', AUDIT_ACTIONS.VIEW_ROLE_PERMISSIONS), ...c.getRolePermissions);
 
 router.put('/roles/:roleId/permissions',
-  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', AUDIT_ACTIONS.UPDATE_ROLE_PERMISSIONS), ...c.setRolePermissions);
+  ...tenantAdmin, auditLog(AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', AUDIT_ACTIONS.UPDATE_ROLE_PERMISSIONS, once), ...c.setRolePermissions);
+
+// ── Who can grant access ──────────────────────────────────────────────────────
+// Readable by every member: the Access Denied page names the administrators a
+// refused person can ask. Names and numbers only, of this tenancy only.
+router.get('/administrators', ...tenantMember, ...c.listAdministrators);
 
 // ── Feature management ────────────────────────────────────────────────────────
 // The catalogue is GLOBAL (features has no tenant_id). Reading it is required to

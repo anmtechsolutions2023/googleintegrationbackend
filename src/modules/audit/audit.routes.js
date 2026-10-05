@@ -6,16 +6,12 @@ const { authenticateToken, checkScope } = require('../../middleware/authMiddlewa
 const { SCOPES } = require('../../config/constants');
 const auditController = require('./audit.controller');
 
-// Audit logs are viewable by users granted AUDIT:READ (e.g. read-only business
-// roles) as well as IAM admins (admin:access, who retain access).
-//
-// Tenant admins are admitted too. The controller ALREADY implements a
-// TENANT_ADMIN visibility tier — all logs within their own tenancy and no
-// further — which the guard made unreachable unless the same person also held
-// AUDIT:READ through a role. A tenant admin has full access within their own
-// tenancy, and the tiering below is what keeps that boundary.
+// Audit logs are viewable by anyone granted AUDIT:READ through a role, and by
+// tenant admins. Both see their own tenancy's whole trail and nothing beyond it
+// (the controller pins the tenancy to the token); only a super admin reaches
+// across tenancies.
 const auditRead = checkScope(
-  SCOPES.AUDIT_READ, SCOPES.ADMIN_ACCESS, SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
+  SCOPES.AUDIT_READ, SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN,
 );
 
 // GET /api/audit/logs  — tier-aware log retrieval

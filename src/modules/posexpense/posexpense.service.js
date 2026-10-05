@@ -25,11 +25,22 @@ class PosExpenseService extends BaseCRUDService {
    * @param {string} id
    * @param {string} tenantId
    * @param {string} userPhone - Recorded as the approver.
+   * @param {Object} [options]
+   * @param {boolean} [options.isAdmin] - The approver is a tenant admin.
    */
-  async approve(id, tenantId, userPhone) {
+  async approve(id, tenantId, userPhone, { isAdmin = false } = {}) {
     const existing = await this.getById(id, tenantId);
     if (existing.Status !== EXPENSE_STATUS.DRAFT) {
       throw new HttpError(MESSAGES.ERROR.EXPENSE_NOT_DRAFT, MESSAGES.HTTP_STATUS.CONFLICT);
+    }
+    // Separation of duties: whoever raised a claim does not sign it off.
+    // EXPENSE:APPROVE exists for exactly this, yet front-desk managers and
+    // owner-operators hold both it and POS_OPS:WRITE and could approve their
+    // own spending. Tenant admins are exempt — they are the tenancy's trust
+    // root, and a one-person business would otherwise never get an expense
+    // approved at all. The approval still records who did it.
+    if (!isAdmin && existing.CreatedBy && existing.CreatedBy === userPhone) {
+      throw new HttpError(MESSAGES.ERROR.EXPENSE_SELF_APPROVAL, MESSAGES.HTTP_STATUS.FORBIDDEN);
     }
     return withTransaction(async (conn) => {
       await conn.execute(this.queries.APPROVE, [userPhone, userPhone, id, tenantId]);
@@ -153,7 +164,7 @@ module.exports = {
   create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
   update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   remove: (id, tenantId) => service.delete(id, tenantId),
-  approve: (id, tenantId, userPhone) => service.approve(id, tenantId, userPhone),
+  approve: (id, tenantId, userPhone, options) => service.approve(id, tenantId, userPhone, options),
   reject: (id, tenantId, userPhone) => service.reject(id, tenantId, userPhone),
   settle: (id, data, tenantId, userPhone) => service.settle(id, data, tenantId, userPhone),
 };

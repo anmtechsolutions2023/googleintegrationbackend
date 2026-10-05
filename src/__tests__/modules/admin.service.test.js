@@ -6,6 +6,9 @@ const mockConn = {
 };
 
 jest.mock('uuid', () => ({ v4: () => 'mock-uuid' }));
+// The per-request access cache. Every change of somebody's access must drop
+// their entry, which is what these tests check it is told to do.
+jest.mock('../../middleware/liveAccess', () => ({ invalidate: jest.fn() }));
 jest.mock('../../utils/dbHelper', () => ({
   withConnection: jest.fn((fn) => fn(mockConn)),
   withTransaction: jest.fn((fn) => fn(mockConn)),
@@ -26,6 +29,9 @@ jest.mock('../../config/constants', () => ({
       SELECT_ALL_TENANTS: 'SELECT * FROM user_tenants',
       COUNT_ALL_TENANTS: 'SELECT COUNT(*) as total FROM user_tenants',
       SELECT_FLAGS_BY_PHONE_TENANT: 'SELECT is_super_admin FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
+      SELECT_STATE: 'SELECT full_name, branch_detail_id, branch_name, is_admin, is_super_admin, status FROM user_tenants WHERE ...',
+      SELECT_BRANCH_NAME: 'SELECT BranchName FROM branchdetail WHERE Id = ? AND TenantId = ?',
+      SELECT_ADMINISTRATORS: 'SELECT full_name, user_phone FROM user_tenants WHERE tenant_id = ? AND is_admin = TRUE',
       SELECT_BY_EMAIL: 'SELECT * FROM user_tenants WHERE user_phone = ?',
       INSERT_USER_TENANT: 'INSERT INTO user_tenants ...',
       INSERT_USER_TENANT_FLAGS: 'INSERT INTO user_tenants (... is_admin, is_super_admin ...) VALUES (?, ?, ?, ?, ?, ...)',
@@ -43,9 +49,12 @@ jest.mock('../../config/constants', () => ({
       INSERT: 'INSERT INTO roles ...',
       UPDATE: 'UPDATE roles ...',
       DELETE: 'DELETE FROM roles ...',
+      SELECT_HOLDERS: 'SELECT user_phone, full_name FROM user_roles ... WHERE role_id = ? AND tenant_id = ?',
+      COUNT_PENDING_INVITATIONS: 'SELECT COUNT(*) AS total FROM tenant_invitation_roles ...',
     },
     ROLE_PERMISSIONS: {
       SELECT_BY_ROLE: 'SELECT * FROM role_permissions WHERE role_id = ?',
+      SELECT_FOR_TENANT: 'SELECT rp.role_id, rp.feature_id FROM role_permissions rp JOIN roles r ... WHERE r.tenant_id = ?',
       DELETE_ALL_FOR_ROLE: 'DELETE FROM role_permissions WHERE ...',
       INSERT: 'INSERT INTO role_permissions ...',
     },
@@ -60,6 +69,7 @@ jest.mock('../../config/constants', () => ({
       INSERT: 'INSERT INTO features ...',
       UPDATE: 'UPDATE features ...',
       CHECK_IN_USE: 'SELECT COUNT(*) as cnt FROM role_permissions WHERE feature_id = ?',
+      SELECT_KEYS: 'SELECT feature_id, feature_short_name, scope, is_active FROM features',
     },
   },
   ONBOARDING: {
@@ -80,9 +90,16 @@ jest.mock('../../config/messages', () => ({
 }));
 
 const service = require('../../modules/admin/admin.service');
+const liveAccess = require('../../middleware/liveAccess');
 const { HttpError } = require('../../middleware/errorHandler');
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  // clearAllMocks keeps queued and default values; a test that sets a default
+  // must not leak it into the next one.
+  mockConn.execute.mockReset();
+  mockConn.query.mockReset();
+});
 
 // ─── listOnboardingRequests ───────────────────────────────────────────────────
 describe('listOnboardingRequests', () => {
@@ -122,7 +139,7 @@ describe('approveRequest', () => {
     mockConn.execute
       .mockResolvedValueOnce([[{ id: 'req-1', phone: '+919876500021', name: 'U' }]])
       .mockResolvedValueOnce([[]])                    // no existing user_tenant
-      .mockResolvedValueOnce([[{ name: 'POS_MANAGER' }]]) // roleGuard: resolve role names
+      .mockResolvedValueOnce([[{ id: 'role-1', name: 'POS_MANAGER' }]]) // roleGuard: the tenancy's rows for those ids
       .mockResolvedValueOnce([{ affectedRows: 1 }])  // INSERT user_tenant
       .mockResolvedValueOnce([{ affectedRows: 1 }])  // INSERT user_role
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE onboarding_requests
@@ -164,7 +181,7 @@ describe('autoApproveOnboarding', () => {
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT role
       .mockResolvedValueOnce([[]])                  // features for role (none)
       .mockResolvedValueOnce([[]])                  // dup user_tenant check → none
-      .mockResolvedValueOnce([[{ name: 'POS_MANAGER' }]]) // roleGuard: resolve role names
+      .mockResolvedValueOnce([[{ id: 'mock-uuid', name: 'TENANT_ADMIN' }]]) // roleGuard: the new tenancy's own role
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT user_tenant (flags)
       .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT user_role
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE onboarding status
@@ -176,8 +193,9 @@ describe('autoApproveOnboarding', () => {
     const { QUERIES } = require('../../config/constants');
     const insert = mockConn.execute.mock.calls
       .find(([sql]) => sql === QUERIES.ADMIN_USERS.INSERT_USER_TENANT_FLAGS);
-    expect(insert[1][3]).toBe(1);   // is_admin
-    expect(insert[1][4]).toBe(0);   // is_super_admin — never 1 from any request
+    // [id, phone, full_name, tenant_id, is_admin, is_super_admin]
+    expect(insert[1][4]).toBe(1);   // is_admin
+    expect(insert[1][5]).toBe(0);   // is_super_admin — never 1 from any request
   });
 
   it('throws when the template tenant lacks the TENANT_ADMIN role', async () => {
@@ -223,11 +241,124 @@ describe('deleteRole', () => {
     await expect(service.deleteRole('role-1', 'tenant-1')).rejects.toBeInstanceOf(HttpError);
   });
 
-  it('deletes a non-system role', async () => {
+  it('deletes a non-system role that nobody holds', async () => {
     mockConn.execute
-      .mockResolvedValueOnce([[{ id: 'role-1', is_system_role: 0 }]])
+      .mockResolvedValueOnce([[{ id: 'role-1', name: 'VIEWER', is_system_role: 0 }]])
+      .mockResolvedValueOnce([[]])               // holders: none
+      .mockResolvedValueOnce([[{ total: 0 }]])   // pending invitations: none
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
-    await expect(service.deleteRole('role-1', 'tenant-1')).resolves.toBeUndefined();
+    await expect(service.deleteRole('role-1', 'tenant-1')).resolves.toEqual({ name: 'VIEWER' });
+  });
+
+  it('refuses with 409 while somebody holds the role, naming them, and deletes nothing', async () => {
+    // user_roles cascades on delete, so this used to succeed and quietly take
+    // the role away from everyone holding it.
+    mockConn.execute
+      .mockResolvedValueOnce([[{ id: 'role-1', name: 'OPERATIONS_STAFF', is_system_role: 0 }]])
+      .mockResolvedValueOnce([[{ user_phone: '+919876543211', full_name: 'User211' }]])
+      .mockResolvedValueOnce([[{ total: 0 }]]);
+    const err = await service.deleteRole('role-1', 'tenant-1').catch((e) => e);
+    expect(err).toMatchObject({ statusCode: 409, code: 'ROLE_IN_USE' });
+    expect(err.message).toContain('User211');
+    expect(err.details).toEqual({ holders: [{ name: 'User211', phone: '+919876543211' }], pendingInvitations: 0 });
+    expect(mockConn.execute).toHaveBeenCalledTimes(3);   // no DELETE issued
+  });
+
+  it('refuses with 409 while a pending invitation offers the role', async () => {
+    mockConn.execute
+      .mockResolvedValueOnce([[{ id: 'role-1', name: 'POS_WAITER', is_system_role: 0 }]])
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[{ total: 2 }]]);
+    await expect(service.deleteRole('role-1', 'tenant-1'))
+      .rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('2 pending invitations') });
+  });
+});
+
+// ─── getRolePermissions ───────────────────────────────────────────────────────
+describe('getRolePermissions', () => {
+  it('is a 404 for a role that is not in the caller\'s tenancy', async () => {
+    // Used to read any role's grants by id alone.
+    mockConn.execute.mockResolvedValueOnce([[]]); // SELECT_BY_ID (id AND tenant) → nothing
+    await expect(service.getRolePermissions('foreign-role', 'tenant-1'))
+      .rejects.toMatchObject({ statusCode: 404 });
+    expect(mockConn.execute).toHaveBeenCalledTimes(1);
+    expect(mockConn.execute.mock.calls[0][1]).toEqual(['foreign-role', 'tenant-1']);
+  });
+
+  it('returns the grants of the caller\'s own role', async () => {
+    mockConn.execute
+      .mockResolvedValueOnce([[{ id: 'r1' }]])
+      .mockResolvedValueOnce([[{ feature_id: 'f1' }]]);
+    await expect(service.getRolePermissions('r1', 'tenant-1')).resolves.toEqual([{ feature_id: 'f1' }]);
+  });
+});
+
+// ─── setRolePermissions ───────────────────────────────────────────────────────
+describe('setRolePermissions', () => {
+  const CATALOGUE = [
+    { feature_id: 'f-order-r', feature_short_name: 'POS_ORDER', scope: 'READ', is_active: 1 },
+    { feature_id: 'f-order-w', feature_short_name: 'POS_ORDER', scope: 'WRITE', is_active: 1 },
+    { feature_id: 'f-ops-r', feature_short_name: 'POS_OPS', scope: 'READ', is_active: 1 },
+    { feature_id: 'f-exp-a', feature_short_name: 'EXPENSE', scope: 'APPROVE', is_active: 1 },
+  ];
+
+  it('refuses a system role with 403 — its grants are fixed', async () => {
+    mockConn.execute.mockResolvedValueOnce([[{ id: 'r1', name: 'TENANT_ADMIN', is_system_role: 1 }]]);
+    await expect(service.setRolePermissions('r1', 'tenant-1', ['f-order-r']))
+      .rejects.toMatchObject({ statusCode: 403 });
+    expect(mockConn.execute).toHaveBeenCalledTimes(1);   // nothing deleted or inserted
+  });
+
+  it('refuses an unknown feature id with 400', async () => {
+    mockConn.execute
+      .mockResolvedValueOnce([[{ id: 'r1', name: 'CUSTOM', is_system_role: 0 }]])
+      .mockResolvedValueOnce([CATALOGUE]);
+    await expect(service.setRolePermissions('r1', 'tenant-1', ['no-such-feature']))
+      .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('adds what a choice requires: Manage brings View, approval brings the screen it is made from', async () => {
+    mockConn.execute
+      .mockResolvedValueOnce([[{ id: 'r1', name: 'CUSTOM', is_system_role: 0 }]])
+      .mockResolvedValueOnce([CATALOGUE])
+      .mockResolvedValueOnce([[]])                       // currently grants nothing
+      .mockResolvedValue([{ affectedRows: 1 }]);         // DELETE + INSERTs
+    const change = await service.setRolePermissions('r1', 'tenant-1', ['f-order-w', 'f-exp-a']);
+    expect(change.role).toBe('CUSTOM');
+    expect(change.implied).toEqual(['POS_OPS:READ', 'POS_ORDER:READ']);
+    expect(change.added).toEqual(['EXPENSE:APPROVE', 'POS_OPS:READ', 'POS_ORDER:READ', 'POS_ORDER:WRITE']);
+    const inserted = mockConn.execute.mock.calls
+      .filter(([sql]) => sql === 'INSERT INTO role_permissions ...')
+      .map(([, params]) => params[2]);
+    expect(inserted.sort()).toEqual(['f-exp-a', 'f-ops-r', 'f-order-r', 'f-order-w']);
+    expect(liveAccess.invalidate).toHaveBeenCalledWith('tenant-1');
+  });
+
+  it('reports what was removed', async () => {
+    mockConn.execute
+      .mockResolvedValueOnce([[{ id: 'r1', name: 'CUSTOM', is_system_role: 0 }]])
+      .mockResolvedValueOnce([CATALOGUE])
+      .mockResolvedValueOnce([[{ feature_short_name: 'POS_OPS', scope: 'READ' }]])
+      .mockResolvedValue([{ affectedRows: 1 }]);
+    const change = await service.setRolePermissions('r1', 'tenant-1', ['f-order-r']);
+    expect(change).toMatchObject({ added: ['POS_ORDER:READ'], removed: ['POS_OPS:READ'], implied: [] });
+  });
+});
+
+// ─── listRolePermissionMatrix / listAdministrators ────────────────────────────
+describe('tenancy-wide reads', () => {
+  it('reads every grant of the tenancy in one query', async () => {
+    mockConn.execute.mockResolvedValueOnce([[{ role_id: 'r1', feature_id: 'f1' }]]);
+    await expect(service.listRolePermissionMatrix('tenant-1')).resolves.toEqual([{ role_id: 'r1', feature_id: 'f1' }]);
+    expect(mockConn.execute.mock.calls[0][1]).toEqual(['tenant-1']);
+  });
+
+  it('names the administrators, and nothing more', async () => {
+    mockConn.execute.mockResolvedValueOnce([[{ full_name: 'Owner', user_phone: '+919876543210' }, { full_name: null, user_phone: '+919876543299' }]]);
+    await expect(service.listAdministrators('tenant-1')).resolves.toEqual([
+      { name: 'Owner', phone: '+919876543210' },
+      { name: null, phone: '+919876543299' },
+    ]);
   });
 });
 
@@ -410,16 +541,31 @@ describe('updateUserStatusCrossTenant', () => {
 
 // ─── updateUserStatus (tenant-scoped suspend/activate) ────────────────────────
 describe('updateUserStatus', () => {
-  it('suspends another user in the tenant (is_active = 0)', async () => {
-    mockConn.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
-    await service.updateUserStatus('user@x.com', 't1', 'SUSPENDED', 'admin@x.com');
-    expect(mockConn.execute.mock.calls[0][1]).toEqual([0, 'SUSPENDED', 'user@x.com', 't1']);
+  // Each change reads the membership first: its current status is the "before"
+  // of the audit row, and a missing member is a 404 rather than a silent no-op.
+  const member = (status = 'ACTIVE') => mockConn.execute
+    .mockResolvedValueOnce([[{ status }]])          // SELECT_STATE
+    .mockResolvedValueOnce([{ affectedRows: 1 }]);   // UPDATE_STATUS
+
+  it('suspends another user in the tenant (is_active = 0), reporting before → after', async () => {
+    member('ACTIVE');
+    const change = await service.updateUserStatus('user@x.com', 't1', 'SUSPENDED', 'admin@x.com');
+    expect(mockConn.execute.mock.calls[1][1]).toEqual([0, 'SUSPENDED', 'user@x.com', 't1']);
+    expect(change).toEqual({ before: 'ACTIVE', after: 'SUSPENDED' });
+    expect(liveAccess.invalidate).toHaveBeenCalledWith('t1', 'user@x.com');
   });
 
   it('activates another user in the tenant (is_active = 1)', async () => {
-    mockConn.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
+    member('SUSPENDED');
     await service.updateUserStatus('user@x.com', 't1', 'ACTIVE', 'admin@x.com');
-    expect(mockConn.execute.mock.calls[0][1]).toEqual([1, 'ACTIVE', 'user@x.com', 't1']);
+    expect(mockConn.execute.mock.calls[1][1]).toEqual([1, 'ACTIVE', 'user@x.com', 't1']);
+  });
+
+  it('is a 404 for somebody who is not a member here', async () => {
+    mockConn.execute.mockResolvedValueOnce([[]]);
+    await expect(service.updateUserStatus('nobody@x.com', 't1', 'SUSPENDED', 'admin@x.com'))
+      .rejects.toMatchObject({ statusCode: 404 });
+    expect(liveAccess.invalidate).not.toHaveBeenCalled();
   });
 
   it('throws 403 and issues no UPDATE when an admin suspends themselves', async () => {
@@ -437,28 +583,31 @@ describe('updateUserStatus', () => {
   });
 
   it('allows an admin to activate their own account (harmless no-op)', async () => {
-    mockConn.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
+    member('ACTIVE');
     await service.updateUserStatus('admin@x.com', 't1', 'ACTIVE', 'admin@x.com');
-    expect(mockConn.execute.mock.calls[0][1]).toEqual([1, 'ACTIVE', 'admin@x.com', 't1']);
+    expect(mockConn.execute.mock.calls[1][1]).toEqual([1, 'ACTIVE', 'admin@x.com', 't1']);
   });
 
   it('preserves legacy behaviour when no actor email is supplied', async () => {
-    mockConn.execute.mockResolvedValueOnce([{ affectedRows: 1 }]);
+    member('ACTIVE');
     await service.updateUserStatus('user@x.com', 't1', 'SUSPENDED');
-    expect(mockConn.execute).toHaveBeenCalledTimes(1);
+    expect(mockConn.execute).toHaveBeenCalledTimes(2);
   });
 });
 
 // ─── removeUser (tenant-scoped removal) ───────────────────────────────────────
 describe('removeUser', () => {
-  it('deletes role assignments then the membership for another user', async () => {
+  it('deletes role assignments then the membership, and reports the roles they held', async () => {
     mockConn.execute
+      .mockResolvedValueOnce([[{ role_name: 'POS_WAITER' }, { role_name: 'POS_CASHIER' }]]) // roles held
       .mockResolvedValueOnce([{ affectedRows: 2 }]) // DELETE_ALL_FOR_USER
       .mockResolvedValueOnce([{ affectedRows: 1 }]); // ADMIN_USERS.DELETE
-    await service.removeUser('user@x.com', 't1', 'admin@x.com');
-    expect(mockConn.execute).toHaveBeenCalledTimes(2);
-    expect(mockConn.execute.mock.calls[0][1]).toEqual(['user@x.com', 't1']);
+    const result = await service.removeUser('user@x.com', 't1', 'admin@x.com');
+    expect(result).toEqual({ roles: ['POS_CASHIER', 'POS_WAITER'] });
+    expect(mockConn.execute).toHaveBeenCalledTimes(3);
     expect(mockConn.execute.mock.calls[1][1]).toEqual(['user@x.com', 't1']);
+    expect(mockConn.execute.mock.calls[2][1]).toEqual(['user@x.com', 't1']);
+    expect(liveAccess.invalidate).toHaveBeenCalledWith('t1', 'user@x.com');
   });
 
   it('throws 403 and opens no transaction when an admin removes themselves', async () => {
@@ -477,9 +626,10 @@ describe('removeUser', () => {
 
   it('preserves legacy behaviour when no actor email is supplied', async () => {
     mockConn.execute
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ affectedRows: 0 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
     await service.removeUser('user@x.com', 't1');
-    expect(mockConn.execute).toHaveBeenCalledTimes(2);
+    expect(mockConn.execute).toHaveBeenCalledTimes(3);
   });
 });

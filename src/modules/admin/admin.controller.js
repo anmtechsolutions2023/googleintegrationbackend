@@ -138,6 +138,40 @@ const reopenOnboarding = [
   }),
 ];
 
+// ─── AUDIT DETAILS ────────────────────────────────────────────────────────────
+// Each change of access is ONE audit row, written here, that says what changed:
+// "Roles: OPERATIONS_STAFF → OPERATIONS_STAFF, POS_KITCHEN_STAFF". The route's
+// own row defers to it (see admin.routes.js). Truncated to the column width
+// rather than risking an insert that fails over a long list.
+
+const DETAILS_MAX = 500;
+const listOf = (items) => (items && items.length ? items.join(', ') : 'none');
+const clip = (text) => (text.length > DETAILS_MAX ? `${text.slice(0, DETAILS_MAX - 1)}…` : text);
+const flag = (on) => (on ? 'on' : 'off');
+
+/** "Name: A → B · Home branch: X → Y", listing only what changed. */
+const describeProfileChange = ({ before, after }) => {
+  const parts = [];
+  if ((before.fullName || null) !== (after.fullName || null)) {
+    parts.push(`Name: ${before.fullName || 'not set'} → ${after.fullName || 'not set'}`);
+  }
+  if ((before.branch || null) !== (after.branch || null)) {
+    parts.push(`Home branch: ${before.branch || 'none'} → ${after.branch || 'none'}`);
+  }
+  return parts.length ? parts.join(' · ') : 'No change';
+};
+
+/** "Name: A → B · Active: on → off", for the fields of a role that changed. */
+const describeRoleChange = (before, role) => {
+  const parts = [];
+  if (before.name !== role.name) parts.push(`Name: ${before.name} → ${role.name}`);
+  if ((before.description || '') !== (role.description || '')) parts.push('Description changed');
+  if (!!before.is_active !== !!role.is_active) {
+    parts.push(`Active: ${flag(before.is_active)} → ${flag(role.is_active)}`);
+  }
+  return `Role ${role.name}${parts.length ? ` · ${parts.join(' · ')}` : ' · No change'}`;
+};
+
 // ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
 
 const listUsers = [
@@ -200,11 +234,14 @@ const updateUserRoles = [
   validateBody(schemas.updateUserRolesSchema),
   asyncHandler(async (req, res) => {
     const { userPhone: adminPhone, tenantId } = extractUserContext(req);
-    await service.updateUserRoles(req.params.phone, tenantId, req.body.roleIds, adminPhone);
+    const { before, after } = await service.updateUserRoles(
+      req.params.phone, tenantId, req.body.roleIds, adminPhone,
+    );
 
     await captureAudit(req, tenantId, adminPhone,
-      'UPDATE_USER_ROLES', STATUSES.UPDATED,
-      AUDIT_CATEGORIES.USER_MGMT, 'INFO', req.params.phone);
+      AUDIT_ACTIONS.UPDATE_USER_ROLES, STATUSES.UPDATED,
+      AUDIT_CATEGORIES.USER_MGMT, 'INFO', req.params.phone,
+      clip(`Roles: ${listOf(before)} → ${listOf(after)}`));
 
     successResponse(res, MESSAGES.SUCCESS.USER_ROLES_UPDATED);
   }),
@@ -214,15 +251,18 @@ const updateUserStatus = [
   validateBody(schemas.updateUserStatusSchema),
   asyncHandler(async (req, res) => {
     const { userPhone: adminPhone, tenantId } = extractUserContext(req);
-    await service.updateUserStatus(req.params.phone, tenantId, req.body.status, adminPhone);
+    const { before, after } = await service.updateUserStatus(
+      req.params.phone, tenantId, req.body.status, adminPhone,
+    );
 
     const isSuspend = req.body.status === 'SUSPENDED';
     await captureAudit(req, tenantId, adminPhone,
-      isSuspend ? 'SUSPEND_USER' : 'ACTIVATE_USER',
+      isSuspend ? AUDIT_ACTIONS.SUSPEND_USER : AUDIT_ACTIONS.ACTIVATE_USER,
       isSuspend ? STATUSES.SUSPENDED : STATUSES.ACTIVATED,
       AUDIT_CATEGORIES.USER_MGMT,
       isSuspend ? 'WARN' : 'INFO',
-      req.params.phone);
+      req.params.phone,
+      `Status: ${before || 'unknown'} → ${after}`);
 
     successResponse(res, MESSAGES.SUCCESS.USER_STATUS_UPDATED);
   }),
@@ -238,11 +278,12 @@ const updateUserStatusCrossTenant = [
 
     const isSuspend = status === 'SUSPENDED';
     await captureAudit(req, tenantId, adminPhone,
-      isSuspend ? 'SUSPEND_USER' : 'ACTIVATE_USER',
+      isSuspend ? AUDIT_ACTIONS.SUSPEND_USER : AUDIT_ACTIONS.ACTIVATE_USER,
       isSuspend ? STATUSES.SUSPENDED : STATUSES.ACTIVATED,
       AUDIT_CATEGORIES.USER_MGMT,
       isSuspend ? 'WARN' : 'INFO',
-      phone);
+      phone,
+      `Status → ${status} (by a platform super admin)`);
 
     successResponse(res, MESSAGES.SUCCESS.USER_STATUS_UPDATED);
   }),
@@ -255,11 +296,14 @@ const updateUserProfile = [
   validateBody(schemas.updateUserProfileSchema),
   asyncHandler(async (req, res) => {
     const { userPhone: adminPhone, tenantId } = extractUserContext(req);
-    await service.updateUserProfile(req.params.phone, tenantId, req.validatedBody, adminPhone);
+    const change = await service.updateUserProfile(
+      req.params.phone, tenantId, req.validatedBody, adminPhone,
+    );
 
     await captureAudit(req, tenantId, adminPhone,
-      'USER_PROFILE_UPDATED', STATUSES.SUCCESS,
-      AUDIT_CATEGORIES.USER_MGMT, 'INFO', req.params.phone);
+      AUDIT_ACTIONS.UPDATE_USER_PROFILE, STATUSES.UPDATED,
+      AUDIT_CATEGORIES.USER_MGMT, 'INFO', req.params.phone,
+      clip(describeProfileChange(change)));
 
     successResponse(res, 'Staff details updated');
   }),
@@ -274,11 +318,14 @@ const setTenantAdmin = [
   asyncHandler(async (req, res) => {
     const { userPhone: adminPhone, tenantId } = extractUserContext(req);
     const { isAdmin } = req.validatedBody;
-    await service.setTenantAdmin(req.params.phone, tenantId, isAdmin, adminPhone);
+    const { before, after } = await service.setTenantAdmin(
+      req.params.phone, tenantId, isAdmin, adminPhone,
+    );
 
     await captureAudit(req, tenantId, adminPhone,
-      isAdmin ? 'USER_GRANTED_ADMIN' : 'USER_REVOKED_ADMIN', STATUSES.SUCCESS,
-      AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.phone);
+      isAdmin ? AUDIT_ACTIONS.GRANT_ADMIN : AUDIT_ACTIONS.REVOKE_ADMIN, STATUSES.UPDATED,
+      AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.phone,
+      `Admin switch: ${flag(before)} → ${flag(after)}`);
 
     successResponse(res, isAdmin
       ? 'Tenant administrator access granted'
@@ -289,11 +336,12 @@ const setTenantAdmin = [
 const removeUser = [
   asyncHandler(async (req, res) => {
     const { userPhone: adminPhone, tenantId } = extractUserContext(req);
-    await service.removeUser(req.params.phone, tenantId, adminPhone);
+    const { roles } = await service.removeUser(req.params.phone, tenantId, adminPhone);
 
     await captureAudit(req, tenantId, adminPhone,
-      'REMOVE_USER', STATUSES.DELETED,
-      AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.phone);
+      AUDIT_ACTIONS.REMOVE_USER, STATUSES.DELETED,
+      AUDIT_CATEGORIES.USER_MGMT, 'WARN', req.params.phone,
+      clip(`Held: ${listOf(roles)}`));
 
     successResponse(res, MESSAGES.SUCCESS.USER_REMOVED);
   }),
@@ -350,8 +398,9 @@ const createRole = [
     const role = await service.createRole(tenantId, name, description);
 
     await captureAudit(req, tenantId, userPhone,
-      'CREATE_ROLE', STATUSES.CREATED,
-      AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', role.id);
+      AUDIT_ACTIONS.CREATE_ROLE, STATUSES.CREATED,
+      AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', role.id,
+      clip(`Role ${role.name}`));
 
     createdResponse(res, MESSAGES.SUCCESS.ROLE_CREATED, role);
   }),
@@ -362,11 +411,12 @@ const updateRole = [
   validateBody(schemas.updateRoleSchema),
   asyncHandler(async (req, res) => {
     const { userPhone, tenantId } = extractUserContext(req);
-    const role = await service.updateRole(req.params.roleId, tenantId, req.body);
+    const { role, before } = await service.updateRole(req.params.roleId, tenantId, req.body);
 
     await captureAudit(req, tenantId, userPhone,
-      'UPDATE_ROLE', STATUSES.UPDATED,
-      AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', req.params.roleId);
+      AUDIT_ACTIONS.UPDATE_ROLE, STATUSES.UPDATED,
+      AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', req.params.roleId,
+      clip(describeRoleChange(before, role)));
 
     successResponse(res, MESSAGES.SUCCESS.ROLE_UPDATED, role);
   }),
@@ -376,11 +426,12 @@ const deleteRole = [
   validateIdParam('roleId'),
   asyncHandler(async (req, res) => {
     const { userPhone, tenantId } = extractUserContext(req);
-    await service.deleteRole(req.params.roleId, tenantId);
+    const { name } = await service.deleteRole(req.params.roleId, tenantId);
 
     await captureAudit(req, tenantId, userPhone,
-      'DELETE_ROLE', STATUSES.DELETED,
-      AUDIT_CATEGORIES.ROLE_MGMT, 'WARN', req.params.roleId);
+      AUDIT_ACTIONS.DELETE_ROLE, STATUSES.DELETED,
+      AUDIT_CATEGORIES.ROLE_MGMT, 'WARN', req.params.roleId,
+      clip(`Role ${name}`));
 
     successResponse(res, MESSAGES.SUCCESS.ROLE_DELETED);
   }),
@@ -389,8 +440,18 @@ const deleteRole = [
 const getRolePermissions = [
   validateIdParam('roleId'),
   asyncHandler(async (req, res) => {
-    const permissions = await service.getRolePermissions(req.params.roleId);
+    const { tenantId } = extractUserContext(req);
+    const permissions = await service.getRolePermissions(req.params.roleId, tenantId);
     successResponse(res, 'Role permissions retrieved', permissions);
+  }),
+];
+
+// Every grant of every role in the caller's tenancy, as { role_id, feature_id }.
+const listRolePermissionMatrix = [
+  asyncHandler(async (req, res) => {
+    const { tenantId } = extractUserContext(req);
+    const rows = await service.listRolePermissionMatrix(tenantId);
+    successResponse(res, 'Role permissions retrieved', rows);
   }),
 ];
 
@@ -399,13 +460,29 @@ const setRolePermissions = [
   validateBody(schemas.updateRolePermissionsSchema),
   asyncHandler(async (req, res) => {
     const { userPhone, tenantId } = extractUserContext(req);
-    await service.setRolePermissions(req.params.roleId, tenantId, req.body.featureIds);
+    const change = await service.setRolePermissions(
+      req.params.roleId, tenantId, req.body.featureIds,
+    );
 
+    const parts = [`Role ${change.role}`, `Added: ${listOf(change.added)}`, `Removed: ${listOf(change.removed)}`];
+    if (change.implied.length) parts.push(`Added because required: ${listOf(change.implied)}`);
     await captureAudit(req, tenantId, userPhone,
-      'SET_ROLE_PERMISSIONS', STATUSES.UPDATED,
-      AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', req.params.roleId);
+      AUDIT_ACTIONS.UPDATE_ROLE_PERMISSIONS, STATUSES.UPDATED,
+      AUDIT_CATEGORIES.ROLE_MGMT, 'INFO', req.params.roleId,
+      clip(parts.join(' · ')));
 
-    successResponse(res, MESSAGES.SUCCESS.ROLE_UPDATED);
+    // The editor shows what the server added for the admin ("View" because they
+    // ticked "Manage"), so the saved role is never a surprise.
+    successResponse(res, MESSAGES.SUCCESS.ROLE_UPDATED, change);
+  }),
+];
+
+// The administrators of the caller's own tenancy, for the Access Denied page.
+const listAdministrators = [
+  asyncHandler(async (req, res) => {
+    const { tenantId } = extractUserContext(req);
+    const admins = await service.listAdministrators(tenantId);
+    successResponse(res, 'Administrators retrieved', admins);
   }),
 ];
 
@@ -487,7 +564,9 @@ module.exports = {
   updateRole,
   deleteRole,
   getRolePermissions,
+  listRolePermissionMatrix,
   setRolePermissions,
+  listAdministrators,
   listFeatures,
   createFeature,
   updateFeature,

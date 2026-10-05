@@ -47,20 +47,20 @@ describe('authenticateToken', () => {
     expect(next).toHaveBeenCalledWith(expect.any(HttpError));
   });
 
-  it('calls next(HttpError 403) when jwt.verify throws', () => {
+  it('calls next(HttpError 401) when jwt.verify throws', () => {
     req.headers.authorization = 'Bearer badtoken';
     jwt.verify.mockImplementation(() => { throw new Error('bad'); });
     authenticateToken(req, res, next);
     expect(next).toHaveBeenCalledWith(expect.any(HttpError));
-    expect(next.mock.calls[0][0].statusCode).toBe(403);
+    expect(next.mock.calls[0][0].statusCode).toBe(401);
   });
 
-  it('calls next(HttpError 403) when token payload is missing tid', () => {
+  it('calls next(HttpError 401) when token payload is missing tid', () => {
     req.headers.authorization = 'Bearer goodtoken';
     jwt.verify.mockReturnValue({ scopes: ['TENANT:ADMIN'] }); // tid is undefined
     authenticateToken(req, res, next);
     expect(next).toHaveBeenCalledWith(expect.any(HttpError));
-    expect(next.mock.calls[0][0].statusCode).toBe(403);
+    expect(next.mock.calls[0][0].statusCode).toBe(401);
   });
 
   it('allows null tid (guest token) to pass authenticateToken', () => {
@@ -72,12 +72,12 @@ describe('authenticateToken', () => {
     expect(next).toHaveBeenCalledWith();
   });
 
-  it('calls next(HttpError 403) when token payload scopes is not an array', () => {
+  it('calls next(HttpError 401) when token payload scopes is not an array', () => {
     req.headers.authorization = 'Bearer goodtoken';
     jwt.verify.mockReturnValue({ tid: 'tenant-id', scopes: 'TENANT:ADMIN' }); // not array
     authenticateToken(req, res, next);
     expect(next).toHaveBeenCalledWith(expect.any(HttpError));
-    expect(next.mock.calls[0][0].statusCode).toBe(403);
+    expect(next.mock.calls[0][0].statusCode).toBe(401);
   });
 
   it('sets req.user and calls next() on valid token', () => {

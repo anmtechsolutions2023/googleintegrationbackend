@@ -25,6 +25,11 @@ const COLLECT = [...WRITE, SCOPES.POS_BILLING_WRITE];
 const DUES_READ = [...READ, SCOPES.POS_BILLING_READ, SCOPES.POS_BILLING_WRITE];
 // Giving money up is a management decision. Admins only.
 const WRITE_OFF = [SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN];
+// Money going back out — a full refund, a partial return, and marking a refund
+// paid. These used to need only TRANSACTIONS:WRITE, which editors and
+// operations staff hold to keep the books and the numbering; neither job should
+// be able to hand money back. REFUND:APPROVE is granted on purpose, by role.
+const REFUND = [SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.REFUND_APPROVE];
 
 // ── Reports ──────────────────────────────────────────────────────────────────
 // Declared BEFORE /documents/:id so no report path can be swallowed by the id
@@ -73,7 +78,7 @@ router.get('/documents/:id', authenticateToken, checkScope(...READ), ...controll
 router.post(
   '/documents/:id/refund',
   authenticateToken,
-  checkScope(...WRITE),
+  checkScope(...REFUND),
   auditLog(AUDIT_CATEGORIES.PAYMENTS, 'WARN', 'Ledger document refunded'),
   ...controller.refund,
 );
@@ -81,15 +86,15 @@ router.post(
 /**
  * POST /documents/:id/returns — a PARTIAL return.
  *
- * Reuses TRANSACTIONS:WRITE rather than inventing a scope: a return IS a ledger
- * write, and that scope already means exactly that. Audited at WARN like the
- * full refund, because who refunds what and how often is the standard
- * shrinkage control and the audit rows are what answer it.
+ * Same authority as a full refund (REFUND:APPROVE): a return owes the customer
+ * money back. Audited at WARN like the full refund, because who refunds what
+ * and how often is the standard shrinkage control and the audit rows are what
+ * answer it.
  */
 router.post(
   '/documents/:id/returns',
   authenticateToken,
-  checkScope(...WRITE),
+  checkScope(...REFUND),
   auditLog(AUDIT_CATEGORIES.PAYMENTS, 'WARN', 'Partial return recorded'),
   ...controller.createReturn,
 );
@@ -131,7 +136,7 @@ router.get('/documents/:id/returns', authenticateToken, checkScope(...READ), ...
 router.put(
   '/returns/:id/settlement',
   authenticateToken,
-  checkScope(...WRITE),
+  checkScope(...REFUND),
   auditLog(AUDIT_CATEGORIES.PAYMENTS, 'WARN', 'Refund settlement updated'),
   ...controller.setSettlement,
 );

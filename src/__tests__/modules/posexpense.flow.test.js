@@ -114,6 +114,26 @@ describe('approval', () => {
     await expect(service.approve(ID, TENANT, USER)).rejects.toMatchObject({ statusCode: 409 });
   });
 
+  // Separation of duties: EXPENSE:APPROVE exists so that whoever raises a claim
+  // is not the one who signs it off. Front-desk managers and owner-operators
+  // hold both, so the service checks the creator.
+  it('refuses to let the person who raised a claim approve it → 403', async () => {
+    route({ CreatedBy: USER });
+    await expect(service.approve(ID, TENANT, USER)).rejects.toMatchObject({ statusCode: 403 });
+    expect(callsTo(/SET Status = 'approved'/i)).toHaveLength(0);
+  });
+
+  it('lets somebody else approve it', async () => {
+    route({ CreatedBy: 'cashier@test.com' });
+    await expect(service.approve(ID, TENANT, USER)).resolves.toBeDefined();
+  });
+
+  it('lets a tenant admin approve their own claim — a one-person business must be able to', async () => {
+    route({ CreatedBy: USER });
+    await expect(service.approve(ID, TENANT, USER, { isAdmin: true })).resolves.toBeDefined();
+    expect(callsTo(/SET Status = 'approved'/i)).toHaveLength(1);
+  });
+
   it('rejects a draft without touching the ledger', async () => {
     route();
     await service.reject(ID, TENANT, USER);

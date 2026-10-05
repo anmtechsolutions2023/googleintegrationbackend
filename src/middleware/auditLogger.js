@@ -26,14 +26,21 @@ const writeAuditLog = async (tid, phone, action, status, ip, level, category) =>
  * @param {string} defaultLevel - Default log level when the response is 2xx.
  * @param {string} [actionLabel] - Human-readable action label. Falls back to
  *                                 "METHOD /path" when omitted.
+ * @param {Object} [options]
+ * @param {boolean} [options.deferToCapture] - Skip the row on success when the
+ *   controller already wrote one with captureAudit. That row names the person
+ *   or role acted on and what changed; this one could only say that something
+ *   happened, so writing both left every change in the trail twice. Failures
+ *   are still written here, because the controller never reaches its capture.
  * @returns {Function} Express middleware.
  */
-const auditLog = (category = AUDIT_CATEGORIES.GENERAL, defaultLevel = 'INFO', actionLabel = null) => {
+const auditLog = (category = AUDIT_CATEGORIES.GENERAL, defaultLevel = 'INFO', actionLabel = null, { deferToCapture = false } = {}) => {
   return (req, res, next) => {
     const ip = getIp(req);
 
     res.on('finish', async () => {
       if (!req.user) return;
+      if (deferToCapture && req.auditCaptured && res.statusCode < 400) return;
 
       const { phone, tid } = req.user;
       const action = actionLabel || `${req.method} ${req.path}`;

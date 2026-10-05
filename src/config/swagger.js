@@ -3996,7 +3996,7 @@ const swaggerSpec = {
           + 'exceed the sale, a line can never return more than was sold, and no payment mode is ever '
           + 'refunded more than it received. Lines are priced from the ORIGINAL line — an invoice '
           + 'raised at 18% gives back 18%, whatever the rate is today.\n\n'
-          + 'Requires TRANSACTIONS:WRITE. Audited at WARN — who refunds what and how often is the '
+          + 'Requires REFUND:APPROVE (or tenant admin). Audited at WARN — who refunds what and how often is the '
           + 'standard shrinkage control.',
         security,
         parameters: [idParam],
@@ -4106,7 +4106,7 @@ const swaggerSpec = {
         summary: 'Mark a refund as paid out, failed, or back to pending',
         description:
           'A human at the till today; a payment gateway later. The vocabulary exists from day one so '
-          + 'that later change needs no reshaping of documents already written. Requires TRANSACTIONS:WRITE.',
+          + 'that later change needs no reshaping of documents already written. Requires REFUND:APPROVE (or tenant admin).',
         security,
         parameters: [idParam],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/LedgerSettlementUpdate' } } } },
@@ -4121,7 +4121,7 @@ const swaggerSpec = {
         tags: ['Ledger'],
         summary: 'Reverse a settled document (whole document)',
         description:
-          'Reverses a whole document. Now a thin wrapper over `POST /documents/{id}/returns` with no line selection — "return everything still outstanding" — so there is one implementation of returning goods rather than two that drift.\n\n**The signature is unchanged and existing callers keep working.** What changes underneath: a CREDIT NOTE is raised instead of the sale being mutated, so the sale stays SETTLED, no longer vanishes from revenue reports, and can still be partially returned against afterwards if any of it was left.\n\n**Nothing is deleted or overwritten** — the original stands and the reversal sits beside it. Requires TRANSACTIONS:WRITE.',
+          'Reverses a whole document. Now a thin wrapper over `POST /documents/{id}/returns` with no line selection — "return everything still outstanding" — so there is one implementation of returning goods rather than two that drift.\n\n**The signature is unchanged and existing callers keep working.** What changes underneath: a CREDIT NOTE is raised instead of the sale being mutated, so the sale stays SETTLED, no longer vanishes from revenue reports, and can still be partially returned against afterwards if any of it was left.\n\n**Nothing is deleted or overwritten** — the original stands and the reversal sits beside it. Requires REFUND:APPROVE (or tenant admin).',
         security,
         parameters: [idParam],
         requestBody: {
@@ -4477,6 +4477,17 @@ const swaggerSpec = {
     // ─── POS (Front Desk) ───
     ...crudPaths('PosFloors', '/api/pos/floors', 'PosFloorCreate', 'PosFloorUpdate', 'PosFloor', false),
     ...crudPaths('PosTables', '/api/pos/tables', 'PosTableCreate', 'PosTableUpdate', 'PosTable', false),
+    '/api/pos/tables/{id}/occupancy': {
+      put: {
+        tags: ['PosTables'], summary: 'Seat or free a table (the till)', security,
+        description: 'Accepts POS_ORDER:WRITE or POS_BILLING:WRITE — the scopes the till\'s own actions need — and changes '
+          + 'only Status (occupied | free) and CurrentOrderId. Freeing a table clears its current order. Changing anything '
+          + 'else about a table still needs POS_CONFIG:WRITE on PUT /api/pos/tables/{id}.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['Status'], properties: { Status: { type: 'string', enum: ['occupied', 'free'] }, CurrentOrderId: { type: 'string', nullable: true } } } } } },
+        responses: { ...singleResponse('PosTable'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
     ...crudPaths('PosItemMeta', '/api/pos/item-meta', 'PosItemMetaCreate', 'PosItemMetaUpdate', 'PosItemMeta', false),
     '/api/pos/item-meta/bulk': {
       patch: {
@@ -5079,7 +5090,7 @@ const swaggerSpec = {
         },
       },
     },
-    '/api/admin/users/{email}/profile': {
+    '/api/admin/users/{phone}/profile': {
       put: {
         tags: ['AdminUsers'],
         summary: 'Update a member\'s staff details (name, phone, branch)',
@@ -5111,7 +5122,7 @@ const swaggerSpec = {
         },
       },
     },
-    '/api/admin/users/{email}/admin': {
+    '/api/admin/users/{phone}/admin': {
       put: {
         tags: ['AdminUsers'],
         summary: 'Grant or withdraw tenant-administrator access',
@@ -5677,7 +5688,7 @@ const swaggerSpec = {
         },
       },
     },
-    '/api/admin/users/{email}/roles': {
+    '/api/admin/users/{phone}/roles': {
       get: {
         tags: ['Admin — Users'], summary: 'Get current roles for a user', security,
         parameters: [{ name: 'phone', in: 'path', required: true, schema: { type: 'string', example: '+919876543210' } }],
@@ -5703,7 +5714,7 @@ const swaggerSpec = {
         responses: { 200: { description: 'Roles updated' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },
     },
-    '/api/admin/users/{email}/status': {
+    '/api/admin/users/{phone}/status': {
       put: {
         tags: ['Admin — Users'],
         summary: 'Activate or suspend a user',
@@ -5735,22 +5746,41 @@ const swaggerSpec = {
         responses: { ...singleResponse('Role'), ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },
       delete: {
-        tags: ['Admin — Roles'], summary: 'Delete a role (non-system only)', security,
+        tags: ['Admin — Roles'], summary: 'Delete a role (non-system, and only when nobody holds it)', security,
+        description: 'Refused with 409 (code ROLE_IN_USE) while anybody holds the role or a pending invitation offers it. '
+          + '`details.holders` lists who holds it and `details.pendingInvitations` counts the invitations.',
         parameters: [{ name: 'roleId', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: { ...responses.noContent, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+        responses: { ...responses.noContent, ...responses.notFound, 409: { description: 'Role is held by somebody or offered by a pending invitation (code ROLE_IN_USE)' }, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/roles/permissions': {
+      get: {
+        tags: ['Admin — Roles'], summary: 'Every grant of every role in the caller\'s tenancy', security,
+        description: 'One row per grant — the permission matrix, role comparison and access preview are built from it.',
+        responses: { 200: { description: 'Grants', content: { 'application/json': { schema: { type: 'array', items: { type: 'object', properties: { role_id: { type: 'string' }, feature_id: { type: 'string' } } } } } } }, ...responses.unauthorized, ...responses.forbidden },
+      },
+    },
+    '/api/admin/administrators': {
+      get: {
+        tags: ['Admin — Users'], summary: 'Administrators of the caller\'s tenancy (any member may read)', security,
+        description: 'Names and numbers of the members with the Admin switch, for the Access Denied page.',
+        responses: { 200: { description: 'Administrators', content: { 'application/json': { schema: { type: 'array', items: { type: 'object', properties: { name: { type: 'string', nullable: true }, phone: { type: 'string' } } } } } } }, ...responses.unauthorized, ...responses.forbidden },
       },
     },
     '/api/admin/roles/{roleId}/permissions': {
       get: {
-        tags: ['Admin — Roles'], summary: 'Get permissions assigned to a role', security,
+        tags: ['Admin — Roles'], summary: 'Get permissions assigned to a role (404 for another tenancy\'s role)', security,
         parameters: [{ name: 'roleId', in: 'path', required: true, schema: { type: 'string' } }],
         responses: { 200: { description: 'Permissions list', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/RolePermission' } } } } }, ...responses.unauthorized, ...responses.forbidden },
       },
       put: {
         tags: ['Admin — Roles'], summary: 'Replace all permissions for a role', security,
+        description: 'System roles are refused (403). Unknown feature ids are refused (400). Requirements are added: '
+          + 'Manage brings its View, EXPENSE:APPROVE brings POS_OPS:READ, REFUND:APPROVE brings TRANSACTIONS:READ. '
+          + 'The response lists what was added, removed, and added because required. Holders get the change on their next request.',
         parameters: [{ name: 'roleId', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RolePermissionsUpdate' } } } },
-        responses: { 200: { description: 'Permissions updated' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
+        responses: { 200: { description: 'Permissions updated: { role, added[], removed[], implied[] } (feature keys)' }, ...responses.validation, ...responses.notFound, ...responses.unauthorized, ...responses.forbidden },
       },
     },
 

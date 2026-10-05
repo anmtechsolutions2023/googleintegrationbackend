@@ -64,8 +64,10 @@ describe('findAndGetPermissions — guest path auto-approval', () => {
 
     const result = await findAndGetPermissions(req, userData);
 
+    // Identity is the verified number since the move to WhatsApp sign-in; no
+    // Google subject is passed any more.
     expect(adminService.autoApproveOnboarding).toHaveBeenCalledWith({
-      phone: '+919876500011', name: 'New User', googleSub: 'g-123',
+      phone: '+919876500011', name: 'New User',
     });
     expect(result.onboardingStatus).toBe('APPROVED');
     expect(result.tenantId).toBe('new-tenant');

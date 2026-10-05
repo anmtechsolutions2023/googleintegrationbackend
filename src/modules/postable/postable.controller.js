@@ -17,6 +17,7 @@ const {
 const {
   createSchema,
   updateSchema,
+  occupancySchema,
   paginationSchema,
   uuidParamSchema,
 } = require('./postable.schemas');
@@ -56,6 +57,14 @@ const update = asyncHandler(async (req, res) => {
 // A row with trading history is RETIRED, not deleted — see common/retire.js.
 // The message says which happened, so "it's still in my reports" is expected
 // rather than surprising.
+const setOccupancy = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { tid: tenantId, phone } = req.user;
+  logger.info('PosTable.setOccupancy called', { id, tenantId, status: req.body.Status });
+  const updated = await service.setOccupancy(id, req.body, tenantId, phone);
+  successResponse(res, updated, 'POS Table occupancy updated');
+});
+
 const deleteById = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { tid: tenantId, phone: userPhone } = req.user;
@@ -74,5 +83,6 @@ module.exports = {
   getById: [validateParams(uuidParamSchema), getById],
   create: [validateBody(createSchema), create],
   update: [validateParams(uuidParamSchema), validateBody(updateSchema), update],
+  setOccupancy: [validateParams(uuidParamSchema), validateBody(occupancySchema), setOccupancy],
   deleteById: [validateParams(uuidParamSchema), deleteById],
 };

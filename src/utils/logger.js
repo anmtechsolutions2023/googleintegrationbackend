@@ -94,6 +94,10 @@ const captureAudit = async (
     req.socket?.remoteAddress ||
     config.AUDIT.DEFAULT_IP;
 
+  // Tells a route-level auditLog({ deferToCapture }) that this request's
+  // action has its detailed row, so it does not write a vaguer second one.
+  req.auditCaptured = true;
+
   try {
     await db.execute(QUERIES.AUDIT_LOGS.INSERT, [
       tenantId || null,

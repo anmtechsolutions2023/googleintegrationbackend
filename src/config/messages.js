@@ -143,6 +143,13 @@ module.exports = {
     ROLE_IN_USE: 'Cannot delete role: it is currently assigned to one or more users.',
     FEATURE_IN_USE: 'Cannot delete feature: it is assigned to one or more roles.',
     SYSTEM_ROLE_PROTECTED: 'System roles cannot be modified or deleted.',
+    ROLE_NOT_IN_TENANT: 'One or more roles do not belong to this tenancy.',
+    BRANCH_NOT_IN_TENANT: 'That branch is not one of this tenancy\'s branches.',
+    FEATURE_UNKNOWN: 'One or more permissions do not exist. Refresh the page and try again.',
+    // The membership behind a still-valid token is gone, suspended or inactive.
+    ACCESS_REVOKED: 'Your access to this tenancy has changed. Sign in again to continue.',
+    EXPENSE_SELF_APPROVAL:
+      'You raised this expense, so someone else has to approve or reject it. Ask an administrator.',
     USER_ALREADY_EXISTS: 'User is already provisioned in this tenant.',
     INVITE_ALREADY_MEMBER: 'That person is already in this tenancy. Change their roles from the users list instead.',
     INVITE_ALREADY_PENDING: 'There is already a pending invitation for that number. Revoke it first to change the roles.',

@@ -29,6 +29,13 @@ const updateSchema = Joi.object({
   Active: Joi.boolean().optional(),
 }).min(1);
 
+// The till's own change: seat a table when its first round is saved, free it
+// when the bill is settled. Nothing else about the table can be touched here.
+const occupancySchema = Joi.object({
+  Status: Joi.string().lowercase().valid('occupied', 'free').required(),
+  CurrentOrderId: optionalEntityId,
+});
+
 const paginationSchema = Joi.object({
   page: Joi.number().integer().min(1).optional().default(1),
   limit: Joi.number().integer().min(1).max(100).optional().default(10),
@@ -38,4 +45,4 @@ const uuidParamSchema = Joi.object({
   id: entityId.required(),
 });
 
-module.exports = { createSchema, updateSchema, paginationSchema, uuidParamSchema };
+module.exports = { createSchema, updateSchema, occupancySchema, paginationSchema, uuidParamSchema };

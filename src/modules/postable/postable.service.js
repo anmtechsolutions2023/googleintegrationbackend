@@ -68,5 +68,12 @@ module.exports = {
   getById: (id, tenantId) => service.getById(id, tenantId),
   create: (data, tenantId, userPhone) => service.create(data, tenantId, userPhone),
   update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
+  // A freed table has no current order, whatever the caller sent.
+  setOccupancy: (id, { Status, CurrentOrderId }, tenantId, userPhone) => service.update(
+    id,
+    { Status, CurrentOrderId: Status === 'free' ? null : (CurrentOrderId ?? null) },
+    tenantId,
+    userPhone,
+  ),
   remove: (id, tenantId, userPhone) => service.retire(id, tenantId, userPhone),
 };

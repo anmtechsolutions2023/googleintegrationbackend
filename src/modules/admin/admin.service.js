@@ -7,6 +7,10 @@ const { withConnection, withTransaction } = require('../../utils/dbHelper');
 const { QUERIES, ONBOARDING } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
 const { assertRolesGrantable } = require('../../utils/roleGuard');
+const { withRequirements } = require('../../config/permissionRules');
+// Every change of somebody's access drops their cached access, so the next
+// request they make is checked against the new state rather than the old one.
+const liveAccess = require('../../middleware/liveAccess');
 const MESSAGES = require('../../config/messages');
 const { logger } = require('../../utils/logger');
 const {
@@ -354,8 +358,25 @@ const getUserDetail = (phone, tenantId) =>
     return { ...rows[0], roleDetails: roleRows };
   });
 
-const updateUserRoles = (phone, tenantId, roleIds, adminPhone) =>
-  withTransaction(async (conn) => {
+/** The names of the roles a member holds here, sorted — for before → after. */
+const roleNamesOf = async (conn, phone, tenantId) => {
+  const [rows] = await conn.execute(QUERIES.USER_ROLES.SELECT_BY_USER_TENANT, [phone, tenantId]);
+  return rows.map((r) => r.role_name).sort();
+};
+
+/** A membership's current state, or a 404 when there is no such member here. */
+const membershipState = async (conn, phone, tenantId) => {
+  const [rows] = await conn.execute(QUERIES.ADMIN_USERS.SELECT_STATE, [phone, tenantId]);
+  if (rows.length === 0) throw new HttpError('User not found in tenant.', 404);
+  return rows[0];
+};
+
+/**
+ * Replace a member's roles.
+ * @returns {Promise<{before: string[], after: string[]}>} Role names, for the audit row.
+ */
+const updateUserRoles = async (phone, tenantId, roleIds, adminPhone) => {
+  const result = await withTransaction(async (conn) => {
     // An admin must not edit their own roles. Role assignment REPLACES the set,
     // so one save with the wrong boxes ticked strips their own access to the
     // business modules — and, unlike suspension, nothing about the resulting
@@ -376,6 +397,7 @@ const updateUserRoles = (phone, tenantId, roleIds, adminPhone) =>
     // the user with no roles at all.
     await assertRolesGrantable(conn, roleIds, tenantId);
 
+    const before = await roleNamesOf(conn, phone, tenantId);
     await conn.execute(QUERIES.USER_ROLES.DELETE_ALL_FOR_USER, [phone, tenantId]);
     for (const roleId of roleIds) {
       await conn.execute(QUERIES.USER_ROLES.INSERT, [
@@ -386,7 +408,14 @@ const updateUserRoles = (phone, tenantId, roleIds, adminPhone) =>
         adminPhone,
       ]);
     }
+    const after = await roleNamesOf(conn, phone, tenantId);
+    return { before, after };
   });
+  // After the commit, never inside it: a request landing between the two would
+  // read the old rows and cache them for the whole TTL.
+  liveAccess.invalidate(tenantId, phone);
+  return result;
+};
 
 // Emails are compared case-insensitively: the JWT claim and the path/body value
 // can differ in casing for the same account.
@@ -410,9 +439,14 @@ const assertNotSelfRemove = (phone, actorPhone) => {
   }
 };
 
+/**
+ * Suspend or reactivate a member. Takes effect on their next request.
+ * @returns {Promise<{before: string, after: string}>}
+ */
 const updateUserStatus = async (phone, tenantId, status, actorPhone) => {
   assertNotSelfSuspend(phone, actorPhone, status);
-  return withConnection(async (conn) => {
+  const result = await withConnection(async (conn) => {
+    const { status: before } = await membershipState(conn, phone, tenantId);
     const isActive = status === 'ACTIVE' ? 1 : 0;
     await conn.execute(QUERIES.ADMIN_USERS.UPDATE_STATUS, [
       isActive,
@@ -420,7 +454,10 @@ const updateUserStatus = async (phone, tenantId, status, actorPhone) => {
       phone,
       tenantId,
     ]);
+    return { before, after: status };
   });
+  liveAccess.invalidate(tenantId, phone);
+  return result;
 };
 
 // Super-admin-only: suspend/activate a user in ANY tenant (SUSPENDED blocks
@@ -445,7 +482,7 @@ const updateUserStatusCrossTenant = async (phone, tenantId, status, actorPhone) 
       phone,
       tenantId,
     ]);
-  });
+  }).then(() => liveAccess.invalidate(tenantId, phone));
 };
 
 /**
@@ -469,20 +506,33 @@ const updateUserStatusCrossTenant = async (phone, tenantId, status, actorPhone) 
  */
 const updateUserProfile = (phone, tenantId, profile, actorPhone) =>
   withConnection(async (conn) => {
-    const [rows] = await conn.execute(
-      'SELECT id FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
-      [phone, tenantId],
-    );
-    if (rows.length === 0) throw new HttpError('User not found in tenant.', 404);
+    const state = await membershipState(conn, phone, tenantId);
 
     // No `phone` here any more: the membership's number is user_phone, the
     // identity itself, and is changed by rebinding the account rather than by
     // editing a profile field.
     const { fullName = null, branchDetailId = null } = profile || {};
+
+    // The home branch must be one of THIS tenancy's branches. It is a label —
+    // it restricts nothing — but a label naming somebody else's branch would
+    // still read another tenancy's branch name onto this one's staff list.
+    let branchName = null;
+    if (branchDetailId) {
+      const [branch] = await conn.execute(
+        QUERIES.ADMIN_USERS.SELECT_BRANCH_NAME, [branchDetailId, tenantId],
+      );
+      if (branch.length === 0) throw new HttpError(MESSAGES.ERROR.BRANCH_NOT_IN_TENANT, 400);
+      branchName = branch[0].BranchName;
+    }
+
     await conn.execute(QUERIES.ADMIN_USERS.UPDATE_PROFILE, [
       fullName, branchDetailId, phone, tenantId,
     ]);
     logger.info('Staff profile updated', { phone, tenantId, actorPhone });
+    return {
+      before: { fullName: state.full_name, branch: state.branch_name || null },
+      after: { fullName, branch: branchName },
+    };
   });
 
 /**
@@ -514,15 +564,11 @@ const setTenantAdmin = async (phone, tenantId, isAdmin, actorPhone) => {
     throw new HttpError(MESSAGES.ERROR.SELF_DEMOTE_FORBIDDEN, 403);
   }
 
-  return withConnection(async (conn) => {
-    const [rows] = await conn.execute(
-      'SELECT is_super_admin FROM user_tenants WHERE user_phone = ? AND tenant_id = ?',
-      [phone, tenantId],
-    );
-    if (rows.length === 0) throw new HttpError('User not found in tenant.', 404);
+  const result = await withConnection(async (conn) => {
+    const state = await membershipState(conn, phone, tenantId);
     // A super admin already passes every check via the bypass; toggling their
     // tenant-admin flag would be meaningless at best and misleading at worst.
-    if (rows[0].is_super_admin) {
+    if (state.is_super_admin) {
       throw new HttpError(MESSAGES.ERROR.SUPER_ADMIN_IMMUTABLE, 403);
     }
 
@@ -530,15 +576,26 @@ const setTenantAdmin = async (phone, tenantId, isAdmin, actorPhone) => {
       isAdmin ? 1 : 0, phone, tenantId,
     ]);
     logger.info('Tenant admin access changed', { phone, tenantId, isAdmin, actorPhone });
+    return { before: !!state.is_admin, after: !!isAdmin };
   });
+  liveAccess.invalidate(tenantId, phone);
+  return result;
 };
 
+/**
+ * End a membership. Their next request is refused.
+ * @returns {Promise<{roles: string[]}>} The roles they held, for the audit row.
+ */
 const removeUser = async (phone, tenantId, actorPhone) => {
   assertNotSelfRemove(phone, actorPhone);
-  return withTransaction(async (conn) => {
+  const result = await withTransaction(async (conn) => {
+    const roles = await roleNamesOf(conn, phone, tenantId);
     await conn.execute(QUERIES.USER_ROLES.DELETE_ALL_FOR_USER, [phone, tenantId]);
     await conn.execute(QUERIES.ADMIN_USERS.DELETE, [phone, tenantId]);
+    return { roles };
   });
+  liveAccess.invalidate(tenantId, phone);
+  return result;
 };
 
 /**
@@ -629,6 +686,9 @@ const deleteTenant = async (tenantId, actorTenantId) => {
     };
     logger.warn('Tenancy deleted', result);
     return result;
+  }).then((result) => {
+    liveAccess.invalidate(tenantId);
+    return result;
   });
 };
 
@@ -648,8 +708,13 @@ const createRole = (tenantId, name, description) =>
     return rows[0];
   });
 
-const updateRole = (roleId, tenantId, updates) =>
-  withConnection(async (conn) => {
+/**
+ * Rename, describe or (de)activate a role. A deactivated role grants nothing
+ * from the next request on — the grants query reads roles.is_active.
+ * @returns {Promise<{role: Object, before: Object}>}
+ */
+const updateRole = async (roleId, tenantId, updates) => {
+  const result = await withConnection(async (conn) => {
     const [existing] = await conn.execute(QUERIES.ROLES.SELECT_BY_ID, [roleId, tenantId]);
     if (existing.length === 0) throw new HttpError('Role not found.', 404);
     if (existing[0].is_system_role) {
@@ -664,9 +729,21 @@ const updateRole = (roleId, tenantId, updates) =>
       tenantId,
     ]);
     const [updated] = await conn.execute(QUERIES.ROLES.SELECT_BY_ID, [roleId, tenantId]);
-    return updated[0];
+    return { role: updated[0], before: existing[0] };
   });
+  liveAccess.invalidate(tenantId);
+  return result;
+};
 
+/**
+ * Delete a role nobody holds.
+ *
+ * Refused while anybody holds it or a pending invitation offers it. Both
+ * tables cascade on delete, so this used to succeed and quietly take the role
+ * away from every holder — while the dialog said it would be refused.
+ *
+ * @returns {Promise<{name: string}>}
+ */
 const deleteRole = (roleId, tenantId) =>
   withConnection(async (conn) => {
     const [existing] = await conn.execute(QUERIES.ROLES.SELECT_BY_ID, [roleId, tenantId]);
@@ -674,25 +751,119 @@ const deleteRole = (roleId, tenantId) =>
     if (existing[0].is_system_role) {
       throw new HttpError(MESSAGES.ERROR.SYSTEM_ROLE_PROTECTED, 403);
     }
+
+    const [holders] = await conn.execute(QUERIES.ROLES.SELECT_HOLDERS, [roleId, tenantId]);
+    const [[{ total: invitations }]] = await conn.execute(
+      QUERIES.ROLES.COUNT_PENDING_INVITATIONS, [roleId, tenantId],
+    );
+    if (holders.length > 0 || invitations > 0) {
+      const parts = [];
+      if (holders.length > 0) {
+        const names = holders.map((h) => h.full_name || h.user_phone).join(', ');
+        parts.push(`${holders.length} ${holders.length === 1 ? 'person holds' : 'people hold'} it (${names})`);
+      }
+      if (invitations > 0) {
+        parts.push(`${invitations} pending ${invitations === 1 ? 'invitation offers' : 'invitations offer'} it`);
+      }
+      const error = new HttpError(
+        `${existing[0].name} cannot be deleted: ${parts.join(' and ')}. Take it off them first.`,
+        409,
+        'ROLE_IN_USE',
+      );
+      error.details = {
+        holders: holders.map((h) => ({ name: h.full_name || null, phone: h.user_phone })),
+        pendingInvitations: invitations,
+      };
+      throw error;
+    }
+
     await conn.execute(QUERIES.ROLES.DELETE, [roleId, tenantId]);
+    return { name: existing[0].name };
   });
 
-const getRolePermissions = (roleId) =>
+/**
+ * What one of this tenancy's roles grants. A role id from another tenancy is
+ * a 404 — this used to read any role's grants by id alone.
+ */
+const getRolePermissions = (roleId, tenantId) =>
   withConnection(async (conn) => {
+    const [role] = await conn.execute(QUERIES.ROLES.SELECT_BY_ID, [roleId, tenantId]);
+    if (role.length === 0) throw new HttpError('Role not found.', 404);
     const [rows] = await conn.execute(QUERIES.ROLE_PERMISSIONS.SELECT_BY_ROLE, [roleId]);
     return rows;
   });
 
-// Replaces all permissions for a role atomically.
-// All users holding this role get the updated scopes on their next login.
-const setRolePermissions = (roleId, tenantId, featureIds) =>
-  withTransaction(async (conn) => {
+/** Every grant of every role in the tenancy: [{ role_id, feature_id }]. */
+const listRolePermissionMatrix = (tenantId) =>
+  withConnection(async (conn) => {
+    const [rows] = await conn.execute(QUERIES.ROLE_PERMISSIONS.SELECT_FOR_TENANT, [tenantId]);
+    return rows;
+  });
+
+/**
+ * Replace what a role grants, atomically.
+ *
+ * - System roles are refused: their grants are fixed, and the Roles screen
+ *   shows them read-only. The API used to accept the change anyway.
+ * - Every id must be a real feature. role_permissions has a foreign key now,
+ *   but a clear 400 beats a constraint error.
+ * - Requirements are added: "Manage" brings its "View", approvals bring the
+ *   screen they are made from (config/permissionRules.js). A role can no
+ *   longer be saved in a shape whose screens never appear.
+ *
+ * Holders get the change on their next request.
+ *
+ * @returns {Promise<{added: string[], removed: string[], implied: string[]}>}
+ *   Feature keys, for the audit row and the editor's confirmation.
+ */
+const setRolePermissions = async (roleId, tenantId, featureIds) => {
+  const result = await withTransaction(async (conn) => {
     const [check] = await conn.execute(QUERIES.ROLES.SELECT_BY_ID, [roleId, tenantId]);
     if (check.length === 0) throw new HttpError('Role not found.', 404);
-    await conn.execute(QUERIES.ROLE_PERMISSIONS.DELETE_ALL_FOR_ROLE, [roleId]);
-    for (const featureId of featureIds) {
-      await conn.execute(QUERIES.ROLE_PERMISSIONS.INSERT, [uuidv4(), roleId, featureId]);
+    if (check[0].is_system_role) {
+      throw new HttpError(MESSAGES.ERROR.SYSTEM_ROLE_PROTECTED, 403);
     }
+
+    const [catalogue] = await conn.execute(QUERIES.FEATURES.SELECT_KEYS);
+    const keyOf = (f) => `${f.feature_short_name}:${f.scope}`;
+    const byId = new Map(catalogue.map((f) => [f.feature_id, f]));
+    const idByKey = new Map(catalogue.map((f) => [keyOf(f), f.feature_id]));
+    const wanted = [...new Set(featureIds)];
+    if (wanted.some((id) => !byId.has(id))) {
+      throw new HttpError(MESSAGES.ERROR.FEATURE_UNKNOWN, 400);
+    }
+
+    const chosen = wanted.map((id) => keyOf(byId.get(id)));
+    const active = new Set(catalogue.filter((f) => f.is_active).map(keyOf));
+    const finalKeys = withRequirements(chosen, active);
+
+    const [current] = await conn.execute(QUERIES.ROLE_PERMISSIONS.SELECT_BY_ROLE, [roleId]);
+    const beforeKeys = current.map((r) => `${r.feature_short_name}:${r.scope}`);
+
+    await conn.execute(QUERIES.ROLE_PERMISSIONS.DELETE_ALL_FOR_ROLE, [roleId]);
+    for (const key of finalKeys) {
+      await conn.execute(QUERIES.ROLE_PERMISSIONS.INSERT, [uuidv4(), roleId, idByKey.get(key)]);
+    }
+
+    return {
+      role: check[0].name,
+      added: finalKeys.filter((k) => !beforeKeys.includes(k)),
+      removed: beforeKeys.filter((k) => !finalKeys.includes(k)).sort(),
+      implied: finalKeys.filter((k) => !chosen.includes(k)),
+    };
+  });
+  liveAccess.invalidate(tenantId);
+  return result;
+};
+
+/**
+ * The people who can grant access in a tenancy — named on the Access Denied
+ * page so a refused member knows whom to ask.
+ */
+const listAdministrators = (tenantId) =>
+  withConnection(async (conn) => {
+    const [rows] = await conn.execute(QUERIES.ADMIN_USERS.SELECT_ADMINISTRATORS, [tenantId]);
+    return rows.map((r) => ({ name: r.full_name || null, phone: r.user_phone }));
   });
 
 // ─── USER ROLES READ ─────────────────────────────────────────────────────────
@@ -782,7 +953,9 @@ module.exports = {
   updateRole,
   deleteRole,
   getRolePermissions,
+  listRolePermissionMatrix,
   setRolePermissions,
+  listAdministrators,
   listFeatures,
   createFeature,
   updateFeature,
