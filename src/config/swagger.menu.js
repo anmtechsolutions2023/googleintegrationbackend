@@ -135,6 +135,26 @@ const paths = {
   },
 };
 
+const clearBody = { required: true, content: { 'application/json': { schema: { type: 'object', required: ['mode'], properties: {
+  mode: { type: 'string', enum: ['hide', 'empty'], description: '`hide`: every dish off every menu, nothing deleted (reversible). `empty`: delete dishes never sold, hide the rest, clear category hours and today\'s portion counts.' },
+  removeUnused: { type: 'boolean', description: '`empty` only: also remove categories, tags, variants and add-on groups nothing uses. The standard provisioned tags are kept.' },
+  confirm: { type: 'string', example: 'CLEAR MENU', description: 'Required on POST /clear.' },
+} } } } };
+const clearResult = { type: 'object', properties: {
+  mode: { type: 'string' }, dishes: { type: 'integer' }, deleted: { type: 'integer' }, hidden: { type: 'integer' },
+  keptBecause: { type: 'object', properties: { sold: { type: 'integer' }, offers: { type: 'integer' }, openOrders: { type: 'integer' } } },
+  listingsRemoved: { type: 'integer' }, hoursCleared: { type: 'integer' }, countsCleared: { type: 'integer' },
+  removed: { type: 'object', properties: { categories: { type: 'integer' }, tags: { type: 'integer' }, variants: { type: 'integer' }, addonGroups: { type: 'integer' } } },
+} };
+
+Object.assign(paths, {
+  '/api/menu/backup': { get: { tags: ['Menu'], summary: 'The whole menu as a .zip of menu.csv, addons.csv and hours.csv', description: `Exactly what Import reads, so it restores the menu. Audit-logged. ${READ}`, security,
+    responses: { 200: { description: 'The archive', content: { 'application/zip': { schema: { type: 'string', format: 'binary' } } } } } } },
+  '/api/menu/clear/preview': { post: { tags: ['Menu'], summary: 'What clearing the menu would do — changes nothing', description: 'Runs the clear inside a transaction and rolls it back, so the counts are exact. Tenant admins only.', security, requestBody: clearBody, responses: { ...ok(clearResult), ...err(403, 'Not an admin') } } },
+  '/api/menu/clear': { post: { tags: ['Menu'], summary: 'Clear the menu', description: 'A dish on a bill line, named by an offer, or on an open order is never deleted — it is hidden, so invoices, returns and reports keep their items. Past orders, bills, reports, branches, channels, portals, tax groups and units are never touched. Tenant admins only; audit-logged at WARN with the counts. Take GET /api/menu/backup first — the app does this before every clear.', security, requestBody: clearBody,
+    responses: { ...ok(clearResult), ...err(400, 'Missing or wrong confirmation phrase'), ...err(403, 'Not an admin') } } },
+});
+
 const tags = [{ name: 'Menu', description: 'Dishes as one object: the one-page editor, the menu file (CSV round-trip that creates missing masters), the prices grid and dish photos.' }];
 
 module.exports = { schemas, paths, tags };

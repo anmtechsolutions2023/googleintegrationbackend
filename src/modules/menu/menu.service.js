@@ -221,6 +221,31 @@ const deletePhoto = (itemId, tenantId) => withConnection(async (conn) => {
   await conn.execute(Q().PHOTO_DELETE, [tenantId, itemId]);
 });
 
+// ── Backup ───────────────────────────────────────────────────────────────────
+
+/**
+ * The whole menu as the three files the import reads — menu.csv, addons.csv,
+ * hours.csv — in one .zip. Taken before a clear, and offered on its own.
+ */
+const backup = async (user) => {
+  // Required here, not at the top: the export catalogue reads the menu
+  // definitions, which read this module's neighbours.
+  const exportService = require('../export/export.service');
+  const zip = require('../../utils/zip');
+  const { businessDate } = require('../../utils/dateRange');
+  const files = [];
+  for (const [key, name] of [['menu', 'menu.csv'], ['menu-addons', 'addons.csv'], ['menu-hours', 'hours.csv']]) {
+    const out = await exportService.run(key, {}, user);
+    files.push({ name, data: out.csv, rows: out.rowCount });
+  }
+  return {
+    fileName: `menu-backup_${businessDate()}.zip`,
+    buffer: zip.build(files.map(({ name, data }) => ({ name, data }))),
+    details: files.map((f) => `${f.name} ${f.rows} rows`).join(' · '),
+  };
+};
+
 module.exports = {
+  backup,
   options, listDishes, getDish, save, priceGrid, savePrices, bulk, putPhoto, getPhoto, deletePhoto,
 };

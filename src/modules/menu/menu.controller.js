@@ -4,9 +4,10 @@ const { successResponse, createdResponse, noContentResponse } = require('../../u
 const { validateBody, validateParams } = require('../../middleware/validation');
 const { captureAudit } = require('../../utils/logger');
 const { AUDIT_CATEGORIES, STATUSES } = require('../../config/constants');
-const { dishSchema, importSchema, pricesSchema, bulkSchema, photoSchema, itemIdParam } = require('./menu.schemas');
+const { dishSchema, importSchema, pricesSchema, bulkSchema, photoSchema, itemIdParam, clearSchema } = require('./menu.schemas');
 const service = require('./menu.service');
 const menuImport = require('./menu.import');
+const { clearMenu } = require('./menu.clear');
 
 const body = (req) => req.validatedBody ?? req.body;
 
@@ -84,6 +85,34 @@ const deletePhoto = asyncHandler(async (req, res) => {
   noContentResponse(res);
 });
 
+const backup = asyncHandler(async (req, res) => {
+  const out = await service.backup(req.user);
+  await captureAudit(req, req.user.tid, req.user.phone, 'Menu backup downloaded', STATUSES.SUCCESS,
+    AUDIT_CATEGORIES.MASTER_DATA, 'INFO', null, `${out.fileName} · ${out.details}`);
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${out.fileName}"`);
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(200).send(out.buffer);
+});
+
+/** What a clear would do — counted by running it and rolling back. */
+const clearPreview = asyncHandler(async (req, res) => {
+  successResponse(res, 'Counted — nothing was changed', await clearMenu(body(req), { dryRun: true }, req.user.tid));
+});
+
+const clearApply = asyncHandler(async (req, res) => {
+  const r = await clearMenu(body(req), { dryRun: false }, req.user.tid);
+  const details = r.mode === 'hide'
+    ? `Took every dish off the menu: ${r.hidden} hidden`
+    : `Emptied the menu: ${r.deleted} deleted, ${r.hidden} hidden; removed ${r.removed.categories} categories, `
+      + `${r.removed.tags} tags, ${r.removed.variants} variants, ${r.removed.addonGroups} add-on groups; `
+      + `${r.hoursCleared} hour windows and ${r.countsCleared} counts cleared`;
+  await captureAudit(req, req.user.tid, req.user.phone, 'Menu cleared', STATUSES.SUCCESS,
+    AUDIT_CATEGORIES.MASTER_DATA, 'WARN', null, details.slice(0, 500));
+  successResponse(res, 'Menu cleared', r);
+});
+
 const id = validateParams(itemIdParam);
 
 module.exports = {
@@ -100,4 +129,7 @@ module.exports = {
   getPhoto: [id, getPhoto],
   putPhoto: [id, validateBody(photoSchema), putPhoto],
   deletePhoto: [id, deletePhoto],
+  backup: [backup],
+  clearPreview: [validateBody(clearSchema), clearPreview],
+  clearApply: [validateBody(clearSchema), clearApply],
 };

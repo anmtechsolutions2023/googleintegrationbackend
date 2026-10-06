@@ -14,6 +14,9 @@ const controller = require('./menu.controller');
 
 const READ = checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CONFIG_READ, SCOPES.POS_CONFIG_WRITE);
 const WRITE = checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CONFIG_WRITE);
+// Clearing the menu deletes what can be deleted. Admins only — a menu
+// manager can import and edit, not wipe.
+const ADMIN = checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN);
 const audit = (label) => auditLog(AUDIT_CATEGORIES.MASTER_DATA, 'INFO', label);
 // The controller writes the detailed row; this one only records a failure.
 const auditFailures = (label) => auditLog(AUDIT_CATEGORIES.MASTER_DATA, 'INFO', label, { deferToCapture: true });
@@ -43,5 +46,13 @@ router.post('/import/apply', authenticateToken, WRITE, auditFailures('Menu file 
 router.get('/prices', authenticateToken, READ, ...controller.prices);
 /** PUT /prices — a batch of price and listing changes, all or nothing. */
 router.put('/prices', authenticateToken, WRITE, auditFailures('Menu price change attempted'), ...controller.savePrices);
+
+/** GET /backup — the menu as menu.csv + addons.csv + hours.csv, zipped. */
+router.get('/backup', authenticateToken, READ, auditFailures('Menu backup attempted'), ...controller.backup);
+
+/** POST /clear/preview — what clearing would do. Changes nothing. */
+router.post('/clear/preview', authenticateToken, ADMIN, ...controller.clearPreview);
+/** POST /clear — clear the menu. Body: { mode: hide|empty, removeUnused, confirm: 'CLEAR MENU' }. */
+router.post('/clear', authenticateToken, ADMIN, auditFailures('Menu clear attempted'), ...controller.clearApply);
 
 module.exports = router;

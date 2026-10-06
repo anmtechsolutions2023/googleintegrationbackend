@@ -107,4 +107,11 @@ const photoSchema = Joi.object({
 
 const itemIdParam = Joi.object({ itemId: entityId.required() });
 
-module.exports = { dishSchema, importSchema, pricesSchema, bulkSchema, photoSchema, itemIdParam };
+// Clearing the menu. The phrase is checked by the service on apply only.
+const clearSchema = Joi.object({
+  mode: Joi.string().valid('hide', 'empty').required(),
+  removeUnused: Joi.boolean().default(false),
+  confirm: Joi.string().trim().max(40).allow('').optional(),
+});
+
+module.exports = { dishSchema, importSchema, pricesSchema, bulkSchema, photoSchema, itemIdParam, clearSchema };
