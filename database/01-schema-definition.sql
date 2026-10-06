@@ -1819,6 +1819,11 @@ CREATE TABLE pos_item_meta_variant (
     Id              VARCHAR(50)   NOT NULL,
     ItemMetaId      VARCHAR(50)   NOT NULL,
     VariantId       VARCHAR(50)   NOT NULL,
+    -- What this variant adds to THIS dish's base price. NULL = the variant's
+    -- own Price from pos_variant, which is what every row written before this
+    -- column existed means. "Large" is +60 on a biryani and +40 on a lassi;
+    -- one global price forced people to invent "Large (Biryani)".
+    Surcharge       DECIMAL(18,4) NULL,
     TenantId        VARCHAR(50)   NOT NULL,
     Active          TINYINT(1)    NOT NULL DEFAULT 1,
     CreatedOn       DATETIME,
@@ -1829,6 +1834,28 @@ CREATE TABLE pos_item_meta_variant (
     UNIQUE (ItemMetaId, VariantId, TenantId),
     FOREIGN KEY (ItemMetaId) REFERENCES pos_item_meta(Id) ON DELETE CASCADE,
     FOREIGN KEY (VariantId)  REFERENCES pos_variant(Id)
+);
+
+-- 4.7a pos_item_photo — one photo per dish (catalogue item), shared by every
+-- branch and channel. Bytes in the database for the same reason as
+-- pos_branch_media: the app runs serverless with no disk, and one square image
+-- per dish is small. Capped by MEDIA.MAX_BYTES and re-measured on the server.
+CREATE TABLE pos_item_photo (
+    Id              VARCHAR(50)   NOT NULL,
+    TenantId        VARCHAR(50)   NOT NULL,
+    ItemDetailId    VARCHAR(50)   NOT NULL,
+    MimeType        VARCHAR(50)   NOT NULL,
+    Width           INT           NULL,
+    Height          INT           NULL,
+    ByteSize        INT           NOT NULL,
+    Bytes           LONGBLOB      NOT NULL,
+    CreatedOn       DATETIME,
+    CreatedBy       VARCHAR(50),
+    UpdatedOn       DATETIME,
+    UpdatedBy       VARCHAR(50),
+    PRIMARY KEY (Id),
+    UNIQUE KEY uk_itemphoto_item (TenantId, ItemDetailId),
+    FOREIGN KEY (ItemDetailId) REFERENCES itemdetail(Id) ON DELETE CASCADE
 );
 
 -- 4.7b pos_item_meta_addon_group — join: which choice blocks apply to a dish.

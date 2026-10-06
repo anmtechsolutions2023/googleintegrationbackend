@@ -15,6 +15,7 @@ jest.mock('../../modules/pricing/pricing.repository', () => ({
   getTaxGroupComponents: jest.fn(),
 }));
 jest.mock('../../modules/positemmeta/positemmeta.repository', () => ({
+  getVariantSurcharges: jest.fn(async () => new Map()),
   getVariantPricesByIds: jest.fn(async () => new Map()),
   getAddonPricesByIds: jest.fn(async () => new Map()),
   getAddonRulesByItemMetaIds: jest.fn(async () => new Map()),
@@ -397,6 +398,29 @@ describe('priceLines — variants are a surcharge, not a taxed line', () => {
     );
     expect(lines[0].netAmount).toBe(100); // 130 − 30
     expect(lines[0].taxAmount).toBe(18);
+  });
+});
+
+describe('priceLines — a dish can price a variant its own way', () => {
+  afterEach(() => itemMetaRepository.getVariantSurcharges.mockResolvedValue(new Map()));
+
+  it('charges the dish\'s own surcharge when the line names its menu row', async () => {
+    itemMetaRepository.getVariantSurcharges.mockResolvedValue(new Map([['meta-biryani|var-large', 60]]));
+    const { lines } = await service.priceLines([
+      { costInfoId: CI_100, quantity: 1, variantIds: [VAR_LARGE], itemMetaId: 'meta-biryani', ref: 'a' },
+    ], TENANT);
+    expect(lines[0].variantAmount).toBe(60);
+    expect(lines[0].unitAmount).toBe(160);
+    expect(itemMetaRepository.getVariantSurcharges).toHaveBeenCalledWith(['meta-biryani'], TENANT);
+  });
+
+  it('keeps the variant\'s default where the dish sets none, or the line names no menu row', async () => {
+    itemMetaRepository.getVariantSurcharges.mockResolvedValue(new Map([['meta-biryani|var-large', 60]]));
+    const { lines } = await service.priceLines([
+      { costInfoId: CI_100, quantity: 1, variantIds: [VAR_LARGE], itemMetaId: 'meta-lassi', ref: 'a' },
+      { costInfoId: CI_100, quantity: 1, variantIds: [VAR_LARGE], ref: 'b' },
+    ], TENANT);
+    expect(lines.map((l) => l.variantAmount)).toEqual([30, 30]);
   });
 });
 

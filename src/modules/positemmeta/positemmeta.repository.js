@@ -61,6 +61,29 @@ const getVariantPricesByIds = async (variantIds, tenantId) => {
 };
 
 /**
+ * Per-dish variant prices for a batch of menu rows.
+ *
+ * A dish can price a variant its own way ("Large" +60 on biryani, +40 on
+ * lassi). Only rows that do are returned; every other variant keeps the master
+ * price from getVariantPricesByIds.
+ *
+ * @param {string[]} itemMetaIds
+ * @param {string} tenantId
+ * @returns {Promise<Map<string, number>>} Keyed `${itemMetaId}|${variantId}`.
+ */
+const getVariantSurcharges = async (itemMetaIds, tenantId) => {
+  const ids = [...new Set((itemMetaIds || []).filter(Boolean))];
+  if (ids.length === 0) return new Map();
+  return withConnection(async (conn) => {
+    const [rows] = await conn.execute(
+      QUERIES.POS_ITEM_META.SELECT_VARIANT_SURCHARGES.replace(':ids', ids.map(() => '?').join(', ')),
+      [tenantId, ...ids],
+    );
+    return new Map(rows.map((r) => [`${r.ItemMetaId}|${r.VariantId}`, Number(r.Surcharge) || 0]));
+  });
+};
+
+/**
  * Resolves selected add-on ids to their master name, price and owning group.
  *
  * Same contract as `getVariantPricesByIds` — the price is the master's, never
@@ -191,6 +214,7 @@ module.exports = {
   getInactiveItemMetaIds,
   getCostInfoIdsByItemMetaIds,
   getVariantPricesByIds,
+  getVariantSurcharges,
   getAddonPricesByIds,
   getAddonRulesByItemMetaIds,
   getCategoryIdsByItemMetaIds,

@@ -115,6 +115,9 @@ class PosOrderService extends BaseCRUDService {
     const { lines, totals } = await pricingService.priceLines(
       priceable.map((l, index) => ({
         costInfoId: l.costInfoId,
+        // The menu row, so a variant this dish prices its own way is charged
+        // at that price.
+        itemMetaId: l.id || l.Id || undefined,
         quantity: quantityOf(l),
         // Selected variants and add-ons are both a per-unit surcharge resolved
         // from their masters. Neither is trusted from the request.

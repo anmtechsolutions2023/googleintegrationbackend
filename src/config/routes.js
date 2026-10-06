@@ -94,6 +94,7 @@ const possettingRoutes = require('../modules/possetting/possetting.routes');
 const taxsettingRoutes = require('../modules/taxsetting/taxsetting.routes');
 const gstexportRoutes = require('../modules/gstexport/gstexport.routes');
 const exportRoutes = require('../modules/export/export.routes');
+const menuRoutes = require('../modules/menu/menu.routes');
 const receiptFormatRoutes = require('../modules/posreceipt/receipt.format.routes');
 const offerRoutes = require('../modules/posoffer/offer.routes');
 const posbranchRoutes = require('../modules/posbranch/posbranch.routes');
@@ -181,6 +182,9 @@ const registerRoutes = (app) => {
   // CSV exports — every list in Money, Guests, Menu and Insights as a file,
   // each gated on its own screen's scope (modules/export/export.catalogue.js).
   app.use('/api/exports', exportRoutes);
+  // The Menu workspace: dishes, the one-page dish editor, the menu file
+  // (import / preview), the prices grid and dish photos.
+  app.use('/api/menu', menuRoutes);
 
   // Cash sessions — a cashier's shift at a till, and the day-close variance.
   app.use('/api/pos/cash-sessions', poscashsessionRoutes);

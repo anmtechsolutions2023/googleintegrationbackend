@@ -16,6 +16,7 @@ jest.mock('../../utils/dbHelper', () => ({
 jest.mock('../../modules/positemmeta/positemmeta.repository', () => ({
   getInactiveItemMetaIds: jest.fn(async () => new Set()),
   getCostInfoIdsByItemMetaIds: jest.fn(async () => new Map()),
+  getVariantSurcharges: jest.fn(async () => new Map()),
   getVariantPricesByIds: jest.fn(async () => new Map()),
   getAddonPricesByIds: jest.fn(async () => new Map()),
   getAddonRulesByItemMetaIds: jest.fn(async () => new Map()),

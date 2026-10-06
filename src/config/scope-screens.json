@@ -73,7 +73,9 @@
       "subject": "POS_CONFIG",
       "group": "Menu",
       "screens": [
-        "Menu Master",
+        "Dishes",
+        "Prices & channels",
+        "Branch grid",
         "Category Hours",
         "Variants",
         "Add-on Groups",

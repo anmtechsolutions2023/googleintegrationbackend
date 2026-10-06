@@ -1335,6 +1335,10 @@ module.exports = {
       SELECT_ALL: `SELECT im.*,
           (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c WHERE c.ItemMetaId = im.Id) AS ChannelIds,
           (SELECT JSON_ARRAYAGG(v.VariantId) FROM pos_item_meta_variant v WHERE v.ItemMetaId = im.Id) AS VariantIds,
+          -- {variantId: surcharge} where THIS dish prices a variant its own way.
+          -- Absent ids use the variant's default price.
+          (SELECT JSON_OBJECTAGG(v.VariantId, v.Surcharge) FROM pos_item_meta_variant v
+            WHERE v.ItemMetaId = im.Id AND v.Surcharge IS NOT NULL) AS VariantPrices,
           (SELECT JSON_ARRAYAGG(ag.AddonGroupId) FROM pos_item_meta_addon_group ag WHERE ag.ItemMetaId = im.Id) AS AddonGroupIds,
           (SELECT JSON_ARRAYAGG(tg.TagId) FROM pos_item_meta_tag tg WHERE tg.ItemMetaId = im.Id) AS TagIds,
           ci.Amount AS CostInfoAmount,
@@ -1376,6 +1380,10 @@ module.exports = {
       SELECT_BY_ID: `SELECT im.*,
           (SELECT JSON_ARRAYAGG(c.ChannelId) FROM pos_item_meta_channel c WHERE c.ItemMetaId = im.Id) AS ChannelIds,
           (SELECT JSON_ARRAYAGG(v.VariantId) FROM pos_item_meta_variant v WHERE v.ItemMetaId = im.Id) AS VariantIds,
+          -- {variantId: surcharge} where THIS dish prices a variant its own way.
+          -- Absent ids use the variant's default price.
+          (SELECT JSON_OBJECTAGG(v.VariantId, v.Surcharge) FROM pos_item_meta_variant v
+            WHERE v.ItemMetaId = im.Id AND v.Surcharge IS NOT NULL) AS VariantPrices,
           (SELECT JSON_ARRAYAGG(ag.AddonGroupId) FROM pos_item_meta_addon_group ag WHERE ag.ItemMetaId = im.Id) AS AddonGroupIds,
           (SELECT JSON_ARRAYAGG(tg.TagId) FROM pos_item_meta_tag tg WHERE tg.ItemMetaId = im.Id) AS TagIds,
           ci.Amount AS CostInfoAmount,
@@ -1453,7 +1461,13 @@ module.exports = {
       DELETE_CHANNEL_LINKS: 'DELETE FROM pos_item_meta_channel WHERE ItemMetaId = ? AND TenantId = ?',
       INSERT_CHANNEL_LINK: 'INSERT INTO pos_item_meta_channel (Id, ItemMetaId, ChannelId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
       DELETE_VARIANT_LINKS: 'DELETE FROM pos_item_meta_variant WHERE ItemMetaId = ? AND TenantId = ?',
-      INSERT_VARIANT_LINK: 'INSERT INTO pos_item_meta_variant (Id, ItemMetaId, VariantId, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, 1, NOW(), ?)',
+      // Surcharge NULL = the variant's own price; a number = this dish's.
+      INSERT_VARIANT_LINK: 'INSERT INTO pos_item_meta_variant (Id, ItemMetaId, VariantId, Surcharge, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, ?, 1, NOW(), ?)',
+      // Per-dish variant prices for a batch of menu rows. Pricing reads these
+      // so a cart is charged what the dish says, not the variant's default.
+      SELECT_VARIANT_SURCHARGES:
+        'SELECT ItemMetaId, VariantId, Surcharge FROM pos_item_meta_variant '
+        + 'WHERE TenantId = ? AND Active = 1 AND Surcharge IS NOT NULL AND ItemMetaId IN (:ids)',
       DELETE_ADDON_GROUP_LINKS: 'DELETE FROM pos_item_meta_addon_group WHERE ItemMetaId = ? AND TenantId = ?',
       INSERT_ADDON_GROUP_LINK: 'INSERT INTO pos_item_meta_addon_group (Id, ItemMetaId, AddonGroupId, SortOrder, TenantId, Active, CreatedOn, CreatedBy) VALUES (?, ?, ?, ?, ?, 1, NOW(), ?)',
       DELETE_TAG_LINKS: 'DELETE FROM pos_item_meta_tag WHERE ItemMetaId = ? AND TenantId = ?',
@@ -2544,7 +2558,7 @@ module.exports = {
          WHERE im.TenantId = ? AND im.BranchDetailId = ? AND im.Active = 1
          ORDER BY cat.Name, idt.Name`,
       VARIANTS_FOR_ITEMS: `
-        SELECT l.ItemMetaId, v.Id, v.Name, v.Price
+        SELECT l.ItemMetaId, v.Id, v.Name, COALESCE(l.Surcharge, v.Price) AS Price
           FROM pos_item_meta_variant l
           JOIN pos_variant v ON v.Id = l.VariantId AND v.TenantId = l.TenantId AND v.Active = 1
          WHERE l.TenantId = ? AND l.Active = 1 AND l.ItemMetaId IN (:ids)
@@ -3014,6 +3028,154 @@ module.exports = {
         'DELETE FROM user_roles WHERE user_phone = ? AND tenant_id = ?',
       INSERT:
         'INSERT INTO user_roles (id, user_phone, tenant_id, role_id, assigned_by) VALUES (?, ?, ?, ?, ?)',
+    },
+
+    // The menu editor and the menu file (modules/menu).
+    //
+    // A DISH is the catalogue item (itemdetail) plus its menu entries — one
+    // pos_item_meta per branch it is sold at — and everything hanging off
+    // those. The loaders read that whole shape for a set of dishes in a fixed
+    // number of queries, so the editor, the export and the import's preview
+    // all see a dish the same way. `:items` is replaced with an IN list of
+    // item ids, or with nothing for the whole menu.
+    MENU: {
+      DISH_ITEMS: `
+        SELECT i.Id, i.Name, i.Code, i.Description, i.SKU, i.Barcode, i.HSNCode, i.SACCode,
+               i.SupplyType, i.Active, i.CategoryId, i.UOMId, i.CostInfoId,
+               c.Name AS CategoryName, pc.Name AS ParentCategoryName,
+               u.UnitName, ci.Amount, ci.IsTaxIncluded, ci.TaxGroupId, tg.Name AS TaxGroupName,
+               (SELECT COUNT(*) FROM pos_item_photo ph
+                 WHERE ph.ItemDetailId = i.Id AND ph.TenantId = i.TenantId) AS HasPhoto
+          FROM itemdetail i
+          LEFT JOIN categorydetail c  ON c.Id = i.CategoryId
+          LEFT JOIN categorydetail pc ON pc.Id = c.ParentId
+          LEFT JOIN UOM u             ON u.Id = i.UOMId
+          LEFT JOIN costinfo ci       ON ci.Id = i.CostInfoId
+          LEFT JOIN taxgroup tg       ON tg.Id = ci.TaxGroupId
+         WHERE i.TenantId = ? :items
+         ORDER BY c.Name ASC, i.Name ASC`,
+      DISH_METAS: `
+        SELECT m.Id, m.ItemDetailId, m.BranchDetailId, m.Active, m.CostInfoId,
+               m.FoodTypeId, ft.Name AS FoodTypeName, m.MeatTypeId, mt.Name AS MeatTypeName,
+               m.ServesCount, m.PortionSize, m.PrepTimeMinutes, m.StockTracked, m.MaxPerOrder,
+               mc.Amount AS MetaAmount, m.CreatedOn
+          FROM pos_item_meta m
+          LEFT JOIN pos_food_type ft ON ft.Id = m.FoodTypeId
+          LEFT JOIN pos_meat_type mt ON mt.Id = m.MeatTypeId
+          LEFT JOIN costinfo mc      ON mc.Id = m.CostInfoId
+         WHERE m.TenantId = ? :items
+         ORDER BY m.CreatedOn ASC`,
+      DISH_CHANNELS: `
+        SELECT l.ItemMetaId, l.ChannelId
+          FROM pos_item_meta_channel l
+          JOIN pos_item_meta m ON m.Id = l.ItemMetaId
+         WHERE m.TenantId = ? AND l.Active = 1 :items`,
+      DISH_VARIANTS: `
+        SELECT l.ItemMetaId, v.Id, v.Name, v.Price AS DefaultPrice, l.Surcharge, v.SortOrder
+          FROM pos_item_meta_variant l
+          JOIN pos_item_meta m ON m.Id = l.ItemMetaId
+          JOIN pos_variant v   ON v.Id = l.VariantId
+         WHERE m.TenantId = ? AND l.Active = 1 :items
+         ORDER BY v.SortOrder ASC, v.Name ASC`,
+      DISH_ADDON_GROUPS: `
+        SELECT l.ItemMetaId, g.Id, g.Name, l.SortOrder
+          FROM pos_item_meta_addon_group l
+          JOIN pos_item_meta m   ON m.Id = l.ItemMetaId
+          JOIN pos_addon_group g ON g.Id = l.AddonGroupId
+         WHERE m.TenantId = ? AND l.Active = 1 :items
+         ORDER BY l.SortOrder ASC`,
+      DISH_TAGS: `
+        SELECT l.ItemMetaId, t.Id, t.Name
+          FROM pos_item_meta_tag l
+          JOIN pos_item_meta m ON m.Id = l.ItemMetaId
+          JOIN pos_menu_tag t  ON t.Id = l.TagId
+         WHERE m.TenantId = ? AND l.Active = 1 :items
+         ORDER BY t.Name ASC`,
+      DISH_NUTRITION: `
+        SELECT n.*
+          FROM pos_item_nutrition n
+          JOIN pos_item_meta m ON m.Id = n.ItemMetaId
+         WHERE m.TenantId = ? :items`,
+      DISH_LISTINGS: `
+        SELECT l.Id, l.ItemMetaId, l.PortalId, l.Active, l.ListedName,
+               l.PriceOverrideCostInfoId, oc.Amount AS OverrideAmount
+          FROM pos_portal_listing l
+          JOIN pos_item_meta m ON m.Id = l.ItemMetaId
+          LEFT JOIN costinfo oc ON oc.Id = l.PriceOverrideCostInfoId
+         WHERE m.TenantId = ? :items`,
+      TAX_COMPONENTS: `
+        SELECT tgm.TaxGroupId, tt.Name, tt.Value
+          FROM taxgrouptaxtypemapper tgm
+          JOIN TaxTypes tt ON tt.Id = tgm.TaxTypeId AND tt.TenantId = tgm.TenantId AND tt.Active = 1
+         WHERE tgm.TenantId = ? AND tgm.Active = 1
+         ORDER BY tt.Name ASC`,
+
+      // ── What a dish can be sold through ─────────────────────────────────
+      // Looked up, never created by the editor or a file: a typo in a branch
+      // name must be an error, not a new outlet.
+      BRANCHES: 'SELECT Id, BranchName AS Name FROM branchdetail WHERE TenantId = ? AND Active = 1 ORDER BY BranchName',
+      CHANNELS: 'SELECT Id, Name, Code FROM pos_channel WHERE TenantId = ? AND Active = 1 ORDER BY SortOrder, Name',
+      PORTALS: 'SELECT Id, Name, Code, ChannelId FROM pos_portal WHERE TenantId = ? AND Active = 1 ORDER BY SortOrder, Name',
+
+      // ── Masters the editor offers, and creates on demand ───────────────
+      CATEGORIES: `SELECT c.Id, c.Name, p.Name AS ParentName FROM categorydetail c
+                     LEFT JOIN categorydetail p ON p.Id = c.ParentId
+                    WHERE c.TenantId = ? AND c.Active = 1 ORDER BY c.Name`,
+      CATEGORY_BY_NAME_PARENT:
+        'SELECT Id FROM categorydetail WHERE TenantId = ? AND Name = ? AND ((? IS NULL AND ParentId IS NULL) OR ParentId = ?) LIMIT 1',
+      UNITS: 'SELECT Id, UnitName AS Name FROM UOM WHERE TenantId = ? AND Active = 1 ORDER BY UnitName',
+      TAX_GROUPS: 'SELECT Id, Name FROM taxgroup WHERE TenantId = ? AND Active = 1 ORDER BY Name',
+      FOOD_TYPES: 'SELECT Id, Name, Code, IsVeg FROM pos_food_type WHERE TenantId = ? AND Active = 1 ORDER BY SortOrder, Name',
+      MEAT_TYPES: 'SELECT Id, Name, Code FROM pos_meat_type WHERE TenantId = ? AND Active = 1 ORDER BY SortOrder, Name',
+      TAGS: 'SELECT Id, Name, Code, TagType FROM pos_menu_tag WHERE TenantId = ? AND Active = 1 ORDER BY Name',
+      VARIANTS: 'SELECT Id, Name, Code, Price FROM pos_variant WHERE TenantId = ? AND Active = 1 ORDER BY SortOrder, Name',
+      ADDON_GROUPS: `SELECT g.Id, g.Name, g.Code, g.MinSelection, g.MaxSelection,
+                            a.Id AS AddonId, a.Name AS AddonName, a.Code AS AddonCode, a.Price AS AddonPrice,
+                            ft.Name AS AddonFoodType, a.SortOrder AS AddonSort
+                       FROM pos_addon_group g
+                       LEFT JOIN pos_addon a ON a.AddonGroupId = g.Id AND a.TenantId = g.TenantId AND a.Active = 1
+                       LEFT JOIN pos_food_type ft ON ft.Id = a.FoodTypeId
+                      WHERE g.TenantId = ? AND g.Active = 1
+                      ORDER BY g.SortOrder, g.Name, a.SortOrder, a.Name`,
+      // Code uniqueness for anything this module invents a code for.
+      CODE_TAKEN: {
+        pos_food_type: 'SELECT 1 FROM pos_food_type WHERE TenantId = ? AND Code = ? LIMIT 1',
+        pos_meat_type: 'SELECT 1 FROM pos_meat_type WHERE TenantId = ? AND Code = ? LIMIT 1',
+        pos_menu_tag: 'SELECT 1 FROM pos_menu_tag WHERE TenantId = ? AND Code = ? LIMIT 1',
+        pos_variant: 'SELECT 1 FROM pos_variant WHERE TenantId = ? AND Code = ? LIMIT 1',
+        pos_addon_group: 'SELECT 1 FROM pos_addon_group WHERE TenantId = ? AND Code = ? LIMIT 1',
+        pos_addon: 'SELECT 1 FROM pos_addon WHERE TenantId = ? AND Code = ? LIMIT 1',
+        itemdetail: 'SELECT 1 FROM itemdetail WHERE TenantId = ? AND Code = ? LIMIT 1',
+      },
+      ITEM_BY_CODE: 'SELECT Id FROM itemdetail WHERE TenantId = ? AND Code = ? LIMIT 1',
+      ITEM_BY_NAME: 'SELECT Id FROM itemdetail WHERE TenantId = ? AND Name = ? LIMIT 1',
+      ADDON_IN_GROUP: 'SELECT Id FROM pos_addon WHERE TenantId = ? AND AddonGroupId = ? AND Name = ? LIMIT 1',
+      UPDATE_ADDON: `UPDATE pos_addon SET Price = ?, FoodTypeId = ?, SortOrder = ?, Active = 1,
+                            UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?`,
+      UPDATE_ADDON_GROUP_RULE: `UPDATE pos_addon_group SET MinSelection = ?, MaxSelection = ?,
+                                       UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?`,
+
+      // ── Writing a dish ─────────────────────────────────────────────────
+      SET_META_ACTIVE:
+        'UPDATE pos_item_meta SET Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      SET_ITEM_ACTIVE:
+        'UPDATE itemdetail SET Active = ?, UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
+      // A listing is "listed" while Active. Available stays the counter's
+      // out-of-stock switch and is not touched by a menu edit.
+      UPDATE_LISTING: `UPDATE pos_portal_listing
+                          SET Active = ?, ListedName = ?, PriceOverrideCostInfoId = ?,
+                              SyncStatus = 'pending', UpdatedOn = NOW(), UpdatedBy = ?
+                        WHERE Id = ? AND TenantId = ?`,
+
+      // ── Photos ─────────────────────────────────────────────────────────
+      PHOTO_UPSERT: `INSERT INTO pos_item_photo
+          (Id, TenantId, ItemDetailId, MimeType, Width, Height, ByteSize, Bytes, CreatedOn, CreatedBy, UpdatedOn, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW(), ?)
+        ON DUPLICATE KEY UPDATE MimeType = VALUES(MimeType), Width = VALUES(Width), Height = VALUES(Height),
+          ByteSize = VALUES(ByteSize), Bytes = VALUES(Bytes), UpdatedOn = NOW(), UpdatedBy = VALUES(UpdatedBy)`,
+      PHOTO_GET:
+        'SELECT MimeType, Width, Height, ByteSize, Bytes, UpdatedOn FROM pos_item_photo WHERE TenantId = ? AND ItemDetailId = ? LIMIT 1',
+      PHOTO_DELETE: 'DELETE FROM pos_item_photo WHERE TenantId = ? AND ItemDetailId = ?',
     },
 
     // CSV exports (modules/export). One query per file, each ROW-LEVEL: the
@@ -3585,6 +3747,8 @@ module.exports = {
         'DELETE FROM pos_item_meta_tag WHERE TenantId = ?',
         'DELETE FROM pos_item_meta_variant WHERE TenantId = ?',
         'DELETE FROM pos_item_nutrition WHERE TenantId = ?',
+        // Dish photos hang off itemdetail, which is swept later.
+        'DELETE FROM pos_item_photo WHERE TenantId = ?',
         'DELETE FROM pos_kot WHERE TenantId = ?',
         'DELETE FROM pos_loyalty_ledger WHERE TenantId = ?',
         'DELETE FROM pos_offer_redemption WHERE TenantId = ?',

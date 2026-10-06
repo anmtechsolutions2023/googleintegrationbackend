@@ -175,5 +175,163 @@ const dailyStock = {
   ],
 };
 
-module.exports = [menuItems, menuBranch, menuOptions, categoryHours, dailyStock];
+// ── The menu file ────────────────────────────────────────────────────────────
+// What Menu › Import reads, written by the same rules (modules/menu). Export
+// it, change it in a spreadsheet, import it back. One price column per branch
+// and three columns per portal, so its header depends on the tenancy.
+
+const { loadDishes } = require('../../menu/menu.dish');
+
+const branchesCell = (d, ctx) => (d.branches.length === ctx.menuRefs.branches.length && d.branches.length > 0
+  ? 'All'
+  : d.branches.map((b) => ctx.menuRefs.branchName.get(b.branchId)).filter(Boolean).join('; '));
+
+const channelsCell = (d, ctx) => {
+  const ids = [...new Set(d.branches.flatMap((b) => b.channelIds))];
+  if (ids.length && ids.length === ctx.menuRefs.channels.length) return 'All';
+  return ids.map((id) => ctx.menuRefs.channelName.get(id)).filter(Boolean).join('; ');
+};
+
+const portalSlug = (name) => String(name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+const nut = (field) => (d) => (d.nutrition && d.nutrition[field] !== null && d.nutrition[field] !== undefined ? d.nutrition[field] : '');
+const blank = (v) => (v === null || v === undefined ? '' : v);
+
+const MENU_BASE = [
+  ['code', (d) => d.code || ''],
+  ['name', (d) => d.name],
+  ['category', (d) => d.category || ''],
+  ['description', (d) => d.description || ''],
+  ['diet', (d) => d.diet || ''],
+  ['meat_type', (d) => d.meatType || ''],
+  ['unit', (d) => d.unit || ''],
+  ['price', (d) => f.qty(d.price)],
+  ['tax_group', (d) => d.taxGroup || ''],
+  ['tax_components', (d) => (isExempt(d.taxGroup) ? '' : componentsText(d.taxComponents.map((c) => ({ Name: c.name, Value: c.value }))))],
+  ['tax_included', (d) => String(!!d.taxIncluded)],
+  ['hsn', (d) => d.hsn || ''],
+  ['sac', (d) => d.sac || ''],
+  ['branches', (d, ctx) => branchesCell(d, ctx)],
+];
+const MENU_TAIL = [
+  ['channels', (d, ctx) => channelsCell(d, ctx)],
+  ['variants', (d) => d.variants.map((v) => `${v.name}=${v.surcharge ? `+${f.qty(v.surcharge)}` : '0'}`).join('; ')],
+  ['addon_groups', (d) => d.addonGroups.join('; ')],
+  ['tags', (d) => d.tags.join('; ')],
+  ['serves', (d) => blank(d.serves)],
+  ['portion', (d) => d.portion || ''],
+  ['prep_min', (d) => blank(d.prepMin)],
+  ['max_per_order', (d) => blank(d.maxPerOrder)],
+  ['stock_tracked', (d) => (d.stockTracked ? 'Yes' : 'No')],
+  ['sku', (d) => d.sku || ''],
+  ['barcode', (d) => d.barcode || ''],
+  ['serving_g', nut('ServingSizeG')],
+  ['kcal', nut('Calories')],
+  ['protein_g', nut('ProteinG')],
+  ['carbs_g', nut('CarbohydrateG')],
+  ['sugar_g', nut('SugarG')],
+  ['fat_g', nut('FatG')],
+  ['sat_fat_g', nut('SaturatedFatG')],
+  ['fibre_g', nut('FibreG')],
+  ['sodium_mg', nut('SodiumMg')],
+  ['allergens', nut('Allergens')],
+];
+
+const menuFile = {
+  key: 'menu',
+  workspace: 'Menu',
+  label: 'Menu file (re-importable)',
+  where: 'Menu › Dishes',
+  grain: 'one dish',
+  fileStem: 'menu',
+  scopes: MENU,
+  dated: false,
+  branchless: true,
+  load: async (conn, q, ctx) => {
+    const [[branches], [channels], [portals], dishes] = await Promise.all([
+      conn.execute(QUERIES.MENU.BRANCHES, [ctx.tenantId]),
+      conn.execute(QUERIES.MENU.CHANNELS, [ctx.tenantId]),
+      conn.execute(QUERIES.MENU.PORTALS, [ctx.tenantId]),
+      loadDishes(conn, ctx.tenantId),
+    ]);
+    ctx.menuRefs = {
+      branches, channels, portals,
+      branchName: new Map(branches.map((b) => [b.Id, b.Name])),
+      channelName: new Map(channels.map((c) => [c.Id, c.Name])),
+    };
+    return dishes;
+  },
+  columns: [...MENU_BASE, ...MENU_TAIL, ['status', (d) => d.status]],
+  columnsFor: (ctx) => {
+    const { branches, portals } = ctx.menuRefs;
+    const branchCols = branches.map((b) => [`price@${b.Name}`, (d) => {
+      const e = d.branches.find((x) => x.branchId === b.Id);
+      return e && e.price !== null ? f.qty(e.price) : '';
+    }]);
+    const portalCols = portals.flatMap((p) => {
+      const slug = portalSlug(p.Name);
+      const listing = (d) => d.portals.find((x) => x.portalId === p.Id);
+      return [
+        [`${slug}_listed`, (d) => (listing(d)?.listed ? 'Yes' : 'No')],
+        [`${slug}_price`, (d) => (listing(d)?.price !== null && listing(d)?.price !== undefined ? f.qty(listing(d).price) : '')],
+        [`${slug}_name`, (d) => listing(d)?.name || ''],
+      ];
+    });
+    return [...MENU_BASE, ...branchCols, ...MENU_TAIL, ...portalCols, ['status', (d) => d.status]];
+  },
+};
+
+const menuAddons = {
+  key: 'menu-addons',
+  workspace: 'Menu',
+  label: 'Add-ons file (re-importable)',
+  where: 'Menu › Options',
+  grain: 'one add-on',
+  fileStem: 'addons',
+  scopes: MENU,
+  dated: false,
+  branchless: true,
+  load: async (conn, q, ctx) => {
+    const [rows] = await conn.execute(QUERIES.MENU.ADDON_GROUPS, [ctx.tenantId]);
+    // A group with no add-ons still gets a row, so its pick rule travels.
+    return rows;
+  },
+  columns: [
+    ['group', (r) => r.Name],
+    ['min', (r) => Number(r.MinSelection) || 0],
+    ['max', (r) => Number(r.MaxSelection) || 0],
+    ['addon', (r) => r.AddonName || ''],
+    ['code', (r) => r.AddonCode || ''],
+    ['price', (r) => (r.AddonId ? f.qty(r.AddonPrice) : '')],
+    ['diet', (r) => r.AddonFoodType || ''],
+    ['sort', (r) => (r.AddonId ? Number(r.AddonSort) || 0 : '')],
+  ],
+};
+
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const menuHours = {
+  key: 'menu-hours',
+  workspace: 'Menu',
+  label: 'Hours file (re-importable)',
+  where: 'Menu › Categories & hours',
+  grain: 'one trading window on one day',
+  fileStem: 'hours',
+  scopes: MENU,
+  dated: false,
+  branchless: true,
+  load: async (conn, q, ctx) => {
+    const [rows] = await conn.execute(Q().CATEGORY_HOURS, [ctx.tenantId]);
+    return rows;
+  },
+  columns: [
+    ['category', (r) => r.CategoryName],
+    ['days', (r) => DAY_SHORT[Number(r.DayOfWeek)] || ''],
+    ['from', (r) => f.time(r.StartTime)],
+    // A window stored as ending at the last second of the day reads as 24:00.
+    ['to', (r) => (String(r.EndTime).startsWith('23:59') ? '23:59' : f.time(r.EndTime))],
+  ],
+};
+
+module.exports = [menuFile, menuAddons, menuHours, menuItems, menuBranch, menuOptions, categoryHours, dailyStock];
 module.exports.IMPORT_COLUMNS = IMPORT_COLUMNS;
+module.exports.portalSlug = portalSlug;

@@ -96,9 +96,15 @@ const chosenGroups = (def, q) => {
   return new Set(asked.filter((k) => known.some((g) => g.key === k)));
 };
 
-const columnsFor = (def, q) => {
+/**
+ * The columns written. A definition whose columns depend on the tenancy (one
+ * per branch, three per portal) supplies columnsFor(ctx), read after its load
+ * has filled ctx in; `columns` is then the fixed part the catalogue lists.
+ */
+const columnsFor = (def, q, ctx = null) => {
   const groups = chosenGroups(def, q);
-  return def.columns.filter(([, , group]) => !group || groups.has(group));
+  const all = def.columnsFor && ctx ? def.columnsFor(ctx) : def.columns;
+  return all.filter(([, , group]) => !group || groups.has(group));
 };
 
 /** export_branch_from_to.csv, export_branch_today.csv, or export_today.csv. */
@@ -122,7 +128,7 @@ const build = async (def, q, user) => {
   if (rows.length > MAX_ROWS) {
     throw new HttpError(MESSAGES.ERROR.EXPORT_TOO_MANY_ROWS, STATUS.BAD_REQUEST);
   }
-  const columns = columnsFor(def, q);
+  const columns = columnsFor(def, q, ctx);
   return { ctx, rows, columns };
 };
 

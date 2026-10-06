@@ -196,7 +196,7 @@ describe('a capability carries the screens it opens', () => {
   it('so the reader never has to guess what a name covers', async () => {
     const r = await resolveForScopes(['POS_CONFIG:READ']);
     const [cap] = r.groups.flatMap((g) => g.capabilities);
-    expect(cap.screens).toContain('Menu Master');
+    expect(cap.screens).toContain('Dishes');
     expect(cap.screens).toContain('Campaigns');
   });
 

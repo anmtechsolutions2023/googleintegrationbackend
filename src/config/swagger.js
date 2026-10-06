@@ -5897,4 +5897,11 @@ Object.assign(swaggerSpec.components.schemas, exportDocs.schemas);
 Object.assign(swaggerSpec.paths, exportDocs.paths);
 if (Array.isArray(swaggerSpec.tags)) swaggerSpec.tags.push(...exportDocs.tags);
 
+// The Menu workspace (/api/menu): dish editor, menu file, prices grid, photos.
+const menuDocs = require('./swagger.menu');
+
+Object.assign(swaggerSpec.components.schemas, menuDocs.schemas);
+Object.assign(swaggerSpec.paths, menuDocs.paths);
+if (Array.isArray(swaggerSpec.tags)) swaggerSpec.tags.push(...menuDocs.tags);
+
 module.exports = swaggerSpec;

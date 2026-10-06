@@ -119,10 +119,16 @@ const priceLines = async (lines, tenantId, options = {}) => {
 
   // Every lookup is batched, so a whole cart costs the same four reads
   // regardless of how many lines, variants or add-ons it has.
-  const [chain, variants, addons, gstCharging] = await Promise.all([
+  const [chain, variants, surcharges, addons, gstCharging] = await Promise.all([
     repository.getChainForCostInfos(input.map((l) => l.costInfoId), tenantId),
     itemMetaRepository.getVariantPricesByIds(
       input.flatMap((l) => l.variantIds || []),
+      tenantId,
+    ),
+    // A dish's own price for a variant, where it sets one. Only lines that
+    // name their menu row can have one; the rest price as they always did.
+    itemMetaRepository.getVariantSurcharges(
+      input.filter((l) => l.itemMetaId && (l.variantIds || []).length).map((l) => l.itemMetaId),
       tenantId,
     ),
     itemMetaRepository.getAddonPricesByIds(
@@ -138,7 +144,12 @@ const priceLines = async (lines, tenantId, options = {}) => {
    */
   const resolveVariants = (line) =>
     (line.variantIds || [])
-      .map((id) => variants.get(id))
+      .map((id) => {
+        const master = variants.get(id);
+        if (!master) return null;
+        const own = line.itemMetaId ? surcharges.get(`${line.itemMetaId}|${id}`) : undefined;
+        return own === undefined ? master : { ...master, price: own };
+      })
       .filter(Boolean);
 
   /**

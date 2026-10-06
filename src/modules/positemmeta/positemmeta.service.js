@@ -79,6 +79,19 @@ const toIdArray = (v) => {
   return [];
 };
 
+/** {variantId: number} from JSON_OBJECTAGG (object, string or null). */
+const toPriceMap = (v) => {
+  if (v == null) return {};
+  let raw = v;
+  if (typeof v === 'string') {
+    try { raw = JSON.parse(v); } catch { return {}; }
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw)
+    .filter(([, price]) => price !== null && price !== undefined)
+    .map(([id, price]) => [id, Number(price)]));
+};
+
 class PosItemMetaService extends BaseCRUDService {
   constructor() {
     super('POS Item Meta', QUERIES.POS_ITEM_META);
@@ -180,10 +193,15 @@ class PosItemMetaService extends BaseCRUDService {
    * @param {string} itemMetaId
    * @param {string} tenantId
    * @param {string} userPhone
-   * @param {{ChannelIds?:string[], VariantIds?:string[], AddonGroupIds?:string[], TagIds?:string[]}} links
+   * `VariantPrices` ({variantId: surcharge}) gives a variant this dish's own
+   * price. Left out, every surcharge the dish already had is KEPT — the bulk
+   * editor re-syncs VariantIds alone, and that must not quietly reset "Large
+   * +60" to the variant's default.
+   *
+   * @param {{ChannelIds?:string[], VariantIds?:string[], VariantPrices?:Object, AddonGroupIds?:string[], TagIds?:string[]}} links
    */
   async syncLinks(connection, itemMetaId, tenantId, userPhone, links = {}) {
-    const { ChannelIds, VariantIds, AddonGroupIds, TagIds } = links;
+    const { ChannelIds, VariantIds, VariantPrices, AddonGroupIds, TagIds } = links;
 
     if (Array.isArray(ChannelIds)) {
       await connection.execute(this.queries.DELETE_CHANNEL_LINKS, [itemMetaId, tenantId]);
@@ -195,10 +213,19 @@ class PosItemMetaService extends BaseCRUDService {
     }
 
     if (Array.isArray(VariantIds)) {
+      let prices = VariantPrices;
+      if (prices === undefined) {
+        const [kept] = await connection.execute(
+          this.queries.SELECT_VARIANT_SURCHARGES.replace(':ids', '?'), [tenantId, itemMetaId],
+        );
+        prices = Object.fromEntries((Array.isArray(kept) ? kept : []).map((r) => [r.VariantId, r.Surcharge]));
+      }
       await connection.execute(this.queries.DELETE_VARIANT_LINKS, [itemMetaId, tenantId]);
       for (const variantId of VariantIds) {
+        const surcharge = prices && prices[variantId] !== undefined && prices[variantId] !== null
+          ? Number(prices[variantId]) : null;
         await connection.execute(this.queries.INSERT_VARIANT_LINK, [
-          uuidv4(), itemMetaId, variantId, tenantId, userPhone,
+          uuidv4(), itemMetaId, variantId, surcharge, tenantId, userPhone,
         ]);
       }
     }
@@ -303,6 +330,7 @@ class PosItemMetaService extends BaseCRUDService {
       ...row,
       ChannelIds: toIdArray(row.ChannelIds),
       VariantIds: toIdArray(row.VariantIds),
+      VariantPrices: toPriceMap(row.VariantPrices),
       AddonGroupIds: toIdArray(row.AddonGroupIds),
       TagIds: toIdArray(row.TagIds),
       // Kept APART on purpose. The till draws a tag set on the dish differently
@@ -502,5 +530,15 @@ module.exports = {
   update: (id, data, tenantId, userPhone) => service.update(id, data, tenantId, userPhone),
   bulkUpdate: (ids, changes, tenantId, userPhone) => service.bulkUpdate(ids, changes, tenantId, userPhone),
   applyListChange,
+  toPriceMap,
   remove: (id, tenantId) => service.delete(id, tenantId),
+  // The dish editor writes a dish's branch entries inside its own transaction,
+  // through the same link and nutrition code as this module's forms.
+  syncLinksTx: (conn, itemMetaId, tenantId, userPhone, links) =>
+    service.syncLinks(conn, itemMetaId, tenantId, userPhone, links),
+  syncNutritionTx: (conn, itemMetaId, tenantId, userPhone, nutrition) =>
+    service.syncNutrition(conn, itemMetaId, tenantId, userPhone, nutrition),
+  prepareInsertParams: (id, data, tenantId, userPhone) => service.prepareInsertParams(id, data, tenantId, userPhone),
+  prepareUpdateParams: (data, existing, userPhone, id, tenantId) =>
+    service.prepareUpdateParams(data, existing, userPhone, id, tenantId),
 };

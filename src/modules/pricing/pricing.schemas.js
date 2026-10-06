@@ -42,6 +42,9 @@ const discountSchema = Joi.object({
 
 const lineSchema = Joi.object({
   costInfoId: entityId.required(),
+  // The menu row this line is for. Optional; when given, a variant the dish
+  // prices its own way is charged at that price.
+  itemMetaId: entityId.optional(),
   quantity: Joi.number().min(0).default(1),
   // Selected variants. Their prices are read from the pos_variant master and
   // added to the unit price BEFORE tax — never taxed as separate lines.

@@ -14,6 +14,10 @@ const { QUERIES } = require('../../config/constants');
 // are kept optional for backward compatibility.
 const uuidArray = Joi.array().items(entityId);
 
+// {variantId: surcharge} — what a variant adds to THIS dish. 0 is a real
+// price (no extra), so only negatives and absurd values are refused.
+const variantPrices = Joi.object().pattern(Joi.string().max(50), Joi.number().min(0).max(999999).allow(null));
+
 const jsonCol = Joi.alternatives(Joi.object(), Joi.array()).allow(null);
 
 // The measurable nutrition fields, mirroring pos_item_nutrition. Every one is
@@ -68,6 +72,9 @@ const createSchema = Joi.object({
   CostInfoId: optionalEntityId,
   ChannelIds: uuidArray.optional(),
   VariantIds: uuidArray.optional(),
+  // This dish's own price for a variant: {variantId: surcharge}. Absent = the
+  // variant's default price.
+  VariantPrices: variantPrices.optional(),
   AddonGroupIds: uuidArray.optional(),
   TagIds: uuidArray.optional(),
   // What the dish IS, beyond its price. ServesCount counts people; PortionSize
@@ -121,6 +128,9 @@ const updateSchema = Joi.object({
   CostInfoId: optionalEntityId,
   ChannelIds: uuidArray.optional(),
   VariantIds: uuidArray.optional(),
+  // This dish's own price for a variant: {variantId: surcharge}. Absent = the
+  // variant's default price.
+  VariantPrices: variantPrices.optional(),
   AddonGroupIds: uuidArray.optional(),
   TagIds: uuidArray.optional(),
   // What the dish IS, beyond its price. ServesCount counts people; PortionSize
