@@ -182,6 +182,7 @@ module.exports = {
   venueReport: [validateQuery(reportQuerySchema), report(reportService.venueReport, 'Venue report retrieved')],
   channelReport: [validateQuery(reportQuerySchema), report(reportService.channelReport, 'Channel report retrieved')],
   discountReport: [validateQuery(reportQuerySchema), report(reportService.discountReport, 'Discount report retrieved')],
+  writeOffReport: [validateQuery(reportQuerySchema), report(reportService.writeOffReport, 'Write-offs retrieved')],
   // Customer reports. Ten reports covered what was sold; these three cover who
   // bought it, how often, and who has stopped.
   customerReport: [validateQuery(reportQuerySchema), report(reportService.customerReport, 'Customer report retrieved')],

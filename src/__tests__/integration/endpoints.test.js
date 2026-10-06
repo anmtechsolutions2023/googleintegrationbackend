@@ -3159,6 +3159,46 @@ describe('Ledger money-out routes — REFUND:APPROVE', () => {
   });
 });
 
+// Dues is open to cashiers; the write-off register is not. Totals of balances
+// given up on, and who gave them up, are for the books and for admins.
+describe('Ledger write-off register — GET /api/ledger/reports/write-offs', () => {
+  const path = '/api/ledger/reports/write-offs?preset=custom&fromDate=2026-10-01&toDate=2026-10-06';
+
+  it('a cashier with POS billing only is refused → 403', async () => {
+    const res = await request(server).get(path).set('Authorization', tokenWith(['POS_BILLING:READ', 'POS_BILLING:WRITE']));
+    expect(res.status).toBe(403);
+  });
+
+  it('a books reader gets the register, a custom range included → 200', async () => {
+    // Through the real schema: Joi turns fromDate/toDate into Dates, which once
+    // reached the UTC bounds as text and answered 500.
+    const res = await request(server).get(path).set('Authorization', tokenWith(['TRANSACTIONS:READ']));
+    expect(res.status).toBe(200);
+    expect(res.body.data.range).toMatchObject({ from: '2026-10-01', to: '2026-10-06' });
+  });
+
+  it('an admin passes the guard', async () => {
+    const res = await request(server).get(path).set('Authorization', adminToken());
+    expect(res.status).not.toBe(403);
+  });
+
+  // The same conversion broke every report that bounds a DATETIME column.
+  ['overview', 'cashflow', 'tenders', 'pending'].forEach((name) => {
+    it(`/reports/${name} answers a custom range → 200`, async () => {
+      const res = await request(server)
+        .get(`/api/ledger/reports/${name}?preset=custom&fromDate=2026-10-01&toDate=2026-10-06`)
+        .set('Authorization', adminToken());
+      expect(res.status).toBe(200);
+    });
+  });
+
+  it('takes the shared report contract: a custom range without bounds → 400', async () => {
+    const res = await request(server).get('/api/ledger/reports/write-offs?preset=custom')
+      .set('Authorization', adminToken());
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('Admin — GET /api/admin/administrators (any member)', () => {
   it('a member with no roles at all may read it → 200', async () => {
     mockConnection.execute.mockResolvedValueOnce([[{ full_name: 'Owner', user_phone: '+919876543210' }]]);

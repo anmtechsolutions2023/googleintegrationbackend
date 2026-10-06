@@ -3878,11 +3878,20 @@ ${DOC_SOURCE_COLUMNS_SQL}
                  SELECT Id FROM transactiondetaillog
                   WHERE TenantId = ? AND (Id = ? OR ReversesLogId = ?)
                )`,
+      // WrittenOffAt is an INSTANT, stamped in UTC like every DATETIME the pool
+      // writes (config/db.js pins it to 'Z'). NOW() is the server's own zone,
+      // which on a server not set to UTC would file an evening write-off under
+      // the next day once the register reads it as UTC.
       SET_WRITE_OFF: `
         UPDATE transactiondetaillog
            SET WriteOffAmount = ?, WriteOffReason = ?, WriteOffNote = ?,
-               WrittenOffAt = NOW(), WrittenOffBy = ?, UpdatedOn = NOW(), UpdatedBy = ?
+               WrittenOffAt = UTC_TIMESTAMP(), WrittenOffBy = ?, UpdatedOn = NOW(), UpdatedBy = ?
          WHERE Id = ? AND TenantId = ?`,
+      // The names behind the mobiles that wrote balances off. Read separately
+      // and matched in Node rather than joined, so a register row never depends
+      // on the membership still existing. `:phones` is a placeholder list.
+      SELECT_MEMBER_NAMES:
+        'SELECT id, user_phone, full_name FROM user_tenants WHERE tenant_id = ? AND user_phone IN (:phones)',
       // Who owes the balance, added after the fact for a sale saved short with
       // no name. Only the snapshot moves — the CRM customer is untouched.
       SET_DEBTOR: `
@@ -3954,6 +3963,81 @@ ${DOC_SOURCE_COLUMNS_SQL}
     // weekend filter are interpolated, and both come from a fixed whitelist in
     // utils/dateRange.js, never from request text.
     LEDGER_REPORT: {
+      // ── Write-offs ─────────────────────────────────────────────────────────
+      //
+      // Balances given up on, counted by the day they were WRITTEN OFF — not the
+      // bill's date. "How much did we write off this month" is a question about
+      // decisions taken this month; a September bill written off on 2 October
+      // belongs to October, and is reported as "on an earlier bill".
+      //
+      // WrittenOffAt is a UTC instant, so callers bound it with the UTC edges of
+      // the local days (toDateTimeBounds). Each query's WHERE clause is the same
+      // and ends where the caller appends its branch / venue / weekend clause.
+      //
+      // Grouped four ways at once and rolled up in Node: one scan answers the
+      // totals, by reason, by who, by day, and the earlier-bills split.
+      // Params: rangeFrom (earlier-bill cut), tenantId, typeName, from, to.
+      WRITE_OFF_GROUPS: `
+        SELECT l.WriteOffReason AS Reason,
+               l.WrittenOffBy   AS WrittenOffBy,
+               {{BUCKET}}       AS WrittenOffDay,
+               CASE WHEN l.TransactionDate < ? THEN 1 ELSE 0 END AS OnEarlierBill,
+               COUNT(*)                            AS Bills,
+               COALESCE(SUM(l.WriteOffAmount), 0)  AS Amount,
+               COALESCE(MAX(l.WriteOffAmount), 0)  AS Largest
+          FROM transactiondetaillog l
+          JOIN transactiontype t ON t.Id = l.TransactionTypeId
+         WHERE l.TenantId = ? AND t.Name = ? AND l.Active = 1
+           AND l.WriteOffAmount > 0
+           AND l.WrittenOffAt BETWEEN ? AND ?
+         GROUP BY l.WriteOffReason, l.WrittenOffBy, WrittenOffDay, OnEarlierBill`,
+      // Every write-off, newest first. Params as WRITE_OFF_GROUPS.
+      WRITE_OFF_ROWS: `
+        SELECT l.Id, l.TransactionNo, l.TransactionDate, l.GrossAmount,
+               l.CustomerName, l.CustomerMobile, l.BranchId, br.BranchName,
+               l.WriteOffAmount, l.WriteOffReason, l.WriteOffNote,
+               l.WrittenOffAt, l.WrittenOffBy,
+               CASE WHEN l.TransactionDate < ? THEN 1 ELSE 0 END AS OnEarlierBill,
+               ${COLLECTED_SQL} AS Collected,
+               ${RETURNED_SQL} AS Returned,
+${DOC_SOURCE_COLUMNS_SQL}
+          FROM transactiondetaillog l
+          JOIN transactiontype t    ON t.Id = l.TransactionTypeId
+          LEFT JOIN branchdetail br ON br.Id = l.BranchId
+         WHERE l.TenantId = ? AND t.Name = ? AND l.Active = 1
+           AND l.WriteOffAmount > 0
+           AND l.WrittenOffAt BETWEEN ? AND ?`,
+      // Names written off more than once — by mobile where the bill has one,
+      // otherwise by name. A walk-in with neither cannot be grouped and is left
+      // out rather than lumped together. Params: tenantId, typeName, from, to.
+      WRITE_OFF_REPEATS: `
+        SELECT MAX(l.CustomerName)   AS CustomerName,
+               MAX(l.CustomerMobile) AS CustomerMobile,
+               COUNT(*)                           AS Times,
+               COALESCE(SUM(l.WriteOffAmount), 0) AS Amount,
+               MAX(l.WrittenOffAt)                AS LastAt
+          FROM transactiondetaillog l
+          JOIN transactiontype t ON t.Id = l.TransactionTypeId
+         WHERE l.TenantId = ? AND t.Name = ? AND l.Active = 1
+           AND l.WriteOffAmount > 0
+           AND l.WrittenOffAt BETWEEN ? AND ?
+           AND COALESCE(NULLIF(TRIM(l.CustomerMobile), ''), NULLIF(TRIM(l.CustomerName), '')) IS NOT NULL
+         GROUP BY COALESCE(NULLIF(TRIM(l.CustomerMobile), ''), LOWER(TRIM(l.CustomerName)))
+        HAVING COUNT(*) > 1
+         ORDER BY Amount DESC
+         LIMIT 20`,
+      // What was invoiced in the same window, by BILL date as every sales figure
+      // is — the denominator of "share of sales". Same document scope as
+      // SALES_SUMMARY. Params: tenantId, typeName, from, to.
+      WRITE_OFF_INVOICED: `
+        SELECT COALESCE(SUM(l.GrossAmount), 0) AS Invoiced
+          FROM transactiondetaillog l
+          JOIN transactiontypestatus s ON s.Id = l.TransactionTypeStatusId
+          JOIN transactiontype t       ON t.Id = l.TransactionTypeId
+         WHERE l.TenantId = ? AND t.Name = ?
+           AND l.TransactionDate BETWEEN ? AND ?
+           AND s.Name IN ('SETTLED', 'PARTIALLY_PAID')`,
+
       // ── Why every revenue query excludes reversals ─────────────────────────
       //
       // A credit note is a SETTLED document with lines and a customer, so a

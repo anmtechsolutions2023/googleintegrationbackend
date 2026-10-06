@@ -26,34 +26,11 @@ const parseJson = (v) => {
   return null;
 };
 
-/**
- * How a document is identified to a human: by token, by table, or by neither.
- *
- * Derived on the server so the ledger list, the ledger detail, the dashboard and
- * any future screen cannot each invent their own rule for what an order "is".
- *
- * @param {Array} orders - Rounds the document covers.
- * @returns {{kind:'token'|'table'|'none', label:string|null, orderNos:string[]}}
- */
-const sourceOf = (tokenLabel, tableName, orderNos = []) => {
-  // Token wins: a counter customer is holding a number, not a table. A round
-  // can legitimately have both if it was moved, and the number is what was
-  // actually handed over.
-  if (tokenLabel) return { kind: 'token', label: tokenLabel, orderNos };
-  if (tableName) return { kind: 'table', label: tableName, orderNos };
-  return { kind: 'none', label: null, orderNos };
-};
-
-/** From the joined rounds of one document (the detail read). */
-const describeSource = (orders = []) => {
-  const join = (key) => [...new Set(orders.map((o) => o[key]).filter(Boolean))].join(', ') || null;
-  return sourceOf(join('TokenLabel'), join('TableName'), orders.map((o) => o.OrderNo).filter(Boolean));
-};
-
-/** From the pre-concatenated columns the LIST query returns. Same rule. */
-const splitList = (v) => (v ? String(v).split(', ').filter(Boolean) : []);
-const describeSourceRow = (row) =>
-  sourceOf(row.TokenLabels || null, row.TableNames || null, splitList(row.OrderNos));
+// How a document is identified to a human: by token, by table, or by neither.
+// Derived on the server so the ledger list, the ledger detail, the dashboard and
+// any future screen cannot each invent their own rule for what an order "is".
+const { describeSource, describeSourceRow } = require('./ledger.source');
+const { memberNames } = require('./ledger.writeoff.report');
 
 /**
  * Paid, owed and written off on one document.
@@ -228,6 +205,11 @@ const getDocument = (id, tenantId) =>
       (returnedLines || []).map((r) => [r.SourceLineId, Number(r.returnedQty || 0)]),
     );
 
+    // Who gave the balance up, by name — WrittenOffBy holds their mobile.
+    const writtenOffBy = log.WrittenOffBy
+      ? (await memberNames(conn, [log.WrittenOffBy], tenantId)).get(log.WrittenOffBy)
+      : null;
+
     return {
       ...log,
       TaxByComponent: parseJson(log.TaxByComponent) || [],
@@ -265,6 +247,7 @@ const getDocument = (id, tenantId) =>
       // figures behind the progress bar and the Collect button.
       ...balanceOf({ ...log, Collected: collectedRow?.collected }, returnedAmount),
       WriteOffReasonLabel: (LEDGER.WRITE_OFF_REASONS.find(([c]) => c === log.WriteOffReason) || [])[1] || null,
+      WrittenOffByName: writtenOffBy ? writtenOffBy.name : null,
       // Drives whether the UI offers any action at all.
       IsImmutable: LEDGER.IMMUTABLE_STATUSES.includes(log.StatusName),
     };

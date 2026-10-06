@@ -3464,6 +3464,65 @@ const swaggerSpec = {
           } },
           accounts: { type: 'array', items: { type: 'object' } },
           netPosition: { type: 'number', description: 'COLLECTED minus spent — cash in hand, not invoiced.' },
+          writeOffs: {
+            type: 'object',
+            description: 'The write-off summary for the window (see /api/ledger/reports/write-offs), with its split by reason and the three latest.',
+            properties: {
+              WrittenOff: { type: 'number', example: 1305.08 }, Bills: { type: 'integer', example: 5 },
+              OnThisPeriodBills: { type: 'number', example: 1105.08 }, OnEarlierBills: { type: 'number', example: 200 },
+              byReason: { type: 'array', items: { type: 'object' } },
+              latest: { type: 'array', items: { type: 'object' } },
+            },
+          },
+        },
+      },
+      ReportWriteOffs: {
+        type: 'object',
+        description: 'Balances given up on, by the day they were written off. Not a payment and not a discount — never folded into either.',
+        properties: {
+          range: reportRange,
+          summary: { type: 'object', properties: {
+            WrittenOff: { type: 'number', example: 1305.08 },
+            Bills: { type: 'integer', example: 5 },
+            Average: { type: 'number', example: 261.02 },
+            Largest: { type: 'number', example: 1000 },
+            LargestNo: { type: 'string', nullable: true, example: 'INV-0006' },
+            LargestReason: { type: 'string', nullable: true },
+            OnEarlierBills: { type: 'number', example: 200, description: 'Written off in the window on bills dated before it.' },
+            EarlierBills: { type: 'integer', example: 1 },
+            OnThisPeriodBills: { type: 'number', example: 1105.08 },
+            Invoiced: { type: 'number', example: 184250, description: 'Invoiced in the window, by bill date — the denominator of ShareOfInvoiced.' },
+            ShareOfInvoiced: { type: 'number', example: 0.71 },
+          } },
+          byReason: { type: 'array', items: { type: 'object', properties: {
+            Code: { type: 'string', enum: ['CUSTOMER_LEFT', 'DISPUTED', 'STAFF_GUEST', 'OTHER'] },
+            Label: { type: 'string' }, Bills: { type: 'integer' }, Amount: { type: 'number' }, Share: { type: 'number' },
+          } } },
+          byUser: { type: 'array', items: { type: 'object', properties: {
+            Key: { type: 'string', description: 'Membership id, or former-N for someone no longer a member.' },
+            Name: { type: 'string' }, Bills: { type: 'integer' }, Amount: { type: 'number' }, Share: { type: 'number' },
+          } } },
+          byDay: { type: 'array', description: 'Per bucket (day, ISO week or month) of the write-off date. Daily windows up to 92 days include ₹0 days.', items: { type: 'object', properties: {
+            Bucket: { type: 'string' }, Bills: { type: 'integer' }, Amount: { type: 'number' },
+          } } },
+          repeats: { type: 'array', description: 'Customers written off more than once in the window, by mobile or name.', items: { type: 'object', properties: {
+            CustomerName: { type: 'string', nullable: true }, CustomerMobile: { type: 'string', nullable: true },
+            Times: { type: 'integer' }, Amount: { type: 'number' }, LastAt: { type: 'string', format: 'date-time' },
+          } } },
+          documents: { type: 'array', items: { type: 'object', properties: {
+            Id: { type: 'string' }, TransactionNo: { type: 'string', example: 'INV-0003' },
+            TransactionDate: { type: 'string', format: 'date' },
+            GrossAmount: { type: 'number', example: 15 }, Collected: { type: 'number', example: 9.92 },
+            Returned: { type: 'number' }, WrittenOff: { type: 'number', example: 5.08 },
+            Reason: { type: 'string' }, ReasonLabel: { type: 'string', example: 'Customer left without paying' },
+            Note: { type: 'string', nullable: true }, WrittenOffAt: { type: 'string', format: 'date-time' },
+            WrittenOffByKey: { type: 'string' }, WrittenOffByName: { type: 'string' },
+            OnEarlierBill: { type: 'boolean' },
+            CustomerName: { type: 'string', nullable: true }, CustomerMobile: { type: 'string', nullable: true },
+            BranchId: { type: 'string', nullable: true }, BranchName: { type: 'string', nullable: true },
+            Source: { type: 'object', properties: { kind: { type: 'string', enum: ['token', 'table', 'none'] }, label: { type: 'string', nullable: true } } },
+          } } },
+          truncated: { type: 'boolean', description: 'True when the window held more than 1,000 write-offs; totals are complete regardless.' },
         },
       },
       LoyaltyStatement: {
@@ -4293,6 +4352,15 @@ const swaggerSpec = {
     '/api/ledger/reports/channels': reportPath('LedgerReports', 'Revenue by sales channel', 'ReportChannels',
       'Dine-in, counter and delivery. Counter sales were always in every total — a counter bill posts the same ledger document as any other — but until this report nothing could name them.'),
     '/api/ledger/reports/discounts': reportPath('LedgerReports', 'What was given away, and why', 'ReportDiscounts'),
+    '/api/ledger/reports/write-offs': reportPath('LedgerReports',
+      'Balances given up on: how much, why, by whom, and every bill', 'ReportWriteOffs',
+      'Counted by the day each balance was WRITTEN OFF (WrittenOffAt), not the bill\'s date. '
+      + 'What was written off on bills dated before the window is split out as `OnEarlierBills`, so '
+      + '`OnThisPeriodBills` equals Invoiced − Collected − Outstanding for the window\'s own bills.\n\n'
+      + 'Totals follow the window, branch, venue and weekend bounds only; narrowing the list by '
+      + 'reason, person or text is the caller\'s and never changes them. Mobiles are not returned: '
+      + 'who wrote a balance off is a name and an opaque key. Requires TRANSACTIONS:READ/WRITE or '
+      + 'an admin — not POS billing, unlike Dues.'),
     '/api/ledger/reports/return-reasons': reportPath('LedgerReports',
       'Why goods came back', 'ReportReturnReasons',
       'Whether returns are a kitchen problem, a menu problem or a till problem. '

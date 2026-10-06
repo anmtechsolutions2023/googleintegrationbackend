@@ -33,6 +33,7 @@ const { resolveTenderMode } = require('./ledger.service');
 const { dueOf } = require('./ledger.due');
 // Shared with the returns path, which settles a sale whose due a return cleared.
 const { settleSaleTx } = require('./ledger.settle');
+const { describeSourceRow } = require('./ledger.source');
 
 const isCashMode = (mode) => String(mode?.Type || '').trim().toLowerCase() === 'cash';
 
@@ -277,13 +278,6 @@ const AGE_BUCKETS = {
 const bucketOf = (days) =>
   Object.keys(AGE_BUCKETS).find((k) => days >= AGE_BUCKETS[k][0] && days <= AGE_BUCKETS[k][1]) || 'older';
 
-const splitList = (v) => (v ? String(v).split(', ').filter(Boolean) : []);
-const sourceOf = (row) => {
-  const orderNos = splitList(row.OrderNos);
-  if (row.TokenLabels) return { kind: 'token', label: row.TokenLabels, orderNos };
-  if (row.TableNames) return { kind: 'table', label: row.TableNames, orderNos };
-  return { kind: 'none', label: null, orderNos };
-};
 
 /**
  * Every sale still owed money, oldest first, with a summary over ALL of them.
@@ -323,7 +317,7 @@ const listDues = (query, tenantId) =>
         Due: dueOf({ gross: r.GrossAmount, collected, returned, writtenOff: r.WriteOffAmount }),
         AgeDays: ageDays,
         AgeBucket: bucketOf(ageDays),
-        Source: sourceOf(r),
+        Source: describeSourceRow(r),
       };
     }).filter((d) => d.Due > 0);
 

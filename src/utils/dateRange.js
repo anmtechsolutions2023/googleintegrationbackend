@@ -59,6 +59,25 @@ const toISODate = (date) =>
  */
 const businessDate = (when) => toISODate(when ? new Date(when) : new Date());
 
+/**
+ * A custom bound as YYYY-MM-DD, whatever shape it arrived in.
+ *
+ * The report schema validates fromDate/toDate with Joi.date(), which CONVERTS
+ * them: '2026-10-01' reaches here as a Date at UTC midnight, not as the string
+ * the client sent. Passed on as-is, toDateTimeBounds read it as text and threw
+ * "Invalid time value" — every custom range on a report with DATETIME bounds
+ * (tenders, cash flow, pending, the overview, write-offs) answered 500.
+ *
+ * The UTC calendar date is the right one for a Date: a date-only ISO string is
+ * parsed as UTC midnight, so its UTC date is exactly the day that was asked
+ * for, in any server timezone. Reading it in local time would move it a day
+ * back west of Greenwich.
+ */
+const asISODate = (v) => {
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? undefined : v.toISOString().slice(0, 10);
+  return v ? String(v).slice(0, 10) : undefined;
+};
+
 const daysAgo = (n) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -82,8 +101,8 @@ const resolveRange = (query = {}) => {
   if (preset === 'custom') {
     // Custom with nothing supplied is "today" rather than "all history": an
     // unbounded scan is never what a dashboard wants.
-    const to = query.toDate || toISODate(new Date());
-    const from = query.fromDate || to;
+    const to = asISODate(query.toDate) || toISODate(new Date());
+    const from = asISODate(query.fromDate) || to;
     return { from, to, bucket, weekendOnly: false, preset };
   }
 

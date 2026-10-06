@@ -47,6 +47,10 @@ router.get('/reports/venue', authenticateToken, checkScope(...READ), ...controll
 // Revenue by sales channel — dine-in / counter / delivery.
 router.get('/reports/channels', authenticateToken, checkScope(...READ), ...controller.channelReport);
 router.get('/reports/discounts', authenticateToken, checkScope(...READ), ...controller.discountReport);
+// Balances given up on — the register behind Dues › Written off and Finance's
+// Written off tab. Books readers and admins only, unlike Dues itself: a cashier
+// who can collect a balance has no need for write-off totals or who made them.
+router.get('/reports/write-offs', authenticateToken, checkScope(...READ), ...controller.writeOffReport);
 // ── Returns ────────────────────────────────────────────────────────────────
 // "Which dishes come back, and why" — unanswerable before returns were their
 // own documents, because nothing recorded WHICH items were refunded.

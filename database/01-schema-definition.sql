@@ -1098,6 +1098,10 @@ CREATE TABLE transactiondetaillog (
     INDEX idx_tdl_reverses (TenantId, ReversesLogId),
     -- The refund worklist: money owed but not yet returned.
     INDEX idx_tdl_settlement (TenantId, SettlementStatus),
+    -- The write-off register: balances given up on, by the day they were.
+    -- Without it, every Finance overview scans the tenancy's whole ledger to
+    -- find the handful of rows that have a WrittenOffAt at all.
+    INDEX idx_tdl_writeoff (TenantId, WrittenOffAt),
     -- Self-referential: a credit note points at the sale it reverses.
     FOREIGN KEY (ReversesLogId)           REFERENCES transactiondetaillog(Id),
     FOREIGN KEY (ReturnReasonId)          REFERENCES pos_return_reason(Id),

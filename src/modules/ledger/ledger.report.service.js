@@ -34,43 +34,9 @@ const numeric = (row, keys) => {
   return out;
 };
 
-/**
- * Restricts a document-level report to a floor or a table.
- *
- * EXISTS rather than a join: the point is to FILTER documents, and joining
- * through pos_bill_order would fan a multi-round bill out into several rows and
- * silently multiply every SUM in the report. EXISTS answers "did any of this
- * bill's rounds happen there?" without changing the row count at all.
- *
- * Reads the venue snapshot on the round, so the filter means "served on that
- * floor at the time", which is the only reading that stays true after the floor
- * plan is rearranged.
- *
- * @param {Object} query - { floorId, tableId }
- * @param {string} [logAlias] - Alias of transactiondetaillog in the outer query.
- * @returns {{clause:string, params:Array}}
- */
-const venueFilter = (query, logAlias = 'l') => {
-  const conditions = [];
-  const params = [];
-  if (query.floorId) { conditions.push('o.FloorId = ?'); params.push(query.floorId); }
-  if (query.tableId) { conditions.push('o.TableId = ?'); params.push(query.tableId); }
-  if (conditions.length === 0) return { clause: '', params: [] };
-
-  return {
-    clause:
-      ` AND EXISTS (
-          SELECT 1
-            FROM pos_bill b
-            JOIN pos_bill_order bo ON bo.BillId = b.Id AND bo.TenantId = b.TenantId
-            JOIN pos_order o       ON o.Id = bo.OrderId AND o.TenantId = bo.TenantId
-           WHERE b.TransactionDetailLogId = ${logAlias}.Id
-             AND b.TenantId = ${logAlias}.TenantId
-             AND ${conditions.join(' AND ')}
-        )`,
-    params,
-  };
-};
+// The floor / table bound, shared with the write-off report.
+const { venueFilter } = require('./ledger.venue');
+const { writeOffReport } = require('./ledger.writeoff.report');
 
 /**
  * Sales: invoiced vs collected, with a bucketed trend.
@@ -478,10 +444,11 @@ const expenseReport = (query, tenantId) =>
  * because expenses post to the same ledger as sales.
  */
 const overviewReport = async (query, tenantId) => {
-  const [sales, expenses, cash] = await Promise.all([
+  const [sales, expenses, cash, writeOffs] = await Promise.all([
     salesReport(query, tenantId),
     expenseReport(query, tenantId),
     cashFlowReport(query, tenantId),
+    writeOffReport(query, tenantId),
   ]);
 
   return {
@@ -493,6 +460,14 @@ const overviewReport = async (query, tenantId) => {
     accounts: cash.accounts,
     // Collected rather than invoiced: cash in hand is what was actually taken.
     netPosition: num(sales.summary.Collected) - expenses.totalAmount,
+    // Balances given up on IN this window, whatever the bill's date. The
+    // summary splits off the part on earlier bills, so OnThisPeriodBills is
+    // exactly Invoiced − Collected − Outstanding for the window's own bills.
+    writeOffs: {
+      ...writeOffs.summary,
+      byReason: writeOffs.byReason,
+      latest: writeOffs.documents.slice(0, 3),
+    },
   };
 };
 
@@ -852,4 +827,5 @@ module.exports = {
   discountReport,
   returnReasonsReport,
   returnProductReport,
+  writeOffReport,
 };

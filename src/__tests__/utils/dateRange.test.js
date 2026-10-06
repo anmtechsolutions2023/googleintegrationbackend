@@ -51,6 +51,19 @@ describe('resolveRange — presets', () => {
     expect(r.to).toBe('2026-03-31');
   });
 
+  it('takes the Date objects schema validation turns custom bounds into', () => {
+    // Joi.date() converts '2026-10-01' to a Date. Passed on as-is it reached
+    // toDateTimeBounds as text and every custom range on a DATETIME report 500'd.
+    const { reportQuerySchema } = require('../../modules/ledger/ledger.schemas');
+    const { value } = reportQuerySchema.validate({ preset: 'custom', fromDate: '2026-10-01', toDate: '2026-10-06' });
+    expect(value.fromDate).toBeInstanceOf(Date);
+
+    const r = resolveRange(value);
+    expect(r.from).toBe('2026-10-01');
+    expect(r.to).toBe('2026-10-06');
+    expect(() => toDateTimeBounds(r)).not.toThrow();
+  });
+
   it('falls back to today rather than scanning all history', () => {
     // An unbounded default would make one careless request read every row the
     // tenant has ever written.
