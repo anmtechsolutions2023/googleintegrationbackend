@@ -142,8 +142,10 @@ CREATE TABLE features (
     -- APPROVE is a real action, not a synonym for WRITE: the person who raises
     -- an expense must not be the one who signs it off. It was missing from this
     -- enum while the seed inserted it, so MySQL silently stored '' and
-    -- EXPENSE:APPROVE became a permission nobody could ever hold.
-    scope               ENUM('READ', 'WRITE', 'UPDATE', 'APPROVE') NOT NULL,
+    -- EXPENSE:APPROVE became a permission nobody could ever hold. EXPORT is
+    -- the same kind of thing: taking data out in bulk (CUSTOMER:EXPORT) is a
+    -- different trust from reading it on screen.
+    scope               ENUM('READ', 'WRITE', 'UPDATE', 'APPROVE', 'EXPORT') NOT NULL,
     display_name        VARCHAR(100)                    NULL,
     category            VARCHAR(50)                     NULL,
     description         TEXT                            NULL,

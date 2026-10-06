@@ -35,10 +35,10 @@
 --             CATEGORY/BEVERAGE/CUISINE), rejection reasons (6)
 --   PART 14 — QR table ordering (POS_QR:READ/WRITE)
 --   PART 15 — Refunds (REFUND:APPROVE)
+--   PART 16 — Customer data export (CUSTOMER:EXPORT)
 --
--- Verified against an empty database (5 Oct 2026, after PART 15 and the
--- removal of tenant_features): 32 features, 12 roles, 175 role permissions,
--- 7 numbering series.
+-- Verified against an empty database (6 Oct 2026, after PART 16): 33
+-- features, 12 roles, 178 role permissions, 7 numbering series.
 --
 -- (Role and permission counts corrected 6 Sep 2026: the previous "11 roles,
 -- 133 role permissions" predated the OWNER_OPERATOR merge from the old
@@ -1159,6 +1159,35 @@ SELECT UUID(), r.id, f.feature_id
  WHERE r.name IN ('SUPER_ADMIN', 'TENANT_ADMIN', 'OWNER_OPERATOR', 'ACCOUNTS_MANAGER')
    AND f.feature_short_name = 'REFUND'
    AND f.scope = 'APPROVE';
+
+-- =============================================================================
+-- PART 16 — Customer data export (CUSTOMER:EXPORT feature + role grants)
+-- =============================================================================
+-- Downloading the customer list, the loyalty statement and the lapsed list as
+-- files (/api/exports/customers, /loyalty, /lapsed), and un-masking mobile
+-- numbers in any export. POS_CRM:READ is not enough: front-of-house managers
+-- hold it to look one guest up, which is a different trust from walking off
+-- with every guest's number.
+--
+-- Owners and administrators only by default. Any other role can be given it
+-- in People & Access; it brings POS_CRM:READ with it (permissionRules).
+-- Granted by role NAME like PARTs 14 and 15. Idempotent.
+INSERT IGNORE INTO features
+    (feature_id, name, feature_short_name, scope, display_name, category, description, is_active)
+VALUES
+    ('f100000b-iam0-0000-0000-000000000001',
+     'Customer Export', 'CUSTOMER', 'EXPORT',
+     'Customer data — Export', 'Customers',
+     'Download customers, loyalty and lapsed lists as files, and un-mask mobile numbers in any export.',
+     1);
+
+INSERT IGNORE INTO role_permissions (id, role_id, feature_id)
+SELECT UUID(), r.id, f.feature_id
+  FROM roles r
+ CROSS JOIN features f
+ WHERE r.name IN ('SUPER_ADMIN', 'TENANT_ADMIN', 'OWNER_OPERATOR')
+   AND f.feature_short_name = 'CUSTOMER'
+   AND f.scope = 'EXPORT';
 
 -- =============================================================================
 -- VERIFICATION QUERIES — run these manually after seeding to confirm correctness

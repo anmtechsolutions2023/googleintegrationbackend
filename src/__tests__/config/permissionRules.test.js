@@ -22,6 +22,10 @@ describe('requirementsOf', () => {
   it('approving a refund needs the ledger', () => {
     expect(requirementsOf('REFUND:APPROVE')).toEqual(['TRANSACTIONS:READ']);
   });
+
+  it('exporting customer data needs the customer screen', () => {
+    expect(requirementsOf('CUSTOMER:EXPORT')).toEqual(['POS_CRM:READ']);
+  });
 });
 
 describe('withRequirements', () => {
@@ -43,8 +47,8 @@ describe('withRequirements', () => {
 
   it('every extra requirement names a key of the form FEATURE:SCOPE', () => {
     for (const [key, needs] of Object.entries(REQUIRES)) {
-      expect(key).toMatch(/^[A-Z_]+:(READ|WRITE|APPROVE)$/);
-      needs.forEach((n) => expect(n).toMatch(/^[A-Z_]+:(READ|WRITE|APPROVE)$/));
+      expect(key).toMatch(/^[A-Z_]+:(READ|WRITE|APPROVE|EXPORT)$/);
+      needs.forEach((n) => expect(n).toMatch(/^[A-Z_]+:(READ|WRITE|APPROVE|EXPORT)$/));
     }
   });
 });

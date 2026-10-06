@@ -68,6 +68,13 @@ module.exports = {
       'Every line on this sale has already been returned in full.',
     LEDGER_RETURN_NO_PAYMENT:
       'This sale has no recorded payment, so there is nothing to refund against.',
+    // CSV exports (modules/export)
+    EXPORT_NOT_FOUND: 'There is no export by that name.',
+    EXPORT_FORBIDDEN: 'You do not have access to this export.',
+    EXPORT_BRANCH_NOT_FOUND: 'Branch not found.',
+    EXPORT_RANGE_TOO_LONG: 'One export can cover at most 366 days. Choose a shorter period.',
+    EXPORT_TOO_MANY_ROWS:
+      'This export has more than 100,000 rows. Choose a shorter period or one branch.',
     LEDGER_REFUND_EXCEEDS_TENDERS:
       'The refund is larger than what remains on the tenders this sale was paid with. '
       + 'No payment mode may be refunded more than it received.',

@@ -21,6 +21,9 @@ const REQUIRES = {
   // Refunds and return settlements are made from the Ledger and Returns
   // screens, which open on TRANSACTIONS:READ.
   'REFUND:APPROVE': ['TRANSACTIONS:READ'],
+  // Customer exports are downloaded from Guests › Customers, which opens on
+  // POS_CRM:READ.
+  'CUSTOMER:EXPORT': ['POS_CRM:READ'],
 };
 
 /**

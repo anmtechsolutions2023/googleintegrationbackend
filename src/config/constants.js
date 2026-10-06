@@ -2968,6 +2968,319 @@ module.exports = {
         'INSERT INTO user_roles (id, user_phone, tenant_id, role_id, assigned_by) VALUES (?, ?, ?, ?, ?)',
     },
 
+    // CSV exports (modules/export). One query per file, each ROW-LEVEL: the
+    // reports aggregate, an export hands over the rows behind them. Every
+    // query takes (tenantId, branchId, branchId, …) with `? IS NULL OR` for
+    // the branch, so "all branches" needs no second copy of the SQL. Optional
+    // filters are appended by the definition before ORDER BY, which is why
+    // none of these end in one.
+    EXPORT: {
+      // Sales, credit notes and expenses. Paid and Returned are the same
+      // correlated sums the Dues screen uses, so a document's Due here is the
+      // Due there. Params: tenantId, branchId, branchId, from, to.
+      LEDGER_DOCUMENTS: `
+        SELECT l.Id, l.TransactionNo, l.TransactionDate, l.SettledAt,
+               t.Name AS TypeName, s.Name AS StatusName, br.BranchName,
+               l.CustomerName, l.CustomerMobile, l.BuyerGstin, l.BuyerLegalName, l.TaxMode,
+               l.NetAmount, l.TaxAmount, l.DiscountAmount, l.RoundOff, l.GrossAmount,
+               l.TaxByComponent, COALESCE(l.WriteOffAmount, 0) AS WriteOffAmount,
+               ${COLLECTED_SQL} AS Paid,
+               ${RETURNED_SQL} AS Returned,
+               orig.TransactionNo AS ReversesNo
+          FROM transactiondetaillog l
+          JOIN transactiontype t              ON t.Id = l.TransactionTypeId
+          LEFT JOIN transactiontypestatus s   ON s.Id = l.TransactionTypeStatusId
+          LEFT JOIN branchdetail br           ON br.Id = l.BranchId
+          LEFT JOIN transactiondetaillog orig ON orig.Id = l.ReversesLogId AND orig.TenantId = l.TenantId
+         WHERE l.TenantId = ? AND l.Active = 1
+           AND (? IS NULL OR l.BranchId = ?)
+           AND l.TransactionDate BETWEEN ? AND ?`,
+      // One row per line of a sale or credit note. Variants and add-ons are the
+      // snapshots printed on the bill. Params: tenantId, branchId, branchId,
+      // from, to, saleType, returnType.
+      LEDGER_LINES: `
+        SELECT l.TransactionNo, l.TransactionDate, t.Name AS TypeName, br.BranchName,
+               d.LineNo, COALESCE(i.Name, d.Comment) AS ItemName, i.Code AS ItemCode,
+               i.HSNCode, i.SACCode, d.Variants, d.Addons,
+               d.Quantity, d.UnitPrice, d.DiscountAmount, d.NetAmount, d.TaxAmount,
+               d.GrossAmount, d.TaxComponents
+          FROM transactionitemdetail d
+          JOIN transactiondetaillog l ON l.Id = d.TransactionDetailLogId AND l.TenantId = d.TenantId
+          JOIN transactiontype t      ON t.Id = l.TransactionTypeId
+          LEFT JOIN branchdetail br   ON br.Id = l.BranchId
+          LEFT JOIN itemdetail i      ON i.Id = d.ItemId AND i.TenantId = d.TenantId
+         WHERE l.TenantId = ? AND l.Active = 1
+           AND (? IS NULL OR l.BranchId = ?)
+           AND l.TransactionDate BETWEEN ? AND ?
+           AND t.Name IN (?, ?)`,
+      // Money as it moved: one row per tender, signed (refunds and expense
+      // payments are negative). Bounded on the breakup's own UTC Timestamp, the
+      // same frame the Z-report reads. Params: tenantId, branchId, branchId,
+      // fromUtc, toUtc.
+      PAYMENTS: `
+        SELECT b.Timestamp, l.TransactionNo, t.Name AS TypeName, br.BranchName,
+               pm.Type AS Method, a.Name AS AccountName, b.Amount, pmtd.RefNo,
+               b.CreatedBy, l.CustomerName
+          FROM paymentbreakup b
+          JOIN paymentdetail pd       ON pd.Id = b.PaymentDetailId AND pd.TenantId = b.TenantId
+          JOIN transactiondetaillog l ON l.Id = pd.TransactionDetailLogId AND l.TenantId = pd.TenantId
+          JOIN transactiontype t      ON t.Id = l.TransactionTypeId
+          LEFT JOIN paymentmodetransactiondetail pmtd ON pmtd.Id = b.PaymentModeTransactionDetailId
+          LEFT JOIN paymentmode pm    ON pm.Id = pmtd.PaymentModeId
+          LEFT JOIN accounttypebase a ON a.Id = b.AccountTypeBaseId
+          LEFT JOIN branchdetail br   ON br.Id = l.BranchId
+         WHERE b.TenantId = ? AND b.Active = 1
+           AND (? IS NULL OR l.BranchId = ?)
+           AND b.Timestamp BETWEEN ? AND ?`,
+      // One row per returned LINE, so "which dish came back" is a filter in
+      // Excel. Refunded-to is the same subquery the returns register uses.
+      // Params: tenantId, branchId, branchId, from, to, returnType.
+      RETURNS: `
+        SELECT l.TransactionNo, l.TransactionDate, orig.TransactionNo AS SaleNo,
+               br.BranchName, l.CustomerName, l.CustomerMobile, l.CreatedBy,
+               COALESCE(l.SettlementStatus, 'PENDING') AS SettlementStatus,
+               d.LineNo, COALESCE(i.Name, d.Comment) AS ItemName, d.Quantity, d.GrossAmount,
+               COALESCE(rr.Name, 'Unspecified') AS ReasonName, COALESCE(rr.IsFault, 0) AS IsFault,
+               (SELECT GROUP_CONCAT(DISTINCT COALESCE(pm.Type, acc.Name) SEPARATOR ', ')
+                  FROM paymentdetail pd
+                  JOIN paymentbreakup pb ON pb.PaymentDetailId = pd.Id AND pb.TenantId = pd.TenantId
+                  LEFT JOIN paymentmodetransactiondetail pmtd ON pmtd.Id = pb.PaymentModeTransactionDetailId
+                  LEFT JOIN paymentmode pm ON pm.Id = pmtd.PaymentModeId
+                  LEFT JOIN accounttypebase acc ON acc.Id = pb.AccountTypeBaseId
+                 WHERE pd.TransactionDetailLogId = l.Id AND pd.TenantId = l.TenantId
+                   AND pb.Amount < 0) AS RefundedTo
+          FROM transactionitemdetail d
+          JOIN transactiondetaillog l ON l.Id = d.TransactionDetailLogId AND l.TenantId = d.TenantId
+          JOIN transactiontype t      ON t.Id = l.TransactionTypeId
+          LEFT JOIN transactiondetaillog orig ON orig.Id = l.ReversesLogId AND orig.TenantId = l.TenantId
+          LEFT JOIN pos_return_reason rr ON rr.Id = l.ReturnReasonId AND rr.TenantId = l.TenantId
+          LEFT JOIN branchdetail br   ON br.Id = l.BranchId
+          LEFT JOIN itemdetail i      ON i.Id = d.ItemId AND i.TenantId = d.TenantId
+         WHERE l.TenantId = ? AND l.Active = 1
+           AND (? IS NULL OR l.BranchId = ?)
+           AND l.TransactionDate BETWEEN ? AND ?
+           AND t.Name = ?`,
+      // Shifts OPENED in the range. Params: tenantId, branchId, branchId,
+      // fromUtc, toUtc.
+      CASH_SESSIONS: `
+        SELECT cs.Id, br.BranchName, cs.CashierPhone, cs.ShiftLabel, cs.OpenedAt, cs.ClosedAt,
+               cs.OpeningFloat, cs.ExpectedCash, cs.CountedCash, cs.Variance, cs.Status, cs.Notes,
+               cs.OpenedBy, cs.ClosedBy
+          FROM pos_cash_session cs
+          LEFT JOIN branchdetail br ON br.Id = cs.BranchDetailId
+         WHERE cs.TenantId = ? AND cs.Active = 1
+           AND (? IS NULL OR cs.BranchDetailId = ?)
+           AND cs.OpenedAt BETWEEN ? AND ?`,
+      // Every claim, not only the settled ones the Expenses report counts: the
+      // approval trail is the point of this file. Dated by ExpenseDate, falling
+      // back to when it was raised. Params: tenantId, branchId, branchId, from, to.
+      EXPENSES: `
+        SELECT e.ExpenseDate, e.CreatedOn, l.TransactionNo, br.BranchName,
+               ec.Name AS CategoryName, e.Description, pm.Type AS PaidBy, e.Amount,
+               e.Status, e.ApprovedBy, e.ApprovedAt, e.CreatedBy
+          FROM pos_expense e
+          JOIN expense_category ec    ON ec.Id = e.ExpenseCategoryId
+          LEFT JOIN paymentmode pm    ON pm.Id = e.PaymentModeId
+          LEFT JOIN transactiondetaillog l ON l.Id = e.TransactionDetailLogId
+          LEFT JOIN branchdetail br   ON br.Id = e.BranchDetailId
+         WHERE e.TenantId = ? AND e.Active = 1
+           AND (? IS NULL OR e.BranchDetailId = ?)
+           AND DATE(COALESCE(e.ExpenseDate, e.CreatedOn)) BETWEEN ? AND ?`,
+      // The register, undated. Params: tenantId, branchId, branchId.
+      ASSETS: `
+        SELECT a.Name, ac.Name AS CategoryName, br.BranchName, a.SerialNo, a.PurchaseDate,
+               a.PurchaseCost, a.Status, a.Notes, l.TransactionNo,
+               TRIM(CONCAT(COALESCE(cd.FirstName, ''), ' ', COALESCE(cd.LastName, ''))) AS SupplierName
+          FROM asset a
+          JOIN asset_category ac      ON ac.Id = a.AssetCategoryId
+          LEFT JOIN branchdetail br   ON br.Id = a.BranchDetailId
+          LEFT JOIN contactdetail cd  ON cd.Id = a.SupplierContactDetailId
+          LEFT JOIN transactiondetaillog l ON l.Id = a.TransactionDetailLogId
+         WHERE a.TenantId = ? AND a.Active = 1
+           AND (? IS NULL OR a.BranchDetailId = ?)`,
+      // The CRM list. Visits / TotalSpent / LoyaltyPoints are the projection
+      // the till keeps on settle. Params: tenantId, branchId, branchId.
+      CUSTOMERS: `
+        SELECT c.Name, c.Phone, c.Email, c.GSTIN, c.LegalName, br.BranchName,
+               c.CreatedOn, c.LastVisitAt, c.Visits, c.TotalSpent, c.LoyaltyPoints,
+               DATEDIFF(CURDATE(), c.LastVisitAt) AS DaysAway
+          FROM pos_customer c
+          LEFT JOIN branchdetail br ON br.Id = c.BranchDetailId
+         WHERE c.TenantId = ? AND c.Active = 1
+           AND (? IS NULL OR c.BranchDetailId = ?)`,
+      // Points movements in the range, every branch: the running balance is
+      // tenant-wide, so it is computed over all of them and the branch is
+      // filtered afterwards. Source names the invoice — a BILL source is the
+      // pos_bill, a RETURN source is the credit note itself.
+      // Params: tenantId, fromUtc, toUtc.
+      LOYALTY: `
+        SELECT ll.Id, ll.CustomerId, ll.CreatedOn, c.Name, c.Phone, ll.EntryType, ll.Points,
+               ll.SourceType, ll.Reason, ll.BranchDetailId, br.BranchName, ll.CreatedBy,
+               CASE ll.SourceType
+                 WHEN 'RETURN' THEN (SELECT x.TransactionNo FROM transactiondetaillog x
+                                      WHERE x.Id = ll.SourceId AND x.TenantId = ll.TenantId)
+                 WHEN 'BILL'   THEN (SELECT x.TransactionNo FROM pos_bill pb
+                                       JOIN transactiondetaillog x ON x.Id = pb.TransactionDetailLogId
+                                      WHERE pb.Id = ll.SourceId AND pb.TenantId = ll.TenantId)
+               END AS SourceNo
+          FROM pos_loyalty_ledger ll
+          JOIN pos_customer c       ON c.Id = ll.CustomerId
+          LEFT JOIN branchdetail br ON br.Id = ll.BranchDetailId
+         WHERE ll.TenantId = ? AND ll.CreatedOn BETWEEN ? AND ?
+         ORDER BY ll.CreatedOn ASC, ll.Id ASC`,
+      // Each customer's balance before the range opens. :ids is expanded by the
+      // caller to one placeholder per customer. Params: tenantId, fromUtc, ...ids.
+      LOYALTY_OPENING: `
+        SELECT CustomerId, COALESCE(SUM(Points), 0) AS Opening
+          FROM pos_loyalty_ledger
+         WHERE TenantId = ? AND CreatedOn < ? AND CustomerId IN (:ids)
+         GROUP BY CustomerId`,
+      // Ratings with the visit they were about. Params: tenantId, branchId,
+      // branchId, fromUtc, toUtc.
+      FEEDBACK: `
+        SELECT f.CreatedOn, COALESCE(c.Name, f.CustomerName) AS CustomerName, c.Phone,
+               f.Rating, f.Comments, br.BranchName, o.OrderType, o.TableName,
+               ch.Name AS ChannelName,
+               (SELECT x.TransactionNo
+                  FROM pos_bill_order bo
+                  JOIN pos_bill pb ON pb.Id = bo.BillId AND pb.TenantId = bo.TenantId
+                  JOIN transactiondetaillog x ON x.Id = pb.TransactionDetailLogId
+                 WHERE bo.OrderId = f.OrderId AND bo.TenantId = f.TenantId
+                 LIMIT 1) AS BillNo
+          FROM pos_feedback f
+          LEFT JOIN pos_customer c  ON c.Id = f.CustomerId
+          LEFT JOIN pos_order o     ON o.Id = f.OrderId AND o.TenantId = f.TenantId
+          LEFT JOIN pos_channel ch  ON ch.Id = o.ChannelId
+          LEFT JOIN branchdetail br ON br.Id = f.BranchDetailId
+         WHERE f.TenantId = ? AND f.Active = 1
+           AND (? IS NULL OR f.BranchDetailId = ?)
+           AND f.CreatedOn BETWEEN ? AND ?`,
+      CAMPAIGNS: `
+        SELECT Id, Name, Code, Status, StartsOn, EndsOn, DaysOfWeek, StartTime, EndTime,
+               BudgetAmount, SpentAmount
+          FROM pos_campaign
+         WHERE TenantId = ? AND Active = 1
+         ORDER BY StartsOn DESC, Name ASC`,
+      // Redemptions in the range, one row per campaign per bill — rolled up in
+      // Node so a bill with three redemptions counts its revenue once.
+      // Params: tenantId, branchId, branchId, fromUtc, toUtc.
+      CAMPAIGN_REDEMPTIONS: `
+        SELECT CampaignId, BillId, COUNT(*) AS Redemptions,
+               COALESCE(SUM(DiscountAmount), 0) AS Given,
+               MAX(BillGrossAmount) AS BillGross
+          FROM pos_offer_redemption
+         WHERE TenantId = ? AND Active = 1
+           AND (? IS NULL OR BranchDetailId = ?)
+           AND RedeemedOn BETWEEN ? AND ?
+         GROUP BY CampaignId, BillId`,
+      // The catalogue in the import template's shape. Food type comes from the
+      // dish's first branch entry: the template has one column, the menu one
+      // per branch. Params: tenantId.
+      MENU_ITEMS: `
+        SELECT i.Name, i.Code, i.Description, i.HSNCode, i.SACCode,
+               c.Name AS CategoryName, u.UnitName, ci.Amount AS Price, ci.IsTaxIncluded,
+               tg.Id AS TaxGroupId, tg.Name AS TaxGroupName,
+               (SELECT ft.Name FROM pos_item_meta m
+                  JOIN pos_food_type ft ON ft.Id = m.FoodTypeId
+                 WHERE m.ItemDetailId = i.Id AND m.TenantId = i.TenantId AND m.Active = 1
+                 ORDER BY m.CreatedOn ASC LIMIT 1) AS FoodTypeName
+          FROM itemdetail i
+          LEFT JOIN categorydetail c ON c.Id = i.CategoryId
+          LEFT JOIN UOM u            ON u.Id = i.UOMId
+          LEFT JOIN costinfo ci      ON ci.Id = i.CostInfoId
+          LEFT JOIN taxgroup tg      ON tg.Id = ci.TaxGroupId
+         WHERE i.TenantId = ? AND i.Active = 1
+         ORDER BY c.Name ASC, i.Name ASC`,
+      // Each tax group's components, for "CGST:2.5|SGST:2.5". Params: tenantId.
+      TAX_GROUP_COMPONENTS: `
+        SELECT tgm.TaxGroupId, tt.Name, tt.Value
+          FROM taxgrouptaxtypemapper tgm
+          JOIN TaxTypes tt ON tt.Id = tgm.TaxTypeId AND tt.TenantId = tgm.TenantId AND tt.Active = 1
+         WHERE tgm.TenantId = ? AND tgm.Active = 1
+         ORDER BY tt.Name ASC`,
+      // One row per dish per branch. Price is the branch's own cost info when
+      // it has one, else the catalogue's. Params: tenantId, branchId, branchId.
+      MENU_BRANCH: `
+        SELECT i.Code, i.Name, c.Name AS CategoryName, br.BranchName,
+               COALESCE(mc.Amount, ci.Amount) AS Price,
+               COALESCE(mtg.Name, tg.Name) AS TaxGroupName,
+               ft.Name AS FoodTypeName, mt.Name AS MeatTypeName,
+               m.ServesCount, m.PortionSize, m.PrepTimeMinutes, m.StockTracked, m.MaxPerOrder,
+               (SELECT GROUP_CONCAT(ch.Name ORDER BY ch.SortOrder, ch.Name SEPARATOR '; ')
+                  FROM pos_item_meta_channel mch
+                  JOIN pos_channel ch ON ch.Id = mch.ChannelId
+                 WHERE mch.ItemMetaId = m.Id AND mch.TenantId = m.TenantId AND mch.Active = 1) AS Channels,
+               (SELECT GROUP_CONCAT(v.Name ORDER BY v.SortOrder, v.Name SEPARATOR '; ')
+                  FROM pos_item_meta_variant mv
+                  JOIN pos_variant v ON v.Id = mv.VariantId
+                 WHERE mv.ItemMetaId = m.Id AND mv.TenantId = m.TenantId AND mv.Active = 1) AS Variants,
+               (SELECT GROUP_CONCAT(g.Name ORDER BY mg.SortOrder, g.Name SEPARATOR '; ')
+                  FROM pos_item_meta_addon_group mg
+                  JOIN pos_addon_group g ON g.Id = mg.AddonGroupId
+                 WHERE mg.ItemMetaId = m.Id AND mg.TenantId = m.TenantId AND mg.Active = 1) AS AddonGroups
+          FROM pos_item_meta m
+          JOIN itemdetail i          ON i.Id = m.ItemDetailId AND i.TenantId = m.TenantId
+          LEFT JOIN categorydetail c ON c.Id = i.CategoryId
+          LEFT JOIN branchdetail br  ON br.Id = m.BranchDetailId
+          LEFT JOIN costinfo mc      ON mc.Id = m.CostInfoId
+          LEFT JOIN taxgroup mtg     ON mtg.Id = mc.TaxGroupId
+          LEFT JOIN costinfo ci      ON ci.Id = i.CostInfoId
+          LEFT JOIN taxgroup tg      ON tg.Id = ci.TaxGroupId
+          LEFT JOIN pos_food_type ft ON ft.Id = m.FoodTypeId
+          LEFT JOIN pos_meat_type mt ON mt.Id = m.MeatTypeId
+         WHERE m.TenantId = ? AND m.Active = 1 AND i.Active = 1
+           AND (? IS NULL OR m.BranchDetailId = ?)
+         ORDER BY br.BranchName ASC, c.Name ASC, i.Name ASC`,
+      // Variants and add-ons in one file. "Used by" counts dishes, not branch
+      // entries. Params: tenantId, tenantId.
+      MENU_OPTIONS: `
+        SELECT 'Variant' AS Kind, NULL AS GroupName, NULL AS MinSelection, NULL AS MaxSelection,
+               v.Name, v.Code, v.Price, NULL AS FoodTypeName, v.SortOrder,
+               (SELECT COUNT(DISTINCT m.ItemDetailId) FROM pos_item_meta_variant mv
+                  JOIN pos_item_meta m ON m.Id = mv.ItemMetaId AND m.Active = 1
+                 WHERE mv.VariantId = v.Id AND mv.TenantId = v.TenantId AND mv.Active = 1) AS UsedBy
+          FROM pos_variant v
+         WHERE v.TenantId = ? AND v.Active = 1
+        UNION ALL
+        SELECT 'Add-on', g.Name, g.MinSelection, g.MaxSelection,
+               a.Name, a.Code, a.Price, ft.Name, a.SortOrder,
+               (SELECT COUNT(DISTINCT m.ItemDetailId) FROM pos_item_meta_addon_group mg
+                  JOIN pos_item_meta m ON m.Id = mg.ItemMetaId AND m.Active = 1
+                 WHERE mg.AddonGroupId = g.Id AND mg.TenantId = g.TenantId AND mg.Active = 1)
+          FROM pos_addon a
+          JOIN pos_addon_group g     ON g.Id = a.AddonGroupId AND g.Active = 1
+          LEFT JOIN pos_food_type ft ON ft.Id = a.FoodTypeId
+         WHERE a.TenantId = ? AND a.Active = 1
+         ORDER BY Kind DESC, GroupName ASC, SortOrder ASC, Name ASC`,
+      // Trading hours, one row per window. DayOfWeek is 0 = Sunday (JS
+      // getDay()). Params: tenantId.
+      CATEGORY_HOURS: `
+        SELECT c.Name AS CategoryName, s.DayOfWeek, s.StartTime, s.EndTime
+          FROM pos_category_schedule s
+          JOIN categorydetail c ON c.Id = s.CategoryId
+         WHERE s.TenantId = ? AND s.Active = 1
+         ORDER BY c.Name ASC, s.DayOfWeek ASC, s.StartTime ASC`,
+      // Portions counted per day. Params: tenantId, branchId, branchId, from, to.
+      DAILY_STOCK: `
+        SELECT ds.BusinessDate, br.BranchName, i.Name, i.Code, ds.PreparedQty, ds.SoldQty
+          FROM pos_item_daily_stock ds
+          JOIN pos_item_meta m      ON m.Id = ds.ItemMetaId
+          JOIN itemdetail i         ON i.Id = m.ItemDetailId
+          LEFT JOIN branchdetail br ON br.Id = ds.BranchDetailId
+         WHERE ds.TenantId = ? AND ds.Active = 1
+           AND (? IS NULL OR ds.BranchDetailId = ?)
+           AND ds.BusinessDate BETWEEN ? AND ?
+         ORDER BY ds.BusinessDate ASC, br.BranchName ASC, i.Name ASC`,
+      // The lapsed list without the report's 500-row cap. Params: tenantId, days.
+      LAPSED: `
+        SELECT Name, Phone, Visits, TotalSpent, LoyaltyPoints, LastVisitAt,
+               DATEDIFF(CURDATE(), LastVisitAt) AS DaysSince
+          FROM pos_customer
+         WHERE TenantId = ? AND Active = 1 AND LastVisitAt IS NOT NULL
+           AND LastVisitAt < DATE_SUB(CURDATE(), INTERVAL ? DAY)
+         ORDER BY TotalSpent DESC`,
+    },
+
     // Customer reports. All read SETTLED DOCUMENTS, not pos_order: an order
     // that was placed and never paid for is not a visit, and the ledger is what
     // knows the difference. Ten reports existed and not one was about people.
@@ -5094,6 +5407,12 @@ ${DOC_SOURCE_COLUMNS_SQL}
     // The asset register is finance-owned reference data, not floor operations.
     ASSET_READ: 'ASSET:READ',
     ASSET_WRITE: 'ASSET:WRITE',
+    // Taking the customer list OUT of the system: names, mobiles and emails in
+    // bulk, as a file. Separate from POS_CRM:READ, which front-of-house
+    // managers hold to look a guest up one at a time — seeing a record on
+    // screen and walking off with all of them are different trusts. Also the
+    // only permission that may un-mask mobiles in any export.
+    CUSTOMER_EXPORT: 'CUSTOMER:EXPORT',
   },
 };
 

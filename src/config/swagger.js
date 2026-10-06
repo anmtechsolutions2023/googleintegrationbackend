@@ -5844,7 +5844,7 @@ const swaggerSpec = {
       put: {
         tags: ['Admin — Roles'], summary: 'Replace all permissions for a role', security,
         description: 'System roles are refused (403). Unknown feature ids are refused (400). Requirements are added: '
-          + 'Manage brings its View, EXPENSE:APPROVE brings POS_OPS:READ, REFUND:APPROVE brings TRANSACTIONS:READ. '
+          + 'Manage brings its View, EXPENSE:APPROVE brings POS_OPS:READ, REFUND:APPROVE brings TRANSACTIONS:READ, CUSTOMER:EXPORT brings POS_CRM:READ. '
           + 'The response lists what was added, removed, and added because required. Holders get the change on their next request.',
         parameters: [{ name: 'roleId', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RolePermissionsUpdate' } } } },
@@ -5888,5 +5888,13 @@ const qrOrderingDocs = require('./swagger.qrOrdering');
 Object.assign(swaggerSpec.components.securitySchemes, qrOrderingDocs.securitySchemes);
 Object.assign(swaggerSpec.components.schemas, qrOrderingDocs.schemas);
 Object.assign(swaggerSpec.paths, qrOrderingDocs.paths);
+
+// CSV exports (/api/exports). The per-export table is generated from the
+// export catalogue, so the docs cannot list a file the server does not serve.
+const exportDocs = require('./swagger.exports');
+
+Object.assign(swaggerSpec.components.schemas, exportDocs.schemas);
+Object.assign(swaggerSpec.paths, exportDocs.paths);
+if (Array.isArray(swaggerSpec.tags)) swaggerSpec.tags.push(...exportDocs.tags);
 
 module.exports = swaggerSpec;

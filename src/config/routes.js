@@ -93,6 +93,7 @@ const postokenRoutes = require('../modules/postoken/postoken.routes');
 const possettingRoutes = require('../modules/possetting/possetting.routes');
 const taxsettingRoutes = require('../modules/taxsetting/taxsetting.routes');
 const gstexportRoutes = require('../modules/gstexport/gstexport.routes');
+const exportRoutes = require('../modules/export/export.routes');
 const receiptFormatRoutes = require('../modules/posreceipt/receipt.format.routes');
 const offerRoutes = require('../modules/posoffer/offer.routes');
 const posbranchRoutes = require('../modules/posbranch/posbranch.routes');
@@ -177,6 +178,9 @@ const registerRoutes = (app) => {
   // GST returns: the CA pack, the sales-without-GST record, and the split
   // report. Read from the same ledger documents as every other report.
   app.use('/api/gst', gstexportRoutes);
+  // CSV exports — every list in Money, Guests, Menu and Insights as a file,
+  // each gated on its own screen's scope (modules/export/export.catalogue.js).
+  app.use('/api/exports', exportRoutes);
 
   // Cash sessions — a cashier's shift at a till, and the day-close variance.
   app.use('/api/pos/cash-sessions', poscashsessionRoutes);
