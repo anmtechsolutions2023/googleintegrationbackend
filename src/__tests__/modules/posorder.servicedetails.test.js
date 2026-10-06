@@ -13,11 +13,14 @@ jest.mock('uuid', () => ({ v4: jest.fn(() => 'mock-uuid') }));
 const WAITER = { Id: 'a1b2c3d4-1111-1111-1111-111111111111', Name: 'Ravi Kumar' };
 const rounds = new Map();
 let waiterRows = [WAITER];
+// Open rounds at a table already served by a waiter (SELECT_TABLE_WAITER).
+let servingRows = [];
 
 const mockConn = {
   execute: jest.fn(async (q, params = []) => {
     const sql = String(q);
     if (/FROM user_tenants/.test(sql)) return [waiterRows];
+    if (/AND TableId = \? AND WaiterId = \?/.test(sql)) return [servingRows];
     if (/^SELECT \* FROM pos_order WHERE Id = \?/.test(sql)) {
       const row = rounds.get(params[0]);
       return [row ? [row] : []];
@@ -77,6 +80,7 @@ const serviceWrites = () => mockConn.execute.mock.calls
 beforeEach(() => {
   jest.clearAllMocks();
   waiterRows = [WAITER];
+  servingRows = [];
   rounds.clear();
   rounds.set(R1, {
     Id: R1, OrderNo: 'ORD-1', Status: 'fired', GuestCount: 2, WaiterId: null, WaiterName: null,
@@ -119,13 +123,32 @@ describe('placing a round with covers and a waiter', () => {
     expect(created).toMatchObject({ GuestCount: 4, WaiterName: 'Ravi Kumar' });
   });
 
-  it('refuses a waiter who is not an active member before numbering the round', async () => {
+  it('refuses a waiter who is not an active member who can take orders, before numbering the round', async () => {
     waiterRows = [];
     await expect(service.createRoundTx(mockConn, {
       TableId: null, Items: [], WaiterId: WAITER.Id,
-    }, TENANT, USER)).rejects.toThrow(/not an active member/);
+    }, TENANT, USER)).rejects.toThrow(/not an active member who can take orders/);
     expect(mockConn.execute.mock.calls.some(([q]) => /INSERT INTO pos_order/.test(String(q))))
       .toBe(false);
+  });
+
+  it('keeps a waiter already serving this table\'s open rounds, though they no longer take orders', async () => {
+    waiterRows = [];
+    servingRows = [{ WaiterId: WAITER.Id, WaiterName: 'Ravi Kumar' }];
+    const created = await service.createRoundTx(mockConn, {
+      TableId: 'table-1', OrderType: 'dinein', Items: [], WaiterId: WAITER.Id,
+    }, TENANT, USER);
+    expect(created).toMatchObject({ WaiterId: WAITER.Id, WaiterName: 'Ravi Kumar' });
+    const lookup = mockConn.execute.mock.calls.find(([q]) => /AND TableId = \? AND WaiterId = \?/.test(String(q)));
+    expect(lookup[1]).toEqual([TENANT, 'table-1', WAITER.Id]);
+  });
+
+  it('still refuses that waiter on a table they are not serving', async () => {
+    waiterRows = [];
+    servingRows = [];
+    await expect(service.createRoundTx(mockConn, {
+      TableId: 'table-2', Items: [], WaiterId: WAITER.Id,
+    }, TENANT, USER)).rejects.toThrow(/cannot be the waiter/);
   });
 
   it('writes nothing extra for a round that names neither', async () => {

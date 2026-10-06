@@ -2883,6 +2883,10 @@ describe('POS waiters: GET /api/pos/orders/waiters', () => {
     expect(res.body.success).toBe(true);
     const sql = mockConnection.execute.mock.calls.map(([q]) => String(q));
     expect(sql.some((q) => /FROM user_tenants/.test(q))).toBe(true);
+    // Only members who can take orders, named — the mobile only when unnamed.
+    const listed = sql.find((q) => /FROM user_tenants/.test(q));
+    expect(listed).toMatch(/f\.feature_short_name = 'POS_ORDER' AND f\.scope = 'WRITE'/);
+    expect(listed).toMatch(/COALESCE\(NULLIF\(TRIM\(ut\.full_name\), ''\), ut\.user_phone\)/);
     expect(sql.some((q) => /SELECT \* FROM pos_order WHERE Id = \?/.test(q))).toBe(false);
   });
 });

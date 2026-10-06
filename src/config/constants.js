@@ -83,6 +83,39 @@ const DUE_SQL = `GREATEST(0, ROUND(l.GrossAmount - ${RETURNED_SQL} - ${COLLECTED
     - COALESCE(l.WriteOffAmount, 0), 2))`;
 
 /**
+ * Who may be named as a table's waiter: an active member who can TAKE ORDERS —
+ * an administrator of the tenancy, or someone whose roles grant
+ * POS_ORDER:WRITE. That covers waiters, cashiers and managers and leaves out
+ * kitchen-only and accounts staff, who would never be serving a table.
+ *
+ * The grant is read exactly as sign-in reads it (PERMISSIONS.SELECT_ALL_GRANTS):
+ * a role of THIS tenancy, still active, holding an active feature — so the
+ * picker can never list someone the till itself would refuse.
+ * Requires `user_tenants ut`.
+ */
+const TAKES_ORDERS_SQL = `(
+    ut.is_admin = 1 OR ut.is_super_admin = 1
+    OR EXISTS (
+      SELECT 1
+        FROM user_roles ur
+        JOIN roles r
+          ON r.id = ur.role_id AND r.tenant_id = ur.tenant_id AND r.is_active = TRUE
+        JOIN role_permissions rp ON rp.role_id = r.id
+        JOIN features f ON f.feature_id = rp.feature_id AND f.is_active = TRUE
+       WHERE ur.tenant_id = ut.tenant_id
+         AND ur.user_phone = ut.user_phone
+         AND f.feature_short_name = 'POS_ORDER' AND f.scope = 'WRITE'
+    )
+  )`;
+
+/**
+ * A member as the till names them: their name, or — only when none was ever
+ * entered — their mobile, so nobody appears as a blank line in the picker.
+ * Requires `user_tenants ut`.
+ */
+const MEMBER_NAME_SQL = "COALESCE(NULLIF(TRIM(ut.full_name), ''), ut.user_phone)";
+
+/**
  * The token or table a document was served at, and its rounds — correlated
  * subqueries rather than joins, so a bill covering three rounds does not fan
  * the row out three times. Requires `transactiondetaillog l`.
@@ -1608,15 +1641,30 @@ module.exports = {
       // A bill printed for the guest to check, before payment.
       MARK_BILL_PRINTED:
         'UPDATE pos_order SET BillPrintedAt = NOW(), UpdatedOn = NOW(), UpdatedBy = ? WHERE Id = ? AND TenantId = ?',
-      // Who can be named as a table's waiter: the tenancy's active members.
-      // Name and outlet only — a phone number is the member's login and has no
-      // business on a till that every cashier can read.
-      SELECT_WAITERS:
-        "SELECT id AS Id, full_name AS Name, branch_detail_id AS BranchDetailId FROM user_tenants "
-        + "WHERE tenant_id = ? AND is_active = 1 AND status = 'ACTIVE' ORDER BY full_name ASC",
-      SELECT_WAITER_BY_ID:
-        "SELECT id AS Id, full_name AS Name FROM user_tenants "
-        + "WHERE id = ? AND tenant_id = ? AND is_active = 1 AND status = 'ACTIVE'",
+      // Who can be named as a table's waiter: active members who can take
+      // orders (TAKES_ORDERS_SQL), by name — the mobile only stands in for a
+      // member who has no name. Name and outlet are all that is returned.
+      SELECT_WAITERS: `
+        SELECT ut.id AS Id, ${MEMBER_NAME_SQL} AS Name, ut.branch_detail_id AS BranchDetailId
+          FROM user_tenants ut
+         WHERE ut.tenant_id = ? AND ut.is_active = 1 AND ut.status = 'ACTIVE'
+           AND ${TAKES_ORDERS_SQL}
+         ORDER BY Name ASC`,
+      // The same rule, for one member: assigning a waiter the picker would not
+      // offer is refused, whoever sends it.
+      SELECT_WAITER_BY_ID: `
+        SELECT ut.id AS Id, ${MEMBER_NAME_SQL} AS Name
+          FROM user_tenants ut
+         WHERE ut.id = ? AND ut.tenant_id = ? AND ut.is_active = 1 AND ut.status = 'ACTIVE'
+           AND ${TAKES_ORDERS_SQL}`,
+      // A waiter already serving one of this table's OPEN rounds. Lets the next
+      // round carry them even if their role has since changed — the rule
+      // above decides who may be newly ASSIGNED, not who may finish the meal.
+      SELECT_TABLE_WAITER: `
+        SELECT WaiterId, WaiterName FROM pos_order
+         WHERE TenantId = ? AND TableId = ? AND WaiterId = ?
+           AND LOWER(COALESCE(Status, '')) NOT IN ('closed', 'settled', 'cancelled')
+         LIMIT 1`,
     },
 
     POS_KOT: {

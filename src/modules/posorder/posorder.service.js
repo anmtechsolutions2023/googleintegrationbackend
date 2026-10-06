@@ -432,7 +432,9 @@ class PosOrderService extends BaseCRUDService {
     // numbered or consumed, so naming a waiter who has left refuses the round
     // cleanly instead of after today's portions were taken.
     const hasService = row.GuestCount != null || row.WaiterId != null;
-    const waiter = hasService ? await this.resolveWaiterTx(connection, row.WaiterId, tenantId) : null;
+    const waiter = hasService
+      ? await this.resolveWaiterTx(connection, row.WaiterId, tenantId, { servingTableId: row.TableId })
+      : null;
     row.OrderNo = await issuePosNumber(connection, 'POS_ORDER', 'ORD', tenantId, userPhone);
     Object.assign(row, await resolveVenueTx(connection, row.TableId, tenantId));
 
@@ -462,28 +464,43 @@ class PosOrderService extends BaseCRUDService {
   /**
    * The waiter a membership id names, or nobody.
    *
-   * Only an ACTIVE member of THIS tenancy qualifies. The name is read here
+   * Only an ACTIVE member of THIS tenancy who can take orders qualifies — the
+   * same rule as the picker (TAKES_ORDERS_SQL). The name is read here
    * rather than taken from the client, because it is printed on the guest's
    * bill and kept on the round as history.
    *
    * @param {Object} connection - Open connection or transaction.
+   * One exception, for a new round only: a waiter already serving an OPEN
+   * round at the same table is kept, even if their role has since changed.
+   * Otherwise a mid-meal role change would refuse the table's next KOT. The
+   * rule decides who may be newly assigned, not who may finish the meal.
+   *
    * @param {string|null} waiterId - user_tenants.id, or null for none.
    * @param {string} tenantId
+   * @param {Object} [options]
+   * @param {string|null} [options.servingTableId] - The table a new round is for.
    * @returns {Promise<{WaiterId: string|null, WaiterName: string|null}>}
    */
-  async resolveWaiterTx(connection, waiterId, tenantId) {
+  async resolveWaiterTx(connection, waiterId, tenantId, { servingTableId = null } = {}) {
     if (!waiterId) return { WaiterId: null, WaiterName: null };
     const [rows] = await connection.execute(
       QUERIES.POS_ORDER.SELECT_WAITER_BY_ID, [waiterId, tenantId],
     );
+    if ((!rows || rows.length === 0) && servingTableId) {
+      const [serving] = await connection.execute(
+        QUERIES.POS_ORDER.SELECT_TABLE_WAITER, [tenantId, servingTableId, waiterId],
+      );
+      if (serving && serving[0]) return { WaiterId: serving[0].WaiterId, WaiterName: serving[0].WaiterName };
+    }
     if (!rows || rows.length === 0) {
-      throw new HttpError('That waiter is not an active member of this business.', 400);
+      throw new HttpError('That person cannot be the waiter: they are not an active member who can take orders.', 400);
     }
     return { WaiterId: rows[0].Id, WaiterName: rows[0].Name };
   }
 
   /**
-   * Who can be named as a table's waiter.
+   * Who can be named as a table's waiter: active members who can take orders
+   * (admins, or a role granting POS_ORDER:WRITE), by name, else by mobile.
    * @param {string} tenantId
    * @returns {Promise<Array<{Id: string, Name: string, BranchDetailId: string|null}>>}
    */
