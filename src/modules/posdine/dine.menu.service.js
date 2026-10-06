@@ -20,6 +20,7 @@ const dailyStock = require('../posdailystock/posdailystock.service');
 const dailyStockRepo = require('../posdailystock/posdailystock.repository');
 const { resolve: resolveStock } = require('../posdailystock/posdailystock.resolver');
 const qrChannel = require('../posqr/posqr.channel');
+const { HttpError } = require('../../middleware/errorHandler');
 
 const Q = QUERIES.POS_DINE;
 
@@ -81,10 +82,12 @@ const loadOptionsTx = async (conn, ids, tenantId) => {
 };
 
 /**
- * @param {Object} ctx - The diner's session context (tenantId, branchId).
+ * @param {Object} ctx - The diner's session context (tenantId, branchId, settings).
  * @returns {Promise<{categories: Array<{id, name, items: Array}>}>}
  */
-const getMenu = async ({ tenantId, branchId }) => {
+const getMenu = async ({ tenantId, branchId, settings }) => {
+  // Photos are on unless the branch turned them off (Settings › QR codes).
+  const showPhotos = settings?.showPhotos !== false;
   const { rows, variants, addons } = await withConnection(async (conn) => {
     const [all] = await conn.execute(Q.MENU_FOR_BRANCH, [tenantId, branchId]);
     const qrChannelId = await qrChannel.ensureQrChannelTx(conn, tenantId);
@@ -146,6 +149,9 @@ const getMenu = async ({ tenantId, branchId }) => {
       maxPerOrder: stock.maxPerOrder,
       variants: variants.get(r.Id) || [],
       addonGroups: [...(addons.get(r.Id) || new Map()).values()],
+      // The photo's version, or null for none (or photos off). The app loads
+      // /api/dine/:token/photo/:id?v=<this>.
+      photoVersion: showPhotos && r.PhotoVersion ? Number(r.PhotoVersion) : null,
     });
     categories.set(key, category);
   });
@@ -153,4 +159,20 @@ const getMenu = async ({ tenantId, branchId }) => {
   return { categories: [...categories.values()] };
 };
 
-module.exports = { getMenu, filterForQrChannel };
+/**
+ * A dish photo for the guest menu: the thumbnail, or the full photo for the
+ * dish sheet. 404 when photos are off at the branch or the dish has none.
+ *
+ * @param {Object} ctx - From dine.context.resolve (tenantId, branchId, settings).
+ * @param {string} itemMetaId - The menu entry's id, as the menu gave it.
+ * @param {'thumb'|'full'} size
+ */
+const getPhoto = async (ctx, itemMetaId, size) => {
+  if (ctx.settings?.showPhotos === false) throw new HttpError('This dish has no photo.', 404);
+  const sql = size === 'full' ? Q.PHOTO_FOR_META_FULL : Q.PHOTO_FOR_META;
+  const [rows] = await withConnection((conn) => conn.execute(sql, [ctx.tenantId, ctx.branchId, itemMetaId]));
+  if (!rows[0]) throw new HttpError('This dish has no photo.', 404);
+  return rows[0];
+};
+
+module.exports = { getMenu, getPhoto, filterForQrChannel };

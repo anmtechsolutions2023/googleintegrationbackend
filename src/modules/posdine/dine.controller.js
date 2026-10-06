@@ -4,7 +4,8 @@
 
 const { asyncHandler } = require('../../utils/controllerHelper');
 const { successResponse, createdResponse } = require('../../utils/responseHelper');
-const { validateBody, validateParams } = require('../../middleware/validation');
+const { validateBody, validateParams, validateQuery } = require('../../middleware/validation');
+const { sendPhoto } = require('../menu/menu.photoResponse');
 const contextService = require('./dine.context.service');
 const authService = require('./dine.auth.service');
 const menuService = require('./dine.menu.service');
@@ -12,6 +13,8 @@ const orderService = require('./dine.order.service');
 const customerService = require('./dine.customer.service');
 const {
   tokenParamSchema,
+  photoParamSchema,
+  photoQuerySchema,
   requestCodeSchema,
   verifyCodeSchema,
   quoteSchema,
@@ -29,6 +32,14 @@ const logo = asyncHandler(async (req, res) => {
   const data = await contextService.getLogo(ctx);
   res.set('X-Content-Type-Options', 'nosniff');
   successResponse(res, data ? 'Logo retrieved' : 'This branch has no logo', data);
+});
+
+/** A dish photo as an image, for the guest menu. Public and cacheable. */
+const photo = asyncHandler(async (req, res) => {
+  const ctx = await contextService.resolve(req.params.token);
+  const q = req.validatedQuery || req.query;
+  const image = await menuService.getPhoto(ctx, req.params.itemId, q.size);
+  sendPhoto(res, image, { versioned: !!q.v, shared: true });
 });
 
 const requestCode = asyncHandler(async (req, res) => {
@@ -77,6 +88,7 @@ const listOrders = asyncHandler(async (req, res) => {
 module.exports = {
   resolve: [validateParams(tokenParamSchema), resolve],
   logo: [validateParams(tokenParamSchema), logo],
+  photo: [validateParams(photoParamSchema), validateQuery(photoQuerySchema), photo],
   requestCode: [validateParams(tokenParamSchema), validateBody(requestCodeSchema), requestCode],
   verifyCode: [validateParams(tokenParamSchema), validateBody(verifyCodeSchema), verifyCode],
   getSession: [getSession],

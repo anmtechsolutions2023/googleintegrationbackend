@@ -17,7 +17,7 @@
 //     serves, portion, prepMin, maxPerOrder, stockTracked,
 //     nutrition: { ServingSizeG, Calories, … , Allergens } | null,
 //     portals: [{ portalId, listed, price, name }],
-//     status: 'Active' | 'Hidden', hasPhoto }
+//     status: 'Active' | 'Hidden', hasPhoto, photoVersion }
 //
 // PER-DISH, NOT PER-BRANCH
 // Diet, options, tags, serving and nutrition are written to every branch
@@ -160,7 +160,8 @@ const loadDishes = async (conn, tenantId, itemIds = null) => {
       nutrition: n ? Object.fromEntries(NUTRITION_FIELDS.map((f) => [f, n[f] === undefined ? null : (f === 'Allergens' ? n[f] : num(n[f]))])) : null,
       portals: [...portals.values()],
       status: hidden ? 'Hidden' : 'Active',
-      hasPhoto: Number(i.HasPhoto) > 0,
+      hasPhoto: i.PhotoVersion !== null && i.PhotoVersion !== undefined,
+      photoVersion: i.PhotoVersion === null || i.PhotoVersion === undefined ? null : Number(i.PhotoVersion),
     };
   });
 };

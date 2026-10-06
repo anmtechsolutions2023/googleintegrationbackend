@@ -31,6 +31,22 @@ const dineLimiter = rateLimit({
   skip: () => isDev && RATE_LIMITS.HTTP.SKIP_IN_DEVELOPMENT,
 });
 
+// Dish photos go through their own, roomier limiter, BEFORE the general one:
+// a menu with photos asks for one image per dish, and those requests must not
+// spend the allowance a guest needs to verify a number and place an order.
+// Each one is cached for a year once loaded, so a guest asks for each once.
+const photoLimiter = rateLimit({
+  windowMs: RATE_LIMITS.HTTP.WINDOW_MS,
+  max: RATE_LIMITS.DINER.PHOTO_MAX_REQUESTS,
+  message: MESSAGES.ERROR.RATE_LIMIT_EXCEEDED,
+  standardHeaders: RATE_LIMITS.HTTP.STANDARD_HEADERS,
+  legacyHeaders: RATE_LIMITS.HTTP.LEGACY_HEADERS,
+  skip: () => isDev && RATE_LIMITS.HTTP.SKIP_IN_DEVELOPMENT,
+});
+
+/** GET /:token/photo/:itemId?size=thumb|full&v= — a dish photo for the guest menu. */
+router.get('/:token/photo/:itemId', photoLimiter, ...controller.photo);
+
 router.use(dineLimiter);
 
 // ── Diner session ──────────────────────────────────────────────────────────

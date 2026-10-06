@@ -17,14 +17,16 @@ const PREFIX = 'qr.ordering.';
 /**
  * Turns stored strings into the settings object every caller uses.
  * @param {Object<string,string>} stored - SettingKey → SettingValue.
- * @returns {{enabled: boolean, mode: string, canOrder: boolean}}
+ * @returns {{enabled: boolean, mode: string, canOrder: boolean, showPhotos: boolean}}
  */
 const fromStored = (stored = {}) => {
   const rawEnabled = stored[SETTING_KEYS.ENABLED];
   const enabled = rawEnabled === undefined ? DEFAULTS.ENABLED : rawEnabled === 'true';
   const rawMode = stored[SETTING_KEYS.MODE];
   const mode = Object.values(MODES).includes(rawMode) ? rawMode : DEFAULTS.MODE;
-  return { enabled, mode, canOrder: enabled && mode === MODES.ORDER };
+  const rawPhotos = stored[SETTING_KEYS.SHOW_PHOTOS];
+  const showPhotos = rawPhotos === undefined ? DEFAULTS.SHOW_PHOTOS : rawPhotos === 'true';
+  return { enabled, mode, canOrder: enabled && mode === MODES.ORDER, showPhotos };
 };
 
 /** On an open connection, so the diner resolve reads it with its other lookups. */
@@ -43,7 +45,7 @@ const getSettings = (branchId, tenantId) =>
 /**
  * Applies a partial change. A value equal to its default removes the override.
  * @param {string} branchId
- * @param {{enabled?: boolean, mode?: string}} patch - Already validated.
+ * @param {{enabled?: boolean, mode?: string, showPhotos?: boolean}} patch - Already validated.
  * @param {string} tenantId
  * @param {string} userPhone
  * @returns {Promise<{enabled: boolean, mode: string, canOrder: boolean}>}
@@ -56,6 +58,9 @@ const setSettings = async (branchId, patch, tenantId, userPhone) =>
     }
     if (patch.mode !== undefined) {
       writes.push([SETTING_KEYS.MODE, patch.mode, DEFAULTS.MODE]);
+    }
+    if (patch.showPhotos !== undefined) {
+      writes.push([SETTING_KEYS.SHOW_PHOTOS, patch.showPhotos, DEFAULTS.SHOW_PHOTOS]);
     }
     for (const [key, value, fallback] of writes) {
       if (value === fallback) {

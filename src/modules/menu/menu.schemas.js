@@ -71,6 +71,7 @@ const dishSchema = Joi.object({
   // Read-only fields the editor may echo back.
   itemId: Joi.any().strip(),
   hasPhoto: Joi.any().strip(),
+  photoVersion: Joi.any().strip(),
 });
 
 // A parsed CSV row: header → cell text. Kept loose on purpose — the importer
@@ -103,6 +104,16 @@ const bulkSchema = Joi.object({
 const photoSchema = Joi.object({
   // A data URI; the server re-measures the bytes (512KB cap).
   dataUri: Joi.string().max(1024 * 1024).required(),
+  // The list-size copy the browser made (≤480px, ≤96KB). Optional: without it
+  // lists fall back to the photo itself.
+  thumbDataUri: Joi.string().max(160 * 1024).allow(null).optional(),
+});
+
+// An <img> asking for a photo. `v` only makes the URL change when the photo
+// does; the server never compares it.
+const photoImageQuery = Joi.object({
+  size: Joi.string().valid('thumb', 'full').default('thumb'),
+  v: Joi.string().max(20).pattern(/^[0-9]+$/).optional(),
 });
 
 const itemIdParam = Joi.object({ itemId: entityId.required() });
@@ -114,4 +125,4 @@ const clearSchema = Joi.object({
   confirm: Joi.string().trim().max(40).allow('').optional(),
 });
 
-module.exports = { dishSchema, importSchema, pricesSchema, bulkSchema, photoSchema, itemIdParam, clearSchema };
+module.exports = { dishSchema, importSchema, pricesSchema, bulkSchema, photoSchema, photoImageQuery, itemIdParam, clearSchema };

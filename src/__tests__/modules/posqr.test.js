@@ -57,8 +57,11 @@ beforeEach(() => {
 });
 
 describe('posqr.settings — no row means OFF', () => {
-  it('defaults to off, order mode', () => {
-    expect(fromStored({})).toEqual({ enabled: false, mode: 'order', canOrder: false });
+  it('defaults to off, order mode, photos on', () => {
+    expect(fromStored({})).toEqual({ enabled: false, mode: 'order', canOrder: false, showPhotos: true });
+  });
+  it('photos can be turned off', () => {
+    expect(fromStored({ 'qr.ordering.showPhotos': 'false' }).showPhotos).toBe(false);
   });
   it('can order only when on AND in order mode', () => {
     expect(fromStored({ 'qr.ordering.enabled': 'true' }).canOrder).toBe(true);

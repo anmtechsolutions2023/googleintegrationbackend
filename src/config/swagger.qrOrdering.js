@@ -110,6 +110,7 @@ const schemas = {
       enabled: { type: 'boolean', description: 'Off (the default) = every code at this branch answers "not active".' },
       mode: { type: 'string', enum: ['menu', 'order'], description: '`menu` = guests verify and browse; staff take the order. `order` = guests place orders for staff to accept.' },
       canOrder: { type: 'boolean', readOnly: true, description: 'enabled AND mode = order.' },
+      showPhotos: { type: 'boolean', description: 'Dish photos on the guest menu. On (the default) unless turned off. Stored as qr.ordering.showPhotos.' },
     },
   },
   QrSettingsUpdate: {
@@ -117,6 +118,7 @@ const schemas = {
     properties: {
       enabled: { type: 'boolean' },
       mode: { type: 'string', enum: ['menu', 'order'] },
+      showPhotos: { type: 'boolean' },
     },
   },
   QrLimit: {
@@ -274,6 +276,7 @@ const schemas = {
       taxIncluded: { type: 'boolean' },
       available: { type: 'boolean', description: 'false when its category is outside trading hours right now.' },
       opensAt: { type: 'string', nullable: true, example: '19:00' },
+      photoVersion: { type: 'integer', nullable: true, example: 1791310866, description: 'null = no photo, or photos off at this branch. Otherwise load GET /api/dine/{token}/photo/{id}?v=<this>.' },
       variants: {
         type: 'array',
         items: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' }, price: { type: 'number', description: 'Surcharge on top of `price`.' } } },
@@ -520,6 +523,24 @@ const paths = {
       description: '`data` is null when the branch has no logo.',
       parameters: [tokenParam],
       responses: { ...ok(ref('DineLogo')), ...err(404, 'This QR code is not active') },
+    },
+  },
+  '/api/dine/{token}/photo/{itemId}': {
+    get: {
+      tags: ['Dine (public)'],
+      summary: 'A dish photo for the guest menu',
+      description: 'The image itself (image/jpeg or image/png), for an `<img>`. `itemId` is the menu entry id from GET /api/dine/menu; `v` is that item\'s `photoVersion`. A versioned request is cached publicly for a year (the URL changes when the photo does). `size=thumb` (default) is the ≤480px list copy; `full` the ≤1024px photo for the dish sheet.\n\nOnly dishes at the branch the code belongs to. 404 when the dish has no photo or the branch turned photos off. Rate-limited per IP by `DINER_PHOTO_MAX_REQUESTS` (2000 / 15 min), separately from the other guest routes.',
+      parameters: [
+        tokenParam,
+        { name: 'itemId', in: 'path', required: true, schema: { type: 'string' } },
+        { name: 'size', in: 'query', schema: { type: 'string', enum: ['thumb', 'full'], default: 'thumb' } },
+        { name: 'v', in: 'query', schema: { type: 'string', pattern: '^[0-9]+$' } },
+      ],
+      responses: {
+        200: { description: 'The image', content: { 'image/jpeg': { schema: { type: 'string', format: 'binary' } }, 'image/png': { schema: { type: 'string', format: 'binary' } } } },
+        ...err(404, 'Not active, no such dish here, no photo, or photos off'),
+        ...err(429, 'Too many photo requests from this address'),
+      },
     },
   },
   '/api/dine/{token}/otp/request': {

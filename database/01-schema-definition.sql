@@ -1840,6 +1840,10 @@ CREATE TABLE pos_item_meta_variant (
 -- branch and channel. Bytes in the database for the same reason as
 -- pos_branch_media: the app runs serverless with no disk, and one square image
 -- per dish is small. Capped by MEDIA.MAX_BYTES and re-measured on the server.
+-- ThumbBytes is a small copy (MENU_PHOTO.THUMB_MAX_PX, JPEG) made in the browser
+-- at upload, for lists: the guest's QR menu, the Dishes list and the till's
+-- picture tiles. NULL for a photo saved before thumbnails existed — readers
+-- then fall back to Bytes.
 CREATE TABLE pos_item_photo (
     Id              VARCHAR(50)   NOT NULL,
     TenantId        VARCHAR(50)   NOT NULL,
@@ -1849,6 +1853,9 @@ CREATE TABLE pos_item_photo (
     Height          INT           NULL,
     ByteSize        INT           NOT NULL,
     Bytes           LONGBLOB      NOT NULL,
+    ThumbMimeType   VARCHAR(50)   NULL,
+    ThumbByteSize   INT           NULL,
+    ThumbBytes      MEDIUMBLOB    NULL,
     CreatedOn       DATETIME,
     CreatedBy       VARCHAR(50),
     UpdatedOn       DATETIME,

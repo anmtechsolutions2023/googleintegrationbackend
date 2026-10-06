@@ -17,6 +17,13 @@ const tokenParamSchema = Joi.object({
     .messages({ 'string.pattern.base': MESSAGES.ERROR.QR_NOT_AVAILABLE }),
 });
 
+// GET /:token/photo/:itemId — itemId is the menu entry id the menu gave out.
+const photoParamSchema = tokenParamSchema.keys({ itemId: entityId.required() });
+const photoQuerySchema = Joi.object({
+  size: Joi.string().valid('thumb', 'full').default('thumb'),
+  v: Joi.string().max(20).pattern(/^[0-9]+$/).optional(),
+});
+
 const requestCodeSchema = Joi.object({
   phone: phoneField().required(),
 });
@@ -53,6 +60,8 @@ const placeOrderSchema = Joi.object({
 
 module.exports = {
   tokenParamSchema,
+  photoParamSchema,
+  photoQuerySchema,
   requestCodeSchema,
   verifyCodeSchema,
   quoteSchema,

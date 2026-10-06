@@ -6,7 +6,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { withConnection, withTransaction } = require('../../utils/dbHelper');
-const { QUERIES } = require('../../config/constants');
+const { QUERIES, MENU_PHOTO } = require('../../config/constants');
 const { HttpError } = require('../../middleware/errorHandler');
 const { validateImage } = require('../posmedia/posmedia.service');
 const m = require('./menu.masters');
@@ -71,6 +71,7 @@ const listDishes = (tenantId) => withConnection(async (conn) => {
       portals: d.portals,
       status: d.status,
       hasPhoto: d.hasPhoto,
+      photoVersion: d.photoVersion,
       stockTracked: d.stockTracked,
     })),
   };
@@ -198,18 +199,54 @@ const assertItem = async (conn, itemId, tenantId) => {
   if (!rows[0]) throw new HttpError('Dish not found', 404);
 };
 
-/** Store (or replace) a dish's photo from a data URI. Validated before writing. */
-const putPhoto = async (itemId, dataUri, tenantId, userPhone) => {
+/**
+ * The list-size copy the browser made. Same checks as the photo itself, with
+ * tighter bounds: it is shown dozens at a time on a guest's phone.
+ */
+const validateThumb = (dataUri) => {
+  if (!dataUri) return null;
   const img = validateImage(dataUri);
+  const { THUMB_MAX_PX, THUMB_MAX_BYTES } = MENU_PHOTO;
+  if (img.byteSize > THUMB_MAX_BYTES || img.width > THUMB_MAX_PX || img.height > THUMB_MAX_PX) {
+    throw new HttpError(`The thumbnail must be at most ${THUMB_MAX_PX}px and ${THUMB_MAX_BYTES / 1024}KB.`, 400);
+  }
+  return img;
+};
+
+/**
+ * Store (or replace) a dish's photo from a data URI, with its thumbnail when
+ * the browser sent one. Validated before writing.
+ */
+const putPhoto = async (itemId, dataUri, tenantId, userPhone, thumbDataUri = null) => {
+  const img = validateImage(dataUri);
+  const thumb = validateThumb(thumbDataUri);
   return withConnection(async (conn) => {
     await assertItem(conn, itemId, tenantId);
     await conn.execute(Q().PHOTO_UPSERT, [
       uuidv4(), tenantId, itemId, img.mimeType, img.width || null, img.height || null,
-      img.byteSize, img.bytes, userPhone, userPhone,
+      img.byteSize, img.bytes,
+      thumb ? thumb.mimeType : null, thumb ? thumb.byteSize : null, thumb ? thumb.bytes : null,
+      userPhone, userPhone,
     ]);
-    return { itemId, mimeType: img.mimeType, width: img.width, height: img.height, byteSize: img.byteSize };
+    return {
+      itemId, mimeType: img.mimeType, width: img.width, height: img.height, byteSize: img.byteSize,
+      thumbByteSize: thumb ? thumb.byteSize : null,
+    };
   });
 };
+
+/**
+ * The photo's bytes, for an <img>: 'thumb' (the list copy, or the photo when a
+ * photo predates thumbnails) or 'full'.
+ *
+ * @returns {Promise<{MimeType: string, Bytes: Buffer, Version: number}>}
+ */
+const getPhotoImage = (itemId, tenantId, size = 'thumb') => withConnection(async (conn) => {
+  const sql = size === 'full' ? Q().PHOTO_IMAGE_FULL : Q().PHOTO_IMAGE_THUMB;
+  const [rows] = await conn.execute(sql, [tenantId, itemId]);
+  if (!rows[0]) throw new HttpError('This dish has no photo.', 404);
+  return rows[0];
+});
 
 const getPhoto = (itemId, tenantId) => withConnection(async (conn) => {
   const [rows] = await conn.execute(Q().PHOTO_GET, [tenantId, itemId]);
@@ -247,5 +284,5 @@ const backup = async (user) => {
 
 module.exports = {
   backup,
-  options, listDishes, getDish, save, priceGrid, savePrices, bulk, putPhoto, getPhoto, deletePhoto,
+  options, listDishes, getDish, save, priceGrid, savePrices, bulk, putPhoto, getPhoto, getPhotoImage, deletePhoto,
 };

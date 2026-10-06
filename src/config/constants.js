@@ -1357,6 +1357,10 @@ module.exports = {
           -- connection, for a column two joins away in the query that was
           -- already running.
           idt.Name AS ItemName,
+          -- The dish photo's version, or NULL for none. The till's picture
+          -- tiles put it on the photo URL as v, so a cached copy lasts until it changes.
+          (SELECT UNIX_TIMESTAMP(ph.UpdatedOn) FROM pos_item_photo ph
+            WHERE ph.TenantId = im.TenantId AND ph.ItemDetailId = im.ItemDetailId LIMIT 1) AS PhotoVersion,
           -- ── Tags, from BOTH levels, kept apart ─────────────────────────────
           -- Not merged in SQL: the till draws a tag set on the dish differently
           -- from one inherited from its section, so it has to know which is
@@ -1402,6 +1406,10 @@ module.exports = {
           -- connection, for a column two joins away in the query that was
           -- already running.
           idt.Name AS ItemName,
+          -- The dish photo's version, or NULL for none. The till's picture
+          -- tiles put it on the photo URL as v, so a cached copy lasts until it changes.
+          (SELECT UNIX_TIMESTAMP(ph.UpdatedOn) FROM pos_item_photo ph
+            WHERE ph.TenantId = im.TenantId AND ph.ItemDetailId = im.ItemDetailId LIMIT 1) AS PhotoVersion,
           -- ── Tags, from BOTH levels, kept apart ─────────────────────────────
           -- Not merged in SQL: the till draws a tag set on the dish differently
           -- from one inherited from its section, so it has to know which is
@@ -2535,6 +2543,21 @@ module.exports = {
     // What a diner may read and do. Everything is keyed on values from the
     // diner's SESSION (tenant, branch, table, customer), never on the request.
     POS_DINE: {
+      // A dish photo for the guest menu, by the menu entry the guest was given
+      // and only at the branch their table is in. Thumbnail unless :full.
+      PHOTO_FOR_META: `
+        SELECT COALESCE(ph.ThumbMimeType, ph.MimeType) AS MimeType, COALESCE(ph.ThumbBytes, ph.Bytes) AS Bytes,
+               UNIX_TIMESTAMP(ph.UpdatedOn) AS Version
+          FROM pos_item_meta im
+          JOIN pos_item_photo ph ON ph.TenantId = im.TenantId AND ph.ItemDetailId = im.ItemDetailId
+         WHERE im.TenantId = ? AND im.BranchDetailId = ? AND im.Id = ? AND im.Active = 1
+         LIMIT 1`,
+      PHOTO_FOR_META_FULL: `
+        SELECT ph.MimeType, ph.Bytes, UNIX_TIMESTAMP(ph.UpdatedOn) AS Version
+          FROM pos_item_meta im
+          JOIN pos_item_photo ph ON ph.TenantId = im.TenantId AND ph.ItemDetailId = im.ItemDetailId
+         WHERE im.TenantId = ? AND im.BranchDetailId = ? AND im.Id = ? AND im.Active = 1
+         LIMIT 1`,
       CHANNEL_BY_CODE:
         'SELECT Id FROM pos_channel WHERE TenantId = ? AND Code = ? LIMIT 1',
       INSERT_CHANNEL: `
@@ -2544,8 +2567,10 @@ module.exports = {
       // The branch's menu. Unpaginated on purpose: one branch's menu is read
       // whole by one screen, and a page boundary would hide dishes from guests.
       MENU_FOR_BRANCH: `
-        SELECT im.Id, im.CostInfoId, im.PortionSize, im.ServesCount, im.PrepTimeMinutes,
+        SELECT im.Id, im.ItemDetailId, im.CostInfoId, im.PortionSize, im.ServesCount, im.PrepTimeMinutes,
                im.StockTracked, im.MaxPerOrder,
+               (SELECT UNIX_TIMESTAMP(ph.UpdatedOn) FROM pos_item_photo ph
+                 WHERE ph.TenantId = im.TenantId AND ph.ItemDetailId = im.ItemDetailId LIMIT 1) AS PhotoVersion,
                idt.Name AS ItemName, idt.Description,
                cat.Id AS CategoryId, cat.Name AS CategoryName,
                ft.Name AS FoodTypeName, ft.IsVeg AS FoodTypeIsVeg,
@@ -3044,8 +3069,11 @@ module.exports = {
                i.SupplyType, i.Active, i.CategoryId, i.UOMId, i.CostInfoId,
                c.Name AS CategoryName, pc.Name AS ParentCategoryName,
                u.UnitName, ci.Amount, ci.IsTaxIncluded, ci.TaxGroupId, tg.Name AS TaxGroupName,
-               (SELECT COUNT(*) FROM pos_item_photo ph
-                 WHERE ph.ItemDetailId = i.Id AND ph.TenantId = i.TenantId) AS HasPhoto
+               -- The photo's version (seconds since epoch of its last save), or
+               -- NULL for none. Photo URLs carry it, so a cached copy is used
+               -- until the photo changes.
+               (SELECT UNIX_TIMESTAMP(ph.UpdatedOn) FROM pos_item_photo ph
+                 WHERE ph.ItemDetailId = i.Id AND ph.TenantId = i.TenantId LIMIT 1) AS PhotoVersion
           FROM itemdetail i
           LEFT JOIN categorydetail c  ON c.Id = i.CategoryId
           LEFT JOIN categorydetail pc ON pc.Id = c.ParentId
@@ -3169,10 +3197,20 @@ module.exports = {
 
       // ── Photos ─────────────────────────────────────────────────────────
       PHOTO_UPSERT: `INSERT INTO pos_item_photo
-          (Id, TenantId, ItemDetailId, MimeType, Width, Height, ByteSize, Bytes, CreatedOn, CreatedBy, UpdatedOn, UpdatedBy)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW(), ?)
+          (Id, TenantId, ItemDetailId, MimeType, Width, Height, ByteSize, Bytes,
+           ThumbMimeType, ThumbByteSize, ThumbBytes, CreatedOn, CreatedBy, UpdatedOn, UpdatedBy)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW(), ?)
         ON DUPLICATE KEY UPDATE MimeType = VALUES(MimeType), Width = VALUES(Width), Height = VALUES(Height),
-          ByteSize = VALUES(ByteSize), Bytes = VALUES(Bytes), UpdatedOn = NOW(), UpdatedBy = VALUES(UpdatedBy)`,
+          ByteSize = VALUES(ByteSize), Bytes = VALUES(Bytes),
+          ThumbMimeType = VALUES(ThumbMimeType), ThumbByteSize = VALUES(ThumbByteSize), ThumbBytes = VALUES(ThumbBytes),
+          UpdatedOn = NOW(), UpdatedBy = VALUES(UpdatedBy)`,
+      // The image itself, for an <img>: the thumbnail or the full photo, never
+      // both — a 25KB list thumbnail must not drag 500KB along with it.
+      PHOTO_IMAGE_THUMB: `SELECT COALESCE(ThumbMimeType, MimeType) AS MimeType, COALESCE(ThumbBytes, Bytes) AS Bytes,
+          UNIX_TIMESTAMP(UpdatedOn) AS Version
+          FROM pos_item_photo WHERE TenantId = ? AND ItemDetailId = ? LIMIT 1`,
+      PHOTO_IMAGE_FULL: `SELECT MimeType, Bytes, UNIX_TIMESTAMP(UpdatedOn) AS Version
+          FROM pos_item_photo WHERE TenantId = ? AND ItemDetailId = ? LIMIT 1`,
       PHOTO_GET:
         'SELECT MimeType, Width, Height, ByteSize, Bytes, UpdatedOn FROM pos_item_photo WHERE TenantId = ? AND ItemDetailId = ? LIMIT 1',
       PHOTO_DELETE: 'DELETE FROM pos_item_photo WHERE TenantId = ? AND ItemDetailId = ?',
@@ -5107,9 +5145,10 @@ ${DOC_SOURCE_COLUMNS_SQL}
     // what a guest at a table sees — so switching the feature on needs no setup.
     FALLBACK_CHANNEL_CODE: 'DINEIN',
     // Per branch, in pos_setting. No row = the default below.
-    SETTING_KEYS: { ENABLED: 'qr.ordering.enabled', MODE: 'qr.ordering.mode' },
+    SETTING_KEYS: { ENABLED: 'qr.ordering.enabled', MODE: 'qr.ordering.mode', SHOW_PHOTOS: 'qr.ordering.showPhotos' },
     MODES: { MENU: 'menu', ORDER: 'order' },
-    DEFAULTS: { ENABLED: false, MODE: 'order' },
+    // Dish photos show on the guest menu unless a branch turns them off.
+    DEFAULTS: { ENABLED: false, MODE: 'order', SHOW_PHOTOS: true },
     // 128 bits: the only thing between the internet and a table's order queue.
     TOKEN_BYTES: 16,
     SESSION_AUDIENCE: 'diner',
@@ -5548,6 +5587,16 @@ ${DOC_SOURCE_COLUMNS_SQL}
     // 384 dots is the full width of an 80mm head; 58mm paper is 320. The client
     // targets the larger and the renderer scales down for narrow paper.
     PRINT_WIDTH_PX: 384,
+  },
+
+  // Dish photos (pos_item_photo). The full photo follows MEDIA's limits; the
+  // thumbnail is a small JPEG the browser makes at upload for lists.
+  MENU_PHOTO: {
+    THUMB_MAX_PX: 480,
+    THUMB_MAX_BYTES: 96 * 1024,
+    // A photo URL carries ?v=<version>, so a cached copy is right until the
+    // photo changes — and then the URL changes with it.
+    CACHE_SECONDS: 365 * 24 * 60 * 60,
   },
 
   IMPORT: {

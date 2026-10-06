@@ -65,6 +65,7 @@ const schemas = {
       } } },
       status: { type: 'string', enum: ['Active', 'Hidden'] },
       hasPhoto: { type: 'boolean', readOnly: true },
+      photoVersion: { type: 'integer', nullable: true, readOnly: true, description: 'Seconds since epoch of the last photo save; null = no photo. Put it on the photo URL as ?v= so a cached copy is used until it changes.' },
     },
   },
   MenuImportResult: {
@@ -120,9 +121,14 @@ const paths = {
   },
   '/api/menu/dishes/{itemId}/photo': {
     get: { tags: ['Menu'], summary: 'The dish photo, as a data URI', description: READ, security, parameters: [itemId], responses: { ...ok({ type: 'object', properties: { dataUri: { type: 'string' }, mimeType: { type: 'string' }, width: { type: 'integer' }, height: { type: 'integer' } } }), ...err(404, 'No photo') } },
-    put: { tags: ['Menu'], summary: 'Set the dish photo', description: `PNG or JPEG data URI, up to 512KB; the bytes decide the type. ${WRITE}`, security, parameters: [itemId],
-      requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { dataUri: { type: 'string' } } } } } }, responses: { 201: { description: 'Saved' }, ...err(400, 'Not an image, or too large') } },
+    put: { tags: ['Menu'], summary: 'Set the dish photo', description: `PNG or JPEG data URI, up to 512KB; the bytes decide the type. \`thumbDataUri\` is the list copy the browser made (≤480px, ≤96KB); without it, lists fall back to the photo. ${WRITE}`, security, parameters: [itemId],
+      requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['dataUri'], properties: { dataUri: { type: 'string' }, thumbDataUri: { type: 'string', nullable: true } } } } } }, responses: { 201: { description: 'Saved' }, ...err(400, 'Not an image, or too large') } },
     delete: { tags: ['Menu'], summary: 'Remove the dish photo', description: WRITE, security, parameters: [itemId], responses: { 204: { description: 'Removed' } } },
+  },
+  '/api/menu/photos/{itemId}': {
+    get: { tags: ['Menu'], summary: 'The dish photo as an image', description: 'For an `<img>` (fetched with the staff token): the Dishes list and the till\'s picture tiles. `size=thumb` (default) is the list copy, falling back to the photo for one saved before thumbnails; `full` is the photo. With `v` (the dish\'s photoVersion) it is cached privately for a year. Open to every POS role that can read the menu; not audited.', security,
+      parameters: [itemId, { name: 'size', in: 'query', schema: { type: 'string', enum: ['thumb', 'full'], default: 'thumb' } }, { name: 'v', in: 'query', schema: { type: 'string', pattern: '^[0-9]+$' } }],
+      responses: { 200: { description: 'The image', content: { 'image/jpeg': { schema: { type: 'string', format: 'binary' } }, 'image/png': { schema: { type: 'string', format: 'binary' } } } }, ...err(404, 'No photo') } },
   },
   '/api/menu/import/preview': { post: { tags: ['Menu'], summary: 'What a menu file would do — writes nothing', description: `${FILE_RULES}\n\nRuns exactly the apply code inside a transaction and rolls it back, so the review is what applying will do. ${WRITE}`, security, requestBody: filesBody, responses: { ...ok(ref('MenuImportResult')) } } },
   '/api/menu/import/apply': { post: { tags: ['Menu'], summary: 'Apply a menu file', description: `${FILE_RULES}\n\nAudit-logged with the counts. ${WRITE}`, security, requestBody: filesBody, responses: { ...ok(ref('MenuImportResult')) } } },

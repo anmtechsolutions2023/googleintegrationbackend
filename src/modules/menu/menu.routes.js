@@ -9,7 +9,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken, checkScope } = require('../../middleware/authMiddleware');
 const { auditLog } = require('../../middleware/auditLogger');
-const { SCOPES, AUDIT_CATEGORIES } = require('../../config/constants');
+const { SCOPES, SCOPE_SETS, AUDIT_CATEGORIES } = require('../../config/constants');
 const controller = require('./menu.controller');
 
 const READ = checkScope(SCOPES.TENANT_ADMIN, SCOPES.TENANT_SUPER_ADMIN, SCOPES.POS_CONFIG_READ, SCOPES.POS_CONFIG_WRITE);
@@ -34,6 +34,13 @@ router.get('/dishes/:itemId', authenticateToken, READ, ...controller.getOne);
 router.put('/dishes/:itemId', authenticateToken, WRITE, audit('Dish saved'), ...controller.update);
 
 router.get('/dishes/:itemId/photo', authenticateToken, READ, ...controller.getPhoto);
+/**
+ * GET /photos/:itemId?size=thumb|full&v= — the photo as an image. Open to every
+ * POS role that can read the menu (the till shows picture tiles), not only menu
+ * managers. Not audited: a list asks for dozens at once, and it reveals nothing
+ * the menu listing does not.
+ */
+router.get('/photos/:itemId', authenticateToken, checkScope(...SCOPE_SETS.POS_REFERENCE_READ), ...controller.photoImage);
 router.put('/dishes/:itemId/photo', authenticateToken, WRITE, audit('Dish photo saved'), ...controller.putPhoto);
 router.delete('/dishes/:itemId/photo', authenticateToken, WRITE, audit('Dish photo removed'), ...controller.deletePhoto);
 

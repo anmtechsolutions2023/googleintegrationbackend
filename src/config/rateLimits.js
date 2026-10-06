@@ -94,6 +94,9 @@ module.exports = {
     SESSION_TTL_SECONDS: num(process.env.DINER_SESSION_TTL_SECONDS, 3 * 60 * 60),
     // Coarse per-IP guard on the public /api/dine router, like HTTP above.
     HTTP_MAX_REQUESTS: num(process.env.DINER_HTTP_MAX_REQUESTS, 300),
+    // Dish photos on the guest menu, per IP — one per dish, cached once seen.
+    // A whole table on one Wi-Fi shares an IP, so this is generous.
+    PHOTO_MAX_REQUESTS: num(process.env.DINER_PHOTO_MAX_REQUESTS, 2000),
   },
 };
 

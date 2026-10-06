@@ -1,10 +1,11 @@
 // src/modules/menu/menu.controller.js
 const { asyncHandler } = require('../../utils/controllerHelper');
 const { successResponse, createdResponse, noContentResponse } = require('../../utils/responseHelper');
-const { validateBody, validateParams } = require('../../middleware/validation');
+const { validateBody, validateParams, validateQuery } = require('../../middleware/validation');
 const { captureAudit } = require('../../utils/logger');
 const { AUDIT_CATEGORIES, STATUSES } = require('../../config/constants');
-const { dishSchema, importSchema, pricesSchema, bulkSchema, photoSchema, itemIdParam, clearSchema } = require('./menu.schemas');
+const { dishSchema, importSchema, pricesSchema, bulkSchema, photoSchema, photoImageQuery, itemIdParam, clearSchema } = require('./menu.schemas');
+const { sendPhoto } = require('./menu.photoResponse');
 const service = require('./menu.service');
 const menuImport = require('./menu.import');
 const { clearMenu } = require('./menu.clear');
@@ -77,7 +78,15 @@ const getPhoto = asyncHandler(async (req, res) => {
 });
 
 const putPhoto = asyncHandler(async (req, res) => {
-  createdResponse(res, 'Photo saved', await service.putPhoto(req.params.itemId, body(req).dataUri, req.user.tid, req.user.phone));
+  const { dataUri, thumbDataUri } = body(req);
+  createdResponse(res, 'Photo saved', await service.putPhoto(req.params.itemId, dataUri, req.user.tid, req.user.phone, thumbDataUri));
+});
+
+/** The photo as an image, for the Dishes list and the till's picture tiles. */
+const photoImage = asyncHandler(async (req, res) => {
+  const q = req.validatedQuery || req.query;
+  const photo = await service.getPhotoImage(req.params.itemId, req.user.tid, q.size);
+  sendPhoto(res, photo, { versioned: !!q.v, shared: false });
 });
 
 const deletePhoto = asyncHandler(async (req, res) => {
@@ -128,6 +137,7 @@ module.exports = {
   bulk: [validateBody(bulkSchema), bulk],
   getPhoto: [id, getPhoto],
   putPhoto: [id, validateBody(photoSchema), putPhoto],
+  photoImage: [id, validateQuery(photoImageQuery), photoImage],
   deletePhoto: [id, deletePhoto],
   backup: [backup],
   clearPreview: [validateBody(clearSchema), clearPreview],

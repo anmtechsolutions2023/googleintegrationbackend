@@ -20,6 +20,8 @@ const orderParamSchema = Joi.object({ id: entityId.required() });
 const settingsUpdateSchema = Joi.object({
   enabled: Joi.boolean().optional(),
   mode: Joi.string().valid(...Object.values(QR_ORDERING.MODES)).optional(),
+  // Dish photos on the guest menu. On unless turned off.
+  showPhotos: Joi.boolean().optional(),
 }).min(1);
 
 const rejectSchema = Joi.object({
