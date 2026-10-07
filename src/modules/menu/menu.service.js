@@ -47,12 +47,15 @@ const options = (tenantId) => withConnection(async (conn) => {
 
 /** One line per dish, for the Dishes list. */
 const listDishes = (tenantId) => withConnection(async (conn) => {
-  const [dishes, [portals]] = await Promise.all([
+  const [dishes, [portals], [channels]] = await Promise.all([
     loadDishes(conn, tenantId),
     conn.execute(Q().PORTALS, [tenantId]),
+    conn.execute(Q().CHANNELS, [tenantId]),
   ]);
   return {
     portals: portals.map((p) => ({ Id: p.Id, Name: p.Name })),
+    // For the bulk bar's channel picker.
+    channels: channels.map((c) => ({ Id: c.Id, Name: c.Name })),
     dishes: dishes.map((d) => ({
       itemId: d.itemId,
       code: d.code,
@@ -175,17 +178,48 @@ const BULK = {
     const p = d.portals.find((x) => x.portalId === portalId);
     if (p) p.listed = false;
   },
+  // Channels are per branch: the change applies at every branch the dish is
+  // sold at.
+  addChannel: (d, { channelId }) => {
+    d.branches.forEach((b) => { if (!b.channelIds.includes(channelId)) b.channelIds.push(channelId); });
+  },
+  // Refused rather than half-done in two cases: a dish left with no channel
+  // at all (no channel reads as "sold everywhere"), and a channel a listed
+  // portal sells through (saving would add it straight back).
+  removeChannel: (d, { channelId, channelName, portals }) => {
+    const via = portals.find((p) => p.ChannelId === channelId
+      && d.portals.some((x) => x.portalId === p.Id && x.listed));
+    if (via) throw new HttpError(`${d.name} is listed on ${via.Name}, which sells through ${channelName}. Unlist it from ${via.Name} first.`, 409);
+    d.branches.forEach((b) => {
+      const left = b.channelIds.filter((id) => id !== channelId);
+      if (b.channelIds.length && !left.length) {
+        throw new HttpError(`${channelName} is the only channel ${d.name} is sold on. Add another channel first, or hide the dish.`, 409);
+      }
+      b.channelIds = left;
+    });
+  },
 };
 
-const bulk = async ({ itemIds, action, value, portalId }, tenantId, userPhone) => {
+const bulk = async ({ itemIds, action, value, portalId, channelId }, tenantId, userPhone) => {
   const apply = BULK[action];
   if (!apply) throw new HttpError('Unknown bulk action.', 400);
   const ctx = m.newContext(tenantId, userPhone);
   return withTransaction(async (conn) => {
     const dishes = await loadDishes(conn, tenantId, itemIds);
     if (dishes.length !== new Set(itemIds).size) throw new HttpError('Some of these dishes no longer exist. Refresh and try again.', 404);
+    let channel = null;
+    let portals = [];
+    if (channelId) {
+      const [[channels], [portalRows]] = await Promise.all([
+        conn.execute(Q().CHANNELS, [tenantId]),
+        conn.execute(Q().PORTALS, [tenantId]),
+      ]);
+      channel = channels.find((c) => c.Id === channelId);
+      if (!channel) throw new HttpError('That channel does not exist.', 404);
+      portals = portalRows;
+    }
     for (const d of dishes) {
-      apply(d, { value, portalId });
+      apply(d, { value, portalId, channelId, channelName: channel?.Name, portals });
       await saveDish(conn, { ...d, taxComponents: undefined }, ctx);
     }
     return { updated: dishes.length, alsoCreated: ctx.created };

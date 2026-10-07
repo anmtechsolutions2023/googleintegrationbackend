@@ -109,9 +109,9 @@ const paths = {
       requestBody: { required: true, content: { 'application/json': { schema: ref('MenuDish') } } },
       responses: { 201: { description: 'Saved' }, ...err(400, 'Validation error, or a new tax group without its rates'), ...err(409, 'Another dish has that name or code') } },
   },
-  '/api/menu/dishes/bulk': { post: { tags: ['Menu'], summary: 'Hide, show, tag or (un)list many dishes', description: WRITE, security,
+  '/api/menu/dishes/bulk': { post: { tags: ['Menu'], summary: 'Hide, show, tag, (un)list or change the channels of many dishes', description: `addChannel / removeChannel apply at every branch the dish is sold at (channelId required). removeChannel is refused (409) when it would leave a dish with no channel, or when the dish is listed on a portal that sells through that channel. All or nothing. ${WRITE}`, security,
     requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: {
-      itemIds: { type: 'array', items: { type: 'string' } }, action: { type: 'string', enum: ['hide', 'show', 'addTag', 'removeTag', 'list', 'unlist'] },
+      itemIds: { type: 'array', items: { type: 'string' } }, action: { type: 'string', enum: ['hide', 'show', 'addTag', 'removeTag', 'list', 'unlist', 'addChannel', 'removeChannel'] }, channelId: { type: 'string' },
       value: { type: 'string', description: 'The tag, for addTag/removeTag.' }, portalId: { type: 'string', description: 'For list/unlist.' },
     } } } } }, responses: { ...ok({ type: 'object' }) } } },
   '/api/menu/dishes/{itemId}': {

@@ -96,7 +96,8 @@ const pricesSchema = Joi.object({
 
 const bulkSchema = Joi.object({
   itemIds: Joi.array().min(1).max(1000).items(entityId).required(),
-  action: Joi.string().valid('hide', 'show', 'addTag', 'removeTag', 'list', 'unlist').required(),
+  action: Joi.string().valid('hide', 'show', 'addTag', 'removeTag', 'list', 'unlist', 'addChannel', 'removeChannel').required(),
+  channelId: entityId.when('action', { is: Joi.valid('addChannel', 'removeChannel'), then: Joi.required() }),
   value: text(100).when('action', { is: Joi.valid('addTag', 'removeTag'), then: Joi.required() }),
   portalId: entityId.when('action', { is: Joi.valid('list', 'unlist'), then: Joi.required() }),
 });
