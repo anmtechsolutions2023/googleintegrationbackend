@@ -3143,6 +3143,11 @@ module.exports = {
       // name must be an error, not a new outlet.
       BRANCHES: 'SELECT Id, BranchName AS Name FROM branchdetail WHERE TenantId = ? AND Active = 1 ORDER BY BranchName',
       CHANNELS: 'SELECT Id, Name, Code FROM pos_channel WHERE TenantId = ? AND Active = 1 ORDER BY SortOrder, Name',
+      // A channel a menu file names that does not exist yet. Sorted after the
+      // ones already there.
+      CHANNEL_INSERT: `INSERT INTO pos_channel (Id, Name, Code, Description, SortOrder, TenantId, Active, CreatedOn, CreatedBy, UpdatedOn, UpdatedBy)
+        SELECT ?, ?, ?, 'Created by a menu import', COALESCE(MAX(SortOrder), 0) + 1, ?, 1, NOW(), ?, NOW(), ?
+          FROM pos_channel WHERE TenantId = ?`,
       PORTALS: 'SELECT Id, Name, Code, ChannelId FROM pos_portal WHERE TenantId = ? AND Active = 1 ORDER BY SortOrder, Name',
 
       // ── Masters the editor offers, and creates on demand ───────────────
@@ -3168,6 +3173,7 @@ module.exports = {
       // Code uniqueness for anything this module invents a code for.
       CODE_TAKEN: {
         pos_food_type: 'SELECT 1 FROM pos_food_type WHERE TenantId = ? AND Code = ? LIMIT 1',
+        pos_channel: 'SELECT 1 FROM pos_channel WHERE TenantId = ? AND Code = ? LIMIT 1',
         pos_meat_type: 'SELECT 1 FROM pos_meat_type WHERE TenantId = ? AND Code = ? LIMIT 1',
         pos_menu_tag: 'SELECT 1 FROM pos_menu_tag WHERE TenantId = ? AND Code = ? LIMIT 1',
         pos_variant: 'SELECT 1 FROM pos_variant WHERE TenantId = ? AND Code = ? LIMIT 1',

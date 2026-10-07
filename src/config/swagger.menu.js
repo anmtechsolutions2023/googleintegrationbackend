@@ -87,8 +87,9 @@ const schemas = {
 };
 
 const FILE_RULES = 'Rows are the parsed CSV (header → cell). menu.csv: one row per dish, matched by `code` then `name`. '
-  + 'A blank cell keeps the current value; a single `-` clears it. Category, unit, diet, meat type, tag, variant, add-on group and tax group are created when named; '
-  + 'branch, channel and portal names must exist. Columns: see GET /api/exports/menu (the export writes exactly what the import reads), '
+  + 'A blank cell keeps the current value; a single `-` clears it. Category, unit, diet, meat type, tag, variant, add-on group, tax group and sales channel are created when named '
+  + '(a portal name in `channels`, e.g. Zomato, means the channel that portal sells through — never a new channel); '
+  + 'branch and portal names must exist. Columns: see GET /api/exports/menu (the export writes exactly what the import reads), '
   + 'plus `price@<branch>` and `<portal>_listed / _price / _name`. Variants: `Regular=0; Large=+60`. Optional addons.csv (group,min,max,addon,code,price,diet,sort) '
   + 'and hours.csv (category,days,from,to). Each row applies on its own; a bad row is reported and skipped.';
 

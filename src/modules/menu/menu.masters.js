@@ -102,7 +102,31 @@ const lookupOnly = (sqlKey, what) => async (conn, ctx, name) => {
 };
 
 const findBranch = lookupOnly('BRANCHES', 'Branch');
-const findChannel = lookupOnly('CHANNELS', 'Channel');
+/**
+ * A sales channel by name or code, created when the file names a new one
+ * (2026-10-07: a file naming "Ownly_Crack'D cafe" used to fail every row).
+ *
+ * A PORTAL'S name is not a new channel: "Zomato" in the channels column means
+ * the channel Zomato sells through (Online), so a portal is never duplicated
+ * as a channel. Branches and portals are still never created from a file.
+ */
+const ensureChannel = async (conn, ctx, name) => {
+  const n = clean(name);
+  const channels = await listOf(conn, ctx, 'CHANNELS');
+  const hit = findIn(channels, n, { byCode: true });
+  if (hit) return hit;
+  const portal = findIn(await listOf(conn, ctx, 'PORTALS'), n, { byCode: true });
+  if (portal && portal.ChannelId) {
+    const via = channels.find((c) => c.Id === portal.ChannelId);
+    if (via) return via;
+  }
+  if (n.length > 100) throw bad(`Channel “${n.slice(0, 40)}…” is longer than 100 characters.`);
+  const row = { Id: uuidv4(), Name: n, Code: await makeCode(conn, ctx, 'pos_channel', n) };
+  await conn.execute(Q().CHANNEL_INSERT, [row.Id, row.Name, row.Code, ctx.tenantId, ctx.userPhone, ctx.userPhone, ctx.tenantId]);
+  remember(ctx, 'CHANNELS', row);
+  noteCreated(ctx, 'channels', n);
+  return row;
+};
 const findPortal = lookupOnly('PORTALS', 'Portal');
 
 // ── Find or create ───────────────────────────────────────────────────────────
@@ -296,7 +320,7 @@ const parseTaxComponents = (text) => {
 
 module.exports = {
   clean, key, newContext, listOf, findIn, makeCode, noteCreated,
-  findBranch, findChannel, findPortal,
+  findBranch, ensureChannel, findPortal,
   ensureCategory, ensureUnit, ensureFoodType, ensureMeatType, ensureTag,
   ensureVariant, ensureAddonGroup, ensureTaxGroup, parseTaxComponents, isExempt,
   DEFAULT_TAX_COMPONENTS: IMPORT.DEFAULT_TAX_COMPONENTS,

@@ -73,9 +73,18 @@ describe('menu file — a row laid over a dish', () => {
     ]);
   });
 
-  it('never creates a channel or branch from a file', async () => {
-    await expect(mergeRow(conn, ctx(), EXISTING(), row({ channels: 'Delivary' }), refs))
-      .rejects.toThrow(/Channel “Delivary” doesn't exist/);
+  it('creates a channel the file names, once, and reads a portal name as its channel', async () => {
+    const c = ctx();
+    const after = await mergeRow(conn, c, EXISTING(), row({ channels: "Home Delivery; Zomato; Ownly_Crack'D cafe; home delivery" }), refs);
+    expect(c.created.channels).toEqual(['Home Delivery', "Ownly_Crack'D cafe"]);
+    const ids = after.branches[0].channelIds;
+    // Zomato sells through Online — no "Zomato" channel, and no duplicates.
+    expect(ids).toHaveLength(3);
+    expect(ids).toContain('c-online');
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it('never creates a branch from a file', async () => {
     await expect(mergeRow(conn, ctx(), EXISTING(), row({ branches: 'Whitefield' }), refs))
       .rejects.toThrow(/Branch “Whitefield” doesn't exist/);
   });

@@ -177,7 +177,9 @@ const mergeRow = async (conn, ctx, before, row, refs) => {
     else {
       channelIds = [];
       for (const name of list(channelCell)) {
-        channelIds.push((await m.findChannel(conn, ctx, name)).Id);
+        const { Id } = await m.ensureChannel(conn, ctx, name);
+        // Zomato and Swiggy both mean Online: once is enough.
+        if (!channelIds.includes(Id)) channelIds.push(Id);
       }
     }
   }
