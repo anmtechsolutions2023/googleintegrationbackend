@@ -149,3 +149,22 @@ describe('liveAccess — through authenticateToken', () => {
     expect(err.message).toBe('pool exhausted');
   });
 });
+
+describe('liveAccess — requests arriving together', () => {
+  it('ten simultaneous requests on a cold cache run the access lookup once', async () => {
+    dbSays({ membership: ACTIVE, grants: ['POS_ORDER:READ'] });
+    const token = tokenFor(['POS_ORDER:READ']);
+    const results = await Promise.all(Array.from({ length: 10 }, () => run(token)));
+    results.forEach((r) => expect(r.err).toBeUndefined());
+    const flagReads = db.execute.mock.calls.filter(([sql]) => sql === QUERIES.ADMIN_USERS.SELECT_ACCESS_FLAGS);
+    expect(flagReads).toHaveLength(1);
+  });
+
+  it('an access change during a lookup is not overwritten by the old answer', async () => {
+    dbSays({ membership: ACTIVE, grants: ['POS_ORDER:READ'] });
+    const first = run(tokenFor(['POS_ORDER:READ']));
+    liveAccess.invalidate(TID, PHONE);
+    await first;
+    expect(liveAccess._cache.size).toBe(0);
+  });
+});

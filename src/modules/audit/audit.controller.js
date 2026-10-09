@@ -124,4 +124,15 @@ const getCategories = (req, res) => {
   res.json({ categories });
 };
 
-module.exports = { getAuditLogs, getCategories };
+/** GET /api/audit/filters — the dropdown values, pinned to the caller's tenancy. */
+const getFilterOptions = async (req, res, next) => {
+  try {
+    const isSuperAdmin = req.user.scopes.includes(SCOPES.TENANT_SUPER_ADMIN);
+    const tenantId = isSuperAdmin ? (req.query.tenantId || null) : req.user.tid;
+    res.json(await auditService.getFilterOptions(tenantId));
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getAuditLogs, getCategories, getFilterOptions };

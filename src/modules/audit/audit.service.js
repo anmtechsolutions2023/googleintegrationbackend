@@ -94,4 +94,18 @@ const getAuditLogs = async (filters = {}) => {
   }
 };
 
-module.exports = { getAuditLogs };
+/**
+ * The values the log screen's People and Action dropdowns offer, from the
+ * latest 2,000 rows of this tenancy (or every tenancy for a super admin).
+ * Replaces the screen downloading 500 full log rows just to fill two lists.
+ *
+ * @param {string|null} tenantId
+ * @returns {Promise<{phones: string[], actions: string[]}>}
+ */
+const getFilterOptions = async (tenantId) => {
+  const [rows] = await db.query(QUERIES.AUDIT_LOGS.FILTER_OPTIONS, [tenantId || null, tenantId || null]);
+  const uniq = (key) => [...new Set(rows.map((r) => r[key]).filter(Boolean))].sort();
+  return { phones: uniq('user_phone'), actions: uniq('action') };
+};
+
+module.exports = { getAuditLogs, getFilterOptions };

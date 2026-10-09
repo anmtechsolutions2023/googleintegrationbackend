@@ -195,6 +195,11 @@ module.exports = {
         'SELECT log_id, tenant_id, user_phone, action, status, ip_address, log_level, category, resource_id, details, timestamp FROM audit_logs WHERE 1=1',
       COUNT:
         'SELECT COUNT(*) AS total FROM audit_logs WHERE 1=1',
+      // The People and Action dropdowns: who and what appears in the most
+      // recent rows. Bounded, so it never scans the whole trail.
+      FILTER_OPTIONS: `SELECT DISTINCT r.user_phone, r.action FROM (
+          SELECT user_phone, action FROM audit_logs WHERE (? IS NULL OR tenant_id = ?)
+           ORDER BY timestamp DESC LIMIT 2000) r`,
       INSERT:
         'INSERT INTO audit_logs (tenant_id, user_phone, action, status, ip_address, log_level, category, resource_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       INSERT_MIDDLEWARE:

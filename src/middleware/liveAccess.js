@@ -64,15 +64,32 @@ const load = async (tenantId, phone) => {
   return { scopes, roles };
 };
 
+// Lookups already running, by member. A page that opens with ten requests at
+// once used to run the three access queries ten times when the cache was cold;
+// now they all wait on the first one.
+const inFlight = new Map();
+// Bumped by invalidate(): a lookup that started before an access change must
+// not write its now-old answer into the cache when it finishes.
+let epoch = 0;
+
 const currentAccess = async (tenantId, phone) => {
   const key = keyOf(tenantId, phone);
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.access;
+  if (inFlight.has(key)) return inFlight.get(key);
 
-  const access = await load(tenantId, phone);
-  if (cache.size >= MAX_ENTRIES) cache.clear();
-  cache.set(key, { at: Date.now(), access });
-  return access;
+  const startedAt = epoch;
+  const pending = load(tenantId, phone)
+    .then((access) => {
+      if (startedAt === epoch) {
+        if (cache.size >= MAX_ENTRIES) cache.clear();
+        cache.set(key, { at: Date.now(), access });
+      }
+      return access;
+    })
+    .finally(() => inFlight.delete(key));
+  inFlight.set(key, pending);
+  return pending;
 };
 
 const sameScopes = (a = [], b = []) => {
@@ -124,13 +141,18 @@ const refresh = async (req, res) => {
  * @param {string} [phone]
  */
 const invalidate = (tenantId, phone) => {
+  epoch += 1;
   if (phone) {
+    inFlight.delete(keyOf(tenantId, phone));
     cache.delete(keyOf(tenantId, phone));
     return;
   }
   const prefix = `${tenantId}|`;
   for (const key of [...cache.keys()]) {
     if (key.startsWith(prefix)) cache.delete(key);
+  }
+  for (const key of [...inFlight.keys()]) {
+    if (key.startsWith(prefix)) inFlight.delete(key);
   }
 };
 

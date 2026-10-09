@@ -20,4 +20,7 @@ router.get('/logs', authenticateToken, auditRead, auditController.getAuditLogs);
 // GET /api/audit/categories  — valid category list for filter dropdowns
 router.get('/categories', authenticateToken, auditRead, auditController.getCategories);
 
+// GET /api/audit/filters  — People and Action dropdown values (latest 2,000 rows)
+router.get('/filters', authenticateToken, auditRead, auditController.getFilterOptions);
+
 module.exports = router;

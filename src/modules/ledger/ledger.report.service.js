@@ -444,12 +444,14 @@ const expenseReport = (query, tenantId) =>
  * because expenses post to the same ledger as sales.
  */
 const overviewReport = async (query, tenantId) => {
-  const [sales, expenses, cash, writeOffs] = await Promise.all([
-    salesReport(query, tenantId),
-    expenseReport(query, tenantId),
-    cashFlowReport(query, tenantId),
-    writeOffReport(query, tenantId),
-  ]);
+  // One after another, not Promise.all: each report takes its own pool
+  // connection, and four at once took the WHOLE default pool (4), so every
+  // other request in the restaurant queued behind one Finance page. Each is a
+  // few indexed aggregates; in sequence they hold one connection at a time.
+  const sales = await salesReport(query, tenantId);
+  const expenses = await expenseReport(query, tenantId);
+  const cash = await cashFlowReport(query, tenantId);
+  const writeOffs = await writeOffReport(query, tenantId);
 
   return {
     range: sales.range,

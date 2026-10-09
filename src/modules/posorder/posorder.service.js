@@ -179,22 +179,30 @@ class PosOrderService extends BaseCRUDService {
    */
   async getAll(tenantId, page = 1, limit = 10, filters = {}) {
     const { tableId, openOnly } = filters || {};
-    if (!tableId) return super.getAll(tenantId, page, limit);
+    if (!tableId && !openOnly) return super.getAll(tenantId, page, limit);
 
     const { pageNum, limitNum, offset } = calculatePagination(page, limit);
-    const openClause = openOnly
-      ? ` AND LOWER(COALESCE(Status, '')) NOT IN (${[...CLOSED_STATUSES].map((s) => `'${s}'`).join(', ')})`
-      : '';
+    // openOnly also works across the whole tenancy: the till and the kitchen
+    // need every LIVE round, and pulling the newest 100 of all rounds (then
+    // dropping the closed ones in the browser) both wasted the read and, on a
+    // busy day, could leave an open table outside the first 100.
+    const where = ['TenantId = ?'];
+    const params = [tenantId];
+    if (tableId) { where.push('TableId = ?'); params.push(tableId); }
+    if (openOnly) {
+      where.push(`LOWER(COALESCE(Status, '')) NOT IN (${[...CLOSED_STATUSES].map((s) => `'${s}'`).join(', ')})`);
+    }
+    const whereSql = where.join(' AND ');
 
     return withConnection(async (connection) => {
       const [countRows] = await connection.execute(
-        `SELECT COUNT(*) as total FROM pos_order WHERE TenantId = ? AND TableId = ?${openClause}`,
-        [tenantId, tableId],
+        `SELECT COUNT(*) as total FROM pos_order WHERE ${whereSql}`,
+        params,
       );
       const [rows] = await connection.execute(
-        `SELECT * FROM pos_order WHERE TenantId = ? AND TableId = ?${openClause}`
+        `SELECT * FROM pos_order WHERE ${whereSql}`
         + ` ORDER BY CreatedOn ASC LIMIT ${limitNum} OFFSET ${offset}`,
-        [tenantId, tableId],
+        params,
       );
 
       return {
